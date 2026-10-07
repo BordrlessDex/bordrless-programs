@@ -1,0 +1,2387 @@
+{
+  "address": "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk",
+  "metadata": {
+    "name": "bordrless_swap",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The Bordrless DEX: constant-product pools between Bordrless Token Standard mints with Uniswap-v4-style hooks (before and after swaps and liquidity changes, with return deltas and dynamic fees), virtual reserves for launch curves, LP tokens on BTS and protocol fees."
+  },
+  "docs": [
+    "Instructions of the DEX."
+  ],
+  "instructions": [
+    {
+      "name": "add_liquidity",
+      "docs": [
+        "Adds liquidity at the pool's ratio and mints LP."
+      ],
+      "discriminator": [
+        181,
+        157,
+        89,
+        67,
+        143,
+        182,
+        52,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "provider",
+          "docs": [
+            "The liquidity provider."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "provider_base",
+          "writable": true
+        },
+        {
+          "name": "provider_quote",
+          "writable": true
+        },
+        {
+          "name": "provider_lp",
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "hook_program]` (checked in the handler); absent (this program's id) without."
+          ],
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "AddLiquidityArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "collect_protocol_fees",
+      "docs": [
+        "Admin: moves the accrued protocol fees of a pool (always in its quote token) to the fee",
+        "collector's quote holding. The remaining accounts are the quote mint's token-hook slice",
+        "(`quote_hook_accounts` of them, its program first)."
+      ],
+      "discriminator": [
+        22,
+        67,
+        23,
+        98,
+        150,
+        178,
+        70,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "The admin."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "collector_quote",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "quote_hook_accounts",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "create_pool",
+      "docs": [
+        "Creates a pool with its first deposit. A pool with virtual reserves (a curve) can only be",
+        "created by its hook program."
+      ],
+      "discriminator": [
+        233,
+        146,
+        209,
+        142,
+        207,
+        104,
+        64,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent and the creation fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Owns the deposit holdings and receives the LP."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_mint"
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              },
+              {
+                "kind": "arg",
+                "path": "args.lp_fee_bps"
+              },
+              {
+                "kind": "arg",
+                "path": "args.hook_program"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lp_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "authority_base",
+          "writable": true
+        },
+        {
+          "name": "authority_quote",
+          "writable": true
+        },
+        {
+          "name": "authority_lp",
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_caller",
+          "docs": [
+            "The hook program's own hook authority, when the hook itself creates the pool: the initialize",
+            "callbacks are then skipped (a program cannot be re-entered through its own CPI)."
+          ],
+          "signer": true,
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "hook_program]` (checked in the handler); absent (this program's id) without."
+          ],
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreatePoolArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "finalize_curve",
+      "docs": [
+        "The pool's hook turns a curve pool into an ordinary one: reserves synced to the vaults, no",
+        "virtual offsets, the first LP minted to a recipient."
+      ],
+      "discriminator": [
+        215,
+        116,
+        160,
+        31,
+        250,
+        87,
+        19,
+        174
+      ],
+      "accounts": [
+        {
+          "name": "hook_caller",
+          "docs": [
+            "The pool hook program's hook authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_vault"
+        },
+        {
+          "name": "quote_vault"
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "lp_recipient",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "hook_caller_bump",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "init_config",
+      "docs": [
+        "Creates the config; signed by the program's upgrade authority, once."
+      ],
+      "discriminator": [
+        23,
+        235,
+        115,
+        232,
+        168,
+        96,
+        1,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The upgrade authority, paying the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "remove_liquidity",
+      "docs": [
+        "Burns LP and withdraws the proportional reserves."
+      ],
+      "discriminator": [
+        80,
+        85,
+        209,
+        72,
+        24,
+        206,
+        177,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "provider",
+          "docs": [
+            "The liquidity provider."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "provider_base",
+          "writable": true
+        },
+        {
+          "name": "provider_quote",
+          "writable": true
+        },
+        {
+          "name": "provider_lp",
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "hook_program]` (checked in the handler); absent (this program's id) without."
+          ],
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RemoveLiquidityArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_config",
+      "docs": [
+        "Admin: changes the config."
+      ],
+      "discriminator": [
+        108,
+        158,
+        154,
+        175,
+        212,
+        98,
+        52,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "The admin."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "swap",
+      "docs": [
+        "Swaps an exact input for at least `min_amount_out`."
+      ],
+      "discriminator": [
+        248,
+        198,
+        158,
+        145,
+        225,
+        117,
+        135,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "trader",
+          "docs": [
+            "The trader: owner (or delegate) of the input holding."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "trader_base",
+          "docs": [
+            "(checked by the token program)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "trader_quote",
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "hook_program]` (checked in the handler); absent (this program's id) without."
+          ],
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "SwapArgs"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Pool",
+      "discriminator": [
+        241,
+        154,
+        109,
+        4,
+        17,
+        177,
+        109,
+        188
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ConfigSet",
+      "discriminator": [
+        15,
+        104,
+        59,
+        16,
+        236,
+        241,
+        8,
+        6
+      ]
+    },
+    {
+      "name": "CurveFinalized",
+      "discriminator": [
+        152,
+        224,
+        86,
+        68,
+        104,
+        223,
+        57,
+        83
+      ]
+    },
+    {
+      "name": "LiquidityAdded",
+      "discriminator": [
+        154,
+        26,
+        221,
+        108,
+        238,
+        64,
+        217,
+        161
+      ]
+    },
+    {
+      "name": "LiquidityRemoved",
+      "discriminator": [
+        225,
+        105,
+        216,
+        39,
+        124,
+        116,
+        169,
+        189
+      ]
+    },
+    {
+      "name": "PoolCreated",
+      "discriminator": [
+        202,
+        44,
+        41,
+        88,
+        104,
+        220,
+        157,
+        82
+      ]
+    },
+    {
+      "name": "ProtocolFeesCollected",
+      "discriminator": [
+        165,
+        34,
+        125,
+        155,
+        15,
+        86,
+        99,
+        191
+      ]
+    },
+    {
+      "name": "Swapped",
+      "discriminator": [
+        217,
+        52,
+        52,
+        83,
+        147,
+        135,
+        96,
+        109
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ZeroAmount",
+      "msg": "the amount is zero"
+    },
+    {
+      "code": 6001,
+      "name": "AlreadyInitialized",
+      "msg": "the config was already created"
+    },
+    {
+      "code": 6002,
+      "name": "NotUpgradeAuthority",
+      "msg": "not the upgrade authority"
+    },
+    {
+      "code": 6003,
+      "name": "NotAdmin",
+      "msg": "not the admin"
+    },
+    {
+      "code": 6004,
+      "name": "Paused",
+      "msg": "the DEX is paused"
+    },
+    {
+      "code": 6005,
+      "name": "SameMint",
+      "msg": "base and quote are the same mint"
+    },
+    {
+      "code": 6006,
+      "name": "FeeTooHigh",
+      "msg": "the fee is above the maximum"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidHookFlags",
+      "msg": "invalid hook flags"
+    },
+    {
+      "code": 6008,
+      "name": "CurveNeedsHook",
+      "msg": "a curve pool needs a hook program and must be created by it"
+    },
+    {
+      "code": 6009,
+      "name": "BadHookCaller",
+      "msg": "the hook caller is not the hook program's hook authority"
+    },
+    {
+      "code": 6010,
+      "name": "WrongHookProgram",
+      "msg": "the hook program passed is not the pool's"
+    },
+    {
+      "code": 6011,
+      "name": "HookProgramMissing",
+      "msg": "the hook program was not passed"
+    },
+    {
+      "code": 6012,
+      "name": "DeltaTooLarge",
+      "msg": "the hook returned a delta that is too large"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidDeltaAccount",
+      "msg": "the hook named an invalid delta account"
+    },
+    {
+      "code": 6014,
+      "name": "CurveLocked",
+      "msg": "the pool is a curve: liquidity cannot be added or removed until it is finalized"
+    },
+    {
+      "code": 6015,
+      "name": "NotCurve",
+      "msg": "the pool is not a curve"
+    },
+    {
+      "code": 6016,
+      "name": "InsufficientLiquidity",
+      "msg": "insufficient liquidity for this trade"
+    },
+    {
+      "code": 6017,
+      "name": "Slippage",
+      "msg": "the output is below the minimum"
+    },
+    {
+      "code": 6018,
+      "name": "NothingReceived",
+      "msg": "nothing arrived in the vault"
+    },
+    {
+      "code": 6019,
+      "name": "FeeExceedsInput",
+      "msg": "the fee would consume the whole input"
+    },
+    {
+      "code": 6020,
+      "name": "DepositTooSmall",
+      "msg": "the deposit is too small"
+    },
+    {
+      "code": 6021,
+      "name": "LpBelowMinimum",
+      "msg": "the LP minted is below the minimum"
+    },
+    {
+      "code": 6022,
+      "name": "WithdrawalBelowMinimum",
+      "msg": "the withdrawal is below the minimum"
+    },
+    {
+      "code": 6023,
+      "name": "WrongVault",
+      "msg": "the holding passed is not the expected vault"
+    },
+    {
+      "code": 6024,
+      "name": "WrongHolding",
+      "msg": "the holding passed is for another mint or owner"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidDirection",
+      "msg": "invalid direction"
+    },
+    {
+      "code": 6026,
+      "name": "AccountCounts",
+      "msg": "too many remaining accounts for the counts given"
+    },
+    {
+      "code": 6027,
+      "name": "HookDataTooLong",
+      "msg": "hook data is too long"
+    },
+    {
+      "code": 6028,
+      "name": "MathOverflow",
+      "msg": "math overflow"
+    },
+    {
+      "code": 6029,
+      "name": "CurveQuoteNotZero",
+      "msg": "a curve pool opens with base only"
+    },
+    {
+      "code": 6030,
+      "name": "UnsupportedHookReturn",
+      "msg": "the hook answered something this callback or the pool's flags do not allow"
+    },
+    {
+      "code": 6031,
+      "name": "InvalidHookReturn",
+      "msg": "the hook's answer does not decode"
+    },
+    {
+      "code": 6032,
+      "name": "TooManyDeltas",
+      "msg": "the hook answered more than three deltas"
+    },
+    {
+      "code": 6033,
+      "name": "ZeroDelta",
+      "msg": "the hook answered a delta of zero"
+    },
+    {
+      "code": 6034,
+      "name": "MintNotWritable",
+      "msg": "the hook answered a burn of a mint that was not passed writable"
+    },
+    {
+      "code": 6035,
+      "name": "FeeExceedsOutput",
+      "msg": "the protocol fee would consume the whole output"
+    },
+    {
+      "code": 6036,
+      "name": "BadHookSigner",
+      "msg": "the hook signer is not this program's signer for the pool's hook program"
+    }
+  ],
+  "types": [
+    {
+      "name": "AddLiquidityArgs",
+      "docs": [
+        "Arguments of `add_liquidity`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base_desired",
+            "docs": [
+              "Base offered."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "quote_desired",
+            "docs": [
+              "Quote offered."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_lp",
+            "docs": [
+              "The least LP acceptable."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_hook_accounts",
+            "docs": [
+              "Remaining accounts of the base mint's token hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "quote_hook_accounts",
+            "docs": [
+              "Remaining accounts of the quote mint's token hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Opaque data for the pool hook."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "docs": [
+        "Program configuration at `[\"config\"]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "admin",
+            "docs": [
+              "May change the config and collect protocol fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "docs": [
+              "Protocol fee of ordinary pools created from now on, in basis points (anyone's pool: no",
+              "curve)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "fee_collector",
+            "docs": [
+              "Whose holdings receive collected protocol fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives pool creation fees (lamports)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_creation_fee_lamports",
+            "docs": [
+              "Lamports paid to create a pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops swaps and liquidity changes."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "pools_created",
+            "docs": [
+              "Pools created so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "launch_protocol_share_bps",
+            "docs": [
+              "Bordrless's share of what the hooks cut on each swap of a launch pool created from now on,",
+              "in basis points of the cuts (2,500 = a quarter): a curve a hook program creates (the",
+              "launchpad's pools), which keeps the model after graduation. A launch whose rules collect",
+              "nothing pays nothing."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                62
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigArgs",
+      "docs": [
+        "Arguments of `init_config` and `set_config`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "The admin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "docs": [
+              "Protocol fee of ordinary pools created from now on."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "fee_collector",
+            "docs": [
+              "Whose holdings receive collected protocol fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives pool creation fees."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_creation_fee_lamports",
+            "docs": [
+              "Lamports paid to create a pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops swaps and liquidity changes."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "launch_protocol_share_bps",
+            "docs": [
+              "Bordrless's share of what the hooks cut on launch pools (curves a hook program creates)",
+              "created from now on, in basis points of the cuts."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "launch_protocol_share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "fee_collector",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_creation_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreatePoolArgs",
+      "docs": [
+        "Arguments of `create_pool`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee in basis points of the input."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "hook_program",
+            "docs": [
+              "Hook program; the default key for none."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hook_flags",
+            "docs": [
+              "Its flags."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_base",
+            "docs": [
+              "Virtual base offset (a curve); zero for an ordinary pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote offset (a curve); zero for an ordinary pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_amount",
+            "docs": [
+              "Base deposited now."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount",
+            "docs": [
+              "Quote deposited now (zero for a curve)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_hook_accounts",
+            "docs": [
+              "Number of remaining accounts that belong to the base mint's token hook (its program, the",
+              "token program's signer for it, its extras; none without a hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "quote_hook_accounts",
+            "docs": [
+              "Number of remaining accounts that belong to the quote mint's token hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Opaque data for the pool hook."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CurveFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "lp_supply",
+            "type": "u64"
+          },
+          {
+            "name": "lp_minted",
+            "type": "u64"
+          },
+          {
+            "name": "lp_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DeltaPaid",
+      "docs": [
+        "One cut a pool hook took from a swap: the holding it was sent to and the amount sent (a token",
+        "hook on that mint may deliver less)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LiquidityAdded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_amount",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount",
+            "type": "u64"
+          },
+          {
+            "name": "lp_minted",
+            "type": "u64"
+          },
+          {
+            "name": "base_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "lp_supply",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LiquidityRemoved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "provider",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_amount",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount",
+            "type": "u64"
+          },
+          {
+            "name": "lp_burned",
+            "type": "u64"
+          },
+          {
+            "name": "base_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "lp_supply",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Mint",
+      "docs": [
+        "A mint. Address: any signer at creation (a keypair, or a PDA of the creating program)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Current supply."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_supply",
+            "docs": [
+              "Largest supply ever allowed; 0 means unlimited."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mint_authority",
+            "docs": [
+              "May mint; `None` once revoked."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "freeze_authority",
+            "docs": [
+              "May freeze and thaw holdings; `None` once revoked."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_authority",
+            "docs": [
+              "May change the hook; `None` locks the hook for ever."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "metadata_authority",
+            "docs": [
+              "May change the metadata; `None` fixes it for ever."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_program",
+            "docs": [
+              "The hook program, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "docs": [
+              "Which callbacks run (`bordrless_hook::token_flags`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who paid for the creation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hook_signer_bump",
+            "docs": [
+              "Bump of `[\"hook-authority\", hook_program]`, this program's signer of every callback to the",
+              "hook (one per hook program, so a hook can tell its own callbacks from a signer another hook",
+              "passed on); 0 without a hook. Set with the hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                31
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pool",
+      "docs": [
+        "A pool at `[\"pool\", base_mint, quote_mint, lp_fee_bps, hook_program or default]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump of the pool PDA."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "lp_mint_bump",
+            "docs": [
+              "Bump of the LP mint PDA `[\"lp\", pool]`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "base_mint",
+            "docs": [
+              "Base mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "Quote mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_mint",
+            "docs": [
+              "LP mint (a BTS mint whose authority is the pool)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "base_vault",
+            "docs": [
+              "The pool's holding of the base mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_vault",
+            "docs": [
+              "The pool's holding of the quote mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hook_program",
+            "docs": [
+              "Hook program, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "docs": [
+              "Which callbacks run (`bordrless_hook::pool_flags`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee in basis points of the input; stays in the pool."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "docs": [
+              "Flat protocol fee in basis points (`FEE_MODEL_FLAT`), always charged in the quote token: of",
+              "what reaches the vault on a buy, of the curve's output on a sell. Accrued for the fee",
+              "collector. 0 under the share model."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "base_reserve",
+            "docs": [
+              "Real base reserve (the base vault's balance)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "docs": [
+              "Real quote reserve (the quote vault's balance minus accrued protocol fees)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "docs": [
+              "Virtual base offset used for pricing."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote offset used for pricing."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_supply",
+            "docs": [
+              "LP shares outstanding, including the minimum liquidity the pool keeps."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fees_quote",
+            "docs": [
+              "Protocol fees accrued (always in the quote token), sitting in the quote vault apart from",
+              "the reserve until `collect_protocol_fees`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "curve",
+            "docs": [
+              "A curve: virtual offsets live, no LP minted yet, liquidity locked until finalized."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who created the pool (the deposit authority)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "last_swap_at",
+            "docs": [
+              "Time of the last swap."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "swap_count",
+            "docs": [
+              "Swaps so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_volume",
+            "docs": [
+              "Base traded so far (both directions)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "quote_volume",
+            "docs": [
+              "Quote traded so far (both directions)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "hook_signer_bump",
+            "docs": [
+              "Bump of `[\"hook-authority\", hook_program]`, this program's signer of every callback to the",
+              "pool's hook (one per hook program, so a hook can tell its own callbacks from a signer",
+              "another hook passed on); 0 without a hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "fee_model",
+            "docs": [
+              "How the protocol fee is taken: `FEE_MODEL_FLAT` (a rate of the quote, ordinary pools) or",
+              "`FEE_MODEL_SHARE` (a share of what the hooks cut, launch pools). Fixed at creation."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "protocol_share_bps",
+            "docs": [
+              "Under `FEE_MODEL_SHARE`: Bordrless's share of what the hooks cut on each swap, in basis",
+              "points of the cuts, taken in the quote (base-side cuts valued at the swap's own price). 0",
+              "under the flat model."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                60
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "docs": [
+              "The flat protocol fee (`FEE_MODEL_FLAT`); 0 under the share model."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "fee_model",
+            "docs": [
+              "`FEE_MODEL_FLAT` or `FEE_MODEL_SHARE`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "protocol_share_bps",
+            "docs": [
+              "Bordrless's share of the hooks' cuts (`FEE_MODEL_SHARE`); 0 under the flat model."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "hook_program",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "type": "u16"
+          },
+          {
+            "name": "virtual_base",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "base_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "lp_supply",
+            "type": "u64"
+          },
+          {
+            "name": "lp_minted",
+            "type": "u64"
+          },
+          {
+            "name": "curve",
+            "type": "bool"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolFeesCollected",
+      "docs": [
+        "Protocol fees (always in the quote token) moved from a pool's quote vault to the fee",
+        "collector's holding."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_amount",
+            "type": "u64"
+          },
+          {
+            "name": "collector",
+            "type": "pubkey"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RemoveLiquidityArgs",
+      "docs": [
+        "Arguments of `remove_liquidity`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "lp_amount",
+            "docs": [
+              "LP burned."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_base",
+            "docs": [
+              "The least base acceptable."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_quote",
+            "docs": [
+              "The least quote acceptable."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_hook_accounts",
+            "docs": [
+              "Remaining accounts of the base mint's token hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "quote_hook_accounts",
+            "docs": [
+              "Remaining accounts of the quote mint's token hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Opaque data for the pool hook."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapArgs",
+      "docs": [
+        "Arguments of `swap`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "direction",
+            "docs": [
+              "0 base → quote (a sell), 1 quote → base (a buy)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "amount_in",
+            "docs": [
+              "Exact input."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_amount_out",
+            "docs": [
+              "The least the recipient's holding must gain."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "in_hook_accounts",
+            "docs": [
+              "Remaining accounts of the input mint's token hook (its program, the token program's",
+              "signer for it, its extras; none without a hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "out_hook_accounts",
+            "docs": [
+              "Remaining accounts of the output mint's token hook (likewise)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Opaque data for the pool hook."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Swapped",
+      "docs": [
+        "A swap. The input side: the hook's `deltas_in` and `burn_in` left the trader's input holding",
+        "first, then the rest, of which `received_in` reached the vault (`cuts_in` is what the hooks",
+        "took on the way: the pool hook's deltas and any token-hook cut). The output side: the curve",
+        "gave `amount_out`; the protocol fee stayed in the quote vault; the hook's `deltas_out` and",
+        "`burn_out` left the output vault; the rest went to the recipient's holding, which gained",
+        "`delivered_out` (`cuts_out` is what the hooks took on the way)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "trader",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "docs": [
+              "The owner of the holding the output was delivered to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "direction",
+            "docs": [
+              "0 base → quote (sell), 1 quote → base (buy)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "amount_in",
+            "docs": [
+              "What the trader put in, before the hook's cuts."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deltas_in",
+            "docs": [
+              "Sent from the trader's input holding by the hook's `before_swap` answer, in order."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DeltaPaid"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn_in",
+            "docs": [
+              "Burned from the trader's input holding by the hook's `before_swap` answer."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cuts_in",
+            "docs": [
+              "What the hooks took from the input and someone received, in the input token:",
+              "`amount_in - burn_in - received_in` (the pool hook's deltas, plus any cut the input mint's",
+              "own hook took from those transfers)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "received_in",
+            "docs": [
+              "What arrived in the input vault."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee",
+            "docs": [
+              "In the input token; stays in the pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee",
+            "docs": [
+              "Always in the quote token. Flat model: on a buy from `received_in`, on a sell from",
+              "`amount_out`. Share model: the pool's share of `cuts_in` and `cuts_out` (base-side cuts",
+              "valued at this swap's price), each rounded up."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "amount_out",
+            "docs": [
+              "What the curve gave (before any protocol fee taken from the output)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deltas_out",
+            "docs": [
+              "Sent from the output vault by the hook's `after_swap` answer, in order."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DeltaPaid"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn_out",
+            "docs": [
+              "Burned from the output vault by the hook's `after_swap` answer."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cuts_out",
+            "docs": [
+              "What the hooks took from the output and someone received, in the output token: the pool",
+              "hook's deltas, plus any cut the output mint's own hook took from those transfers and from",
+              "the delivery."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delivered_out",
+            "docs": [
+              "What the recipient's holding actually gained."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "swap_count",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

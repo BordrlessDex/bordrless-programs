@@ -1,0 +1,29 @@
+[package]
+name = "hook-tester"
+description = "A test-only Bordrless hook, never deployed: a token hook and a pool hook whose answers a test scripts per mint or pool and per callback, which records what each callback was told, can call write_hook_data signed by any PDA of its own, and routes swaps on the DEX by CPI."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "hook_tester"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-hook/idl-build", "bordrless-token/idl-build", "bordrless-swap/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

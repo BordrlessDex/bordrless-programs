@@ -1,0 +1,1881 @@
+{
+  "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22",
+  "metadata": {
+    "name": "bordrless_token",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The Bordrless Token Standard (BTS): mints, holdings, transfers, delegation, freezing, on-chain metadata, and the hook protocol that lets a program run before and after every transfer, mint and burn, take up to three cuts from a transfer and keep 64 bytes of state in every holding."
+  },
+  "docs": [
+    "Instructions of the token standard."
+  ],
+  "instructions": [
+    {
+      "name": "approve",
+      "docs": [
+        "Lets `delegate` move up to `amount` from the holding."
+      ],
+      "discriminator": [
+        69,
+        74,
+        217,
+        36,
+        115,
+        117,
+        97,
+        76
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The owner."
+          ],
+          "signer": true,
+          "relations": [
+            "holding"
+          ]
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "delegate"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "burn",
+      "docs": [
+        "Burns `amount` from a holding; its owner or delegate signs."
+      ],
+      "discriminator": [
+        116,
+        110,
+        29,
+        56,
+        107,
+        219,
+        42,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The source's owner or delegate."
+          ],
+          "signer": true
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true,
+          "relations": [
+            "source"
+          ]
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "`[\"hook-authority\", hook_program]` (checked in the handler); unused (this program's id)",
+            "otherwise."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close_holding",
+      "docs": [
+        "Closes an empty holding and returns its rent; the owner signs. Refused while the mint's",
+        "hook writes hook data and the holding still has some."
+      ],
+      "discriminator": [
+        215,
+        60,
+        1,
+        110,
+        4,
+        89,
+        212,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The owner."
+          ],
+          "signer": true,
+          "relations": [
+            "holding"
+          ]
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The holding's mint (its hook decides whether hook data blocks the close)."
+          ],
+          "relations": [
+            "holding"
+          ]
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_holding",
+      "docs": [
+        "Creates the holding of `owner` for `mint`, or does nothing if it exists."
+      ],
+      "discriminator": [
+        225,
+        46,
+        15,
+        245,
+        223,
+        194,
+        82,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "holding",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_mint",
+      "docs": [
+        "Creates a mint. The mint account signs (a keypair, or a PDA of the creating program)."
+      ],
+      "discriminator": [
+        69,
+        44,
+        215,
+        132,
+        253,
+        214,
+        41,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The new mint, which signs."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateMintArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "mint_to",
+      "docs": [
+        "Mints `amount` into a holding; the mint authority signs."
+      ],
+      "discriminator": [
+        241,
+        34,
+        48,
+        186,
+        37,
+        179,
+        123,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The mint authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "writable": true,
+          "relations": [
+            "destination"
+          ]
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "Receives the tokens."
+          ],
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "`[\"hook-authority\", hook_program]` (checked in the handler); unused (this program's id)",
+            "otherwise."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "revoke",
+      "docs": [
+        "Removes the holding's delegate."
+      ],
+      "discriminator": [
+        170,
+        23,
+        31,
+        34,
+        133,
+        173,
+        93,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The owner."
+          ],
+          "signer": true,
+          "relations": [
+            "holding"
+          ]
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_authority",
+      "docs": [
+        "Replaces or revokes one of the mint's authorities; the current one signs."
+      ],
+      "discriminator": [
+        133,
+        250,
+        37,
+        21,
+        110,
+        163,
+        26,
+        121
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The current authority of the kind being set."
+          ],
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "kind",
+          "type": {
+            "defined": {
+              "name": "AuthorityKind"
+            }
+          }
+        },
+        {
+          "name": "new_authority",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_frozen",
+      "docs": [
+        "Freezes or thaws a holding; the freeze authority signs."
+      ],
+      "discriminator": [
+        62,
+        87,
+        99,
+        96,
+        206,
+        47,
+        204,
+        18
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The freeze authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "holding"
+          ]
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "frozen",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_hook",
+      "docs": [
+        "Sets or clears the mint's hook; the hook authority signs."
+      ],
+      "discriminator": [
+        175,
+        16,
+        187,
+        252,
+        19,
+        54,
+        111,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The hook authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "hook_program",
+          "type": {
+            "option": "pubkey"
+          }
+        },
+        {
+          "name": "hook_flags",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "transfer",
+      "docs": [
+        "Moves `amount` from one holding to another, running the mint's hooks. The authority is the",
+        "source's owner or its delegate."
+      ],
+      "discriminator": [
+        163,
+        52,
+        200,
+        231,
+        140,
+        3,
+        69,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The source's owner or delegate."
+          ],
+          "signer": true
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "source",
+            "destination"
+          ]
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "`[\"hook-authority\", hook_program]` (checked in the handler); unused (this program's id)",
+            "otherwise."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_metadata",
+      "docs": [
+        "Updates the mint's metadata; the metadata authority signs."
+      ],
+      "discriminator": [
+        170,
+        182,
+        43,
+        239,
+        97,
+        78,
+        225,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The metadata authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "symbol",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "uri",
+          "type": {
+            "option": "string"
+          }
+        }
+      ]
+    },
+    {
+      "name": "write_hook_data",
+      "docs": [
+        "The mint's hook program replaces a holding's hook data, signing with its",
+        "`[\"hook-authority\"]` PDA; the mint must have `WRITES_HOOK_DATA`."
+      ],
+      "discriminator": [
+        38,
+        149,
+        238,
+        78,
+        60,
+        216,
+        173,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "docs": [
+            "The `[\"hook-authority\"]` PDA (canonical bump) of the mint's hook program, signing by CPI."
+          ],
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "holding"
+          ]
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "data",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Holding",
+      "discriminator": [
+        23,
+        96,
+        64,
+        250,
+        235,
+        191,
+        0,
+        144
+      ]
+    },
+    {
+      "name": "Mint",
+      "discriminator": [
+        80,
+        188,
+        245,
+        20,
+        95,
+        138,
+        57,
+        156
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AuthoritySet",
+      "discriminator": [
+        122,
+        178,
+        145,
+        44,
+        172,
+        30,
+        25,
+        16
+      ]
+    },
+    {
+      "name": "Burned",
+      "discriminator": [
+        207,
+        37,
+        251,
+        154,
+        239,
+        229,
+        14,
+        67
+      ]
+    },
+    {
+      "name": "DelegateSet",
+      "discriminator": [
+        103,
+        126,
+        239,
+        131,
+        201,
+        31,
+        212,
+        253
+      ]
+    },
+    {
+      "name": "FrozenSet",
+      "discriminator": [
+        219,
+        108,
+        253,
+        252,
+        76,
+        39,
+        169,
+        7
+      ]
+    },
+    {
+      "name": "HoldingClosed",
+      "discriminator": [
+        154,
+        214,
+        152,
+        60,
+        89,
+        71,
+        41,
+        60
+      ]
+    },
+    {
+      "name": "HoldingCreated",
+      "discriminator": [
+        162,
+        200,
+        182,
+        156,
+        75,
+        20,
+        64,
+        14
+      ]
+    },
+    {
+      "name": "HookDataWritten",
+      "discriminator": [
+        189,
+        172,
+        52,
+        231,
+        83,
+        6,
+        254,
+        139
+      ]
+    },
+    {
+      "name": "HookSet",
+      "discriminator": [
+        99,
+        71,
+        64,
+        14,
+        59,
+        16,
+        237,
+        90
+      ]
+    },
+    {
+      "name": "MetadataUpdated",
+      "discriminator": [
+        132,
+        36,
+        215,
+        246,
+        166,
+        90,
+        189,
+        44
+      ]
+    },
+    {
+      "name": "MintCreated",
+      "discriminator": [
+        254,
+        157,
+        196,
+        76,
+        231,
+        48,
+        27,
+        150
+      ]
+    },
+    {
+      "name": "Minted",
+      "discriminator": [
+        174,
+        131,
+        21,
+        57,
+        88,
+        117,
+        114,
+        121
+      ]
+    },
+    {
+      "name": "Transferred",
+      "discriminator": [
+        21,
+        132,
+        239,
+        64,
+        146,
+        239,
+        166,
+        68
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ZeroAmount",
+      "msg": "the amount is zero"
+    },
+    {
+      "code": 6001,
+      "name": "InsufficientFunds",
+      "msg": "insufficient funds"
+    },
+    {
+      "code": 6002,
+      "name": "InsufficientDelegation",
+      "msg": "insufficient delegated amount"
+    },
+    {
+      "code": 6003,
+      "name": "NotAuthorized",
+      "msg": "the authority is neither the owner nor the delegate"
+    },
+    {
+      "code": 6004,
+      "name": "Frozen",
+      "msg": "the holding is frozen"
+    },
+    {
+      "code": 6005,
+      "name": "MintMismatch",
+      "msg": "the holding belongs to another mint"
+    },
+    {
+      "code": 6006,
+      "name": "SameAccount",
+      "msg": "source and destination are the same holding"
+    },
+    {
+      "code": 6007,
+      "name": "AuthorityRevoked",
+      "msg": "the mint has no such authority or it was revoked"
+    },
+    {
+      "code": 6008,
+      "name": "HookProgramMissing",
+      "msg": "the mint has a hook program but it was not passed"
+    },
+    {
+      "code": 6009,
+      "name": "WrongHookProgram",
+      "msg": "the hook program passed is not the mint's"
+    },
+    {
+      "code": 6010,
+      "name": "DeltaTooLarge",
+      "msg": "the hook returned a delta larger than the amount"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidDeltaAccount",
+      "msg": "the hook named an invalid delta account"
+    },
+    {
+      "code": 6012,
+      "name": "MaxSupplyExceeded",
+      "msg": "the max supply would be exceeded"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidHookFlags",
+      "msg": "invalid hook flags"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidMetadata",
+      "msg": "invalid metadata"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidDecimals",
+      "msg": "invalid decimals"
+    },
+    {
+      "code": 6016,
+      "name": "HoldingNotEmpty",
+      "msg": "the holding is not empty"
+    },
+    {
+      "code": 6017,
+      "name": "MathOverflow",
+      "msg": "math overflow"
+    },
+    {
+      "code": 6018,
+      "name": "HoldingMismatch",
+      "msg": "the holding exists for another mint or owner"
+    },
+    {
+      "code": 6019,
+      "name": "BadHookSigner",
+      "msg": "the hook signer is not this program's signer for the mint's hook program"
+    },
+    {
+      "code": 6020,
+      "name": "UnsupportedHookReturn",
+      "msg": "the hook answered something this callback or the mint's flags do not allow"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidHookReturn",
+      "msg": "the hook's answer does not decode"
+    },
+    {
+      "code": 6022,
+      "name": "TooManyDeltas",
+      "msg": "the hook answered more than three deltas"
+    },
+    {
+      "code": 6023,
+      "name": "ZeroDelta",
+      "msg": "the hook answered a delta of zero"
+    },
+    {
+      "code": 6024,
+      "name": "HookDataNotEmpty",
+      "msg": "the holding still keeps hook data for its mint's hook"
+    },
+    {
+      "code": 6025,
+      "name": "HookDataNotWritable",
+      "msg": "the mint has no hook that writes hook data"
+    },
+    {
+      "code": 6026,
+      "name": "NotHookAuthority",
+      "msg": "the signer is not the hook authority of the mint's hook program"
+    }
+  ],
+  "types": [
+    {
+      "name": "AuthorityKind",
+      "docs": [
+        "Which authority `set_authority` replaces."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Freeze"
+          },
+          {
+            "name": "Hook"
+          },
+          {
+            "name": "Metadata"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthoritySet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "new_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Burned",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "source",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "source_post",
+            "type": "u64"
+          },
+          {
+            "name": "supply_post",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateMintArgs",
+      "docs": [
+        "Arguments of `create_mint`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals (at most 12)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Name (at most 32 bytes)."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol (at most 10 bytes)."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI (at most 200 bytes)."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "max_supply",
+            "docs": [
+              "Largest supply allowed; 0 for unlimited."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mint_authority",
+            "docs": [
+              "May mint."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "freeze_authority",
+            "docs": [
+              "May freeze."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_program",
+            "docs": [
+              "The hook program."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "docs": [
+              "Its flags (zero without a hook program)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "hook_authority",
+            "docs": [
+              "May change the hook later."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "metadata_authority",
+            "docs": [
+              "May change the metadata later."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegateSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegate",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DeltaApplied",
+      "docs": [
+        "One delta a `before_transfer` answer took: the holding it credited, that holding's owner, the",
+        "amount and the holding's balance after."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "post",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FrozenSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "frozen",
+            "type": "bool"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Holding",
+      "docs": [
+        "A holding: the token account of `owner` for `mint`, at `[\"holding\", mint, owner]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump of the PDA."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "The owner."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delegate",
+            "docs": [
+              "Delegate, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "delegated_amount",
+            "docs": [
+              "What the delegate may still move."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "frozen",
+            "docs": [
+              "Frozen holdings cannot send, receive or burn."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "State the mint's hook keeps for this holder (`bordrless_hook::HOOK_DATA_LEN` bytes). Only",
+              "the mint's hook program changes it: by answering a `before_*` callback, or through",
+              "`write_hook_data`, and only while the mint has `WRITES_HOOK_DATA`. Zero until then."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HoldingClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HoldingCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookDataWritten",
+      "docs": [
+        "The mint's hook program wrote a holding's hook data through `write_hook_data`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "data",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "hook_program",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MetadataUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Mint",
+      "docs": [
+        "A mint. Address: any signer at creation (a keypair, or a PDA of the creating program)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Current supply."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_supply",
+            "docs": [
+              "Largest supply ever allowed; 0 means unlimited."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mint_authority",
+            "docs": [
+              "May mint; `None` once revoked."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "freeze_authority",
+            "docs": [
+              "May freeze and thaw holdings; `None` once revoked."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_authority",
+            "docs": [
+              "May change the hook; `None` locks the hook for ever."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "metadata_authority",
+            "docs": [
+              "May change the metadata; `None` fixes it for ever."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_program",
+            "docs": [
+              "The hook program, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "docs": [
+              "Which callbacks run (`bordrless_hook::token_flags`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who paid for the creation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hook_signer_bump",
+            "docs": [
+              "Bump of `[\"hook-authority\", hook_program]`, this program's signer of every callback to the",
+              "hook (one per hook program, so a hook can tell its own callbacks from a signer another hook",
+              "passed on); 0 without a hook. Set with the hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                31
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "max_supply",
+            "type": "u64"
+          },
+          {
+            "name": "mint_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "freeze_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "metadata_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_program",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "type": "u16"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Minted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "destination_post",
+            "type": "u64"
+          },
+          {
+            "name": "supply_post",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Transferred",
+      "docs": [
+        "A transfer. The source lost `amount`; the destination gained `amount` less the deltas; each",
+        "delta holding gained its amount. Hook data is not in events."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "source",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "deltas",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DeltaApplied"
+                }
+              }
+            }
+          },
+          {
+            "name": "source_post",
+            "type": "u64"
+          },
+          {
+            "name": "destination_post",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

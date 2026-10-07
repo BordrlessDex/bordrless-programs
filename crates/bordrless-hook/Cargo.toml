@@ -1,0 +1,20 @@
+[package]
+name = "bordrless-hook"
+description = "The Bordrless hook protocol (v2): callback arguments, answers (up to three deltas, a burn, an LP fee, per-holding hook data) and the rules every caller checks them by, flags, the hook-authority PDA and the extra-accounts registry shared by the token standard, the DEX and every program that implements a hook."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

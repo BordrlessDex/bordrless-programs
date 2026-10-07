@@ -1,0 +1,7 @@
+target/
+keys/*
+!keys/README.md
+*-keypair.json
+*.so
+*.log
+.DS_Store

@@ -1,0 +1,2757 @@
+{
+  "address": "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC",
+  "metadata": {
+    "name": "bordrless_launch",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The Bordrless launchpad: creates a Bordrless Token Standard token with the rules it fixes at launch (installing the kit as its token hook when it has any) and its curve pool on the Bordrless DEX, runs the sniper fee, the creator fee, the holder fee and the burn as the pool's hook, graduates the pool with locked liquidity and pays creators."
+  },
+  "docs": [
+    "Instructions of the launchpad."
+  ],
+  "instructions": [
+    {
+      "name": "after_swap",
+      "docs": [
+        "Pool hook: a buy's burn; a sell's creator and holder fees, from the output the DEX hands",
+        "on."
+      ],
+      "discriminator": [
+        235,
+        215,
+        232,
+        183,
+        152,
+        109,
+        5,
+        35
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "6Ztfr97cUewdViXDXdZUsQq4pz7MYdygvK1WijALjZ5q"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "actor"
+        },
+        {
+          "name": "launch",
+          "docs": [
+            "The launch of the base mint. Only `create_launch` creates a `Launch`, at",
+            "`[\"launch\", mint]` with that mint, so the owner, the discriminator and the mint bind it",
+            "without a derivation."
+          ],
+          "writable": true
+        },
+        {
+          "name": "launch_quote",
+          "writable": true
+        },
+        {
+          "name": "holder_vault",
+          "docs": [
+            "writable holding of the quote before paying it)."
+          ]
+        },
+        {
+          "name": "kit_config",
+          "docs": [
+            "rewards are on."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "PoolHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "before_initialize",
+      "docs": [
+        "Pool hook: refuses pools with this hook that this program did not create."
+      ],
+      "discriminator": [
+        34,
+        92,
+        163,
+        44,
+        187,
+        213,
+        131,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "6Ztfr97cUewdViXDXdZUsQq4pz7MYdygvK1WijALjZ5q"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "actor"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "PoolHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "before_swap",
+      "docs": [
+        "Pool hook: the anti-sniper LP fee; a buy's creator and holder fees, a sell's burn."
+      ],
+      "discriminator": [
+        227,
+        59,
+        240,
+        68,
+        164,
+        9,
+        29,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "6Ztfr97cUewdViXDXdZUsQq4pz7MYdygvK1WijALjZ5q"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "actor"
+        },
+        {
+          "name": "launch",
+          "docs": [
+            "The launch of the base mint. Only `create_launch` creates a `Launch`, at",
+            "`[\"launch\", mint]` with that mint, so the owner, the discriminator and the mint bind it",
+            "without a derivation."
+          ],
+          "writable": true
+        },
+        {
+          "name": "launch_quote",
+          "writable": true
+        },
+        {
+          "name": "holder_vault",
+          "docs": [
+            "writable holding of the quote before paying it)."
+          ]
+        },
+        {
+          "name": "kit_config",
+          "docs": [
+            "rewards are on."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "PoolHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "claim_creator_fees",
+      "docs": [
+        "The creator takes the creator fees collected so far."
+      ],
+      "discriminator": [
+        0,
+        23,
+        125,
+        234,
+        156,
+        118,
+        134,
+        89
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "The creator."
+          ],
+          "signer": true,
+          "relations": [
+            "launch"
+          ]
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "launch_quote",
+          "writable": true
+        },
+        {
+          "name": "creator_quote",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_config",
+      "docs": [
+        "Anyone: makes a `LaunchConfig` (rules, creator fee, optionally a custom token hook),",
+        "fixed once created, for launches to use by its key."
+      ],
+      "discriminator": [
+        201,
+        207,
+        243,
+        114,
+        75,
+        111,
+        47,
+        189
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "Whoever makes the config: pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The launch config, for the bounds."
+          ],
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The new config: a keypair that signs."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hook_program",
+          "docs": [
+            "program's id for none); checked executable in the handler."
+          ],
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_launch",
+      "docs": [
+        "Creates a token and its curve pool, from the inline rules or from a `LaunchConfig`. With",
+        "a custom hook, the remaining accounts are the hook, the token program's signer for it,",
+        "its registry for the mint and the registry's extras."
+      ],
+      "discriminator": [
+        239,
+        223,
+        255,
+        134,
+        39,
+        121,
+        127,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "The creator: pays the launch fee and the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch_reserve",
+          "docs": [
+            "address)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "launch_quote",
+          "writable": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "registry",
+          "docs": [
+            "when written)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "dex_config",
+          "writable": true,
+          "address": "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx"
+        },
+        {
+          "name": "pool",
+          "docs": [
+            "this program as hook)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "launch_lp",
+          "writable": true
+        },
+        {
+          "name": "hook_signer",
+          "address": "3dfEZLdjRcpTJ4RxPzgkqnqaG2FipRdaHgRW72AL6kqL"
+        },
+        {
+          "name": "dex_hook_signer",
+          "docs": [
+            "pool's creation takes as its hook signer."
+          ],
+          "address": "6Ztfr97cUewdViXDXdZUsQq4pz7MYdygvK1WijALjZ5q"
+        },
+        {
+          "name": "dex_event_authority",
+          "address": "9cBz2tsg7FwopSsd6HzvtbiL6b7B46eLG436etkB7cyx"
+        },
+        {
+          "name": "swap_program",
+          "address": "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_hook_signer",
+          "docs": [
+            "token instructions of a kit mint take as their hook signer; unused without a kit."
+          ],
+          "address": "C2Y3B3hZTesJQqLYrZ7qoaZUoRmwYWh5Qh3MuFxruouE"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "kit_program",
+          "docs": [
+            "program's id stands for an absent one; the kit accounts below likewise). Checked in the",
+            "handler."
+          ],
+          "optional": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "kit_registry",
+          "docs": [
+            "its seeds)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "rewards only."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "kit_caller",
+          "optional": true
+        },
+        {
+          "name": "kit_event_authority",
+          "optional": true
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The `LaunchConfig` the launch is made from, when it is (this program's id for none): the",
+            "rules, the creator fee and the custom hook come from it, and the arguments must match."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateLaunchArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "graduate",
+      "docs": [
+        "Graduates a launch whose pool has raised the threshold. Permissionless. With a custom",
+        "hook, the remaining accounts are the hook, the token program's signer for it and the",
+        "registry's extras."
+      ],
+      "discriminator": [
+        45,
+        235,
+        225,
+        181,
+        17,
+        218,
+        64,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever cranks it; pays only the network fee."
+          ],
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "docs": [
+            "The launch (only `create_launch` creates one, at its PDA)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "launch_reserve",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault"
+        },
+        {
+          "name": "lp_mint",
+          "writable": true
+        },
+        {
+          "name": "launch_lp",
+          "writable": true
+        },
+        {
+          "name": "hook_signer",
+          "address": "3dfEZLdjRcpTJ4RxPzgkqnqaG2FipRdaHgRW72AL6kqL"
+        },
+        {
+          "name": "swap_program",
+          "address": "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+        },
+        {
+          "name": "dex_event_authority",
+          "address": "9cBz2tsg7FwopSsd6HzvtbiL6b7B46eLG436etkB7cyx"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_hook_signer",
+          "docs": [
+            "reserve's transfer and burn take as their hook signer; unused without a kit."
+          ],
+          "address": "C2Y3B3hZTesJQqLYrZ7qoaZUoRmwYWh5Qh3MuFxruouE"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "kit_program",
+          "docs": [
+            "(this program's id) otherwise, as are the kit accounts below. Checked in the handler."
+          ],
+          "optional": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "extras on the reserve's transfer and burn)."
+          ],
+          "optional": true
+        },
+        {
+          "name": "kit_caller",
+          "docs": [
+            "kit's `graduate`."
+          ],
+          "optional": true
+        },
+        {
+          "name": "kit_event_authority",
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_config",
+      "docs": [
+        "Creates the config; signed by the program's upgrade authority, once."
+      ],
+      "discriminator": [
+        23,
+        235,
+        115,
+        232,
+        168,
+        96,
+        1,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The upgrade authority, paying the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_config",
+      "docs": [
+        "Admin: changes the config. Launches keep the terms they were created with."
+      ],
+      "discriminator": [
+        108,
+        158,
+        154,
+        175,
+        212,
+        98,
+        52,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "The admin."
+          ],
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ConfigArgs"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Launch",
+      "discriminator": [
+        144,
+        51,
+        51,
+        163,
+        206,
+        85,
+        213,
+        38
+      ]
+    },
+    {
+      "name": "LaunchConfig",
+      "discriminator": [
+        18,
+        161,
+        9,
+        224,
+        102,
+        145,
+        29,
+        94
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ConfigSet",
+      "discriminator": [
+        15,
+        104,
+        59,
+        16,
+        236,
+        241,
+        8,
+        6
+      ]
+    },
+    {
+      "name": "CreatorFeesClaimed",
+      "discriminator": [
+        189,
+        178,
+        21,
+        181,
+        171,
+        179,
+        131,
+        1
+      ]
+    },
+    {
+      "name": "Graduated",
+      "discriminator": [
+        51,
+        241,
+        66,
+        50,
+        140,
+        245,
+        156,
+        192
+      ]
+    },
+    {
+      "name": "LaunchConfigCreated",
+      "discriminator": [
+        52,
+        83,
+        40,
+        244,
+        71,
+        181,
+        199,
+        7
+      ]
+    },
+    {
+      "name": "LaunchCreated",
+      "discriminator": [
+        59,
+        38,
+        190,
+        230,
+        33,
+        34,
+        89,
+        20
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotUpgradeAuthority",
+      "msg": "not the upgrade authority"
+    },
+    {
+      "code": 6001,
+      "name": "NotAdmin",
+      "msg": "not the admin"
+    },
+    {
+      "code": 6002,
+      "name": "Paused",
+      "msg": "launches are paused"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidConfig",
+      "msg": "invalid config"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidMetadata",
+      "msg": "invalid metadata"
+    },
+    {
+      "code": 6005,
+      "name": "CreatorFeeTooHigh",
+      "msg": "the creator fee is above the maximum"
+    },
+    {
+      "code": 6006,
+      "name": "VirtualQuoteOutOfBounds",
+      "msg": "the virtual quote reserve is out of bounds"
+    },
+    {
+      "code": 6007,
+      "name": "BadCurve",
+      "msg": "the curve parameters could not be derived"
+    },
+    {
+      "code": 6008,
+      "name": "BadHookSigner",
+      "msg": "not the DEX's signer for this program's pool callbacks"
+    },
+    {
+      "code": 6009,
+      "name": "WrongPool",
+      "msg": "the launch does not belong to this pool"
+    },
+    {
+      "code": 6010,
+      "name": "WrongHolding",
+      "msg": "the holding passed is not the launch's"
+    },
+    {
+      "code": 6011,
+      "name": "OnlyLaunchpadCreatesPools",
+      "msg": "pools with this hook are created by the launchpad only"
+    },
+    {
+      "code": 6012,
+      "name": "AlreadyGraduated",
+      "msg": "the launch has already graduated"
+    },
+    {
+      "code": 6013,
+      "name": "NotReady",
+      "msg": "the pool has not raised the graduation threshold yet"
+    },
+    {
+      "code": 6014,
+      "name": "NothingToClaim",
+      "msg": "nothing to claim"
+    },
+    {
+      "code": 6015,
+      "name": "NotCreator",
+      "msg": "not the creator"
+    },
+    {
+      "code": 6016,
+      "name": "WrongProgram",
+      "msg": "wrong program account"
+    },
+    {
+      "code": 6017,
+      "name": "MathOverflow",
+      "msg": "math overflow"
+    },
+    {
+      "code": 6018,
+      "name": "HolderFeeTooHigh",
+      "msg": "a holder fee is above the maximum"
+    },
+    {
+      "code": 6019,
+      "name": "BurnTooHigh",
+      "msg": "a burn is above the maximum"
+    },
+    {
+      "code": 6020,
+      "name": "RulesFeeTooHigh",
+      "msg": "creator fee, holder fee and burn add up to more than the maximum on one side"
+    },
+    {
+      "code": 6021,
+      "name": "MaxWalletOutOfBounds",
+      "msg": "max wallet must be off or within the bounds"
+    },
+    {
+      "code": 6022,
+      "name": "CreatorLockTooLong",
+      "msg": "the creator wallet lock is longer than the maximum"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidEarlyLock",
+      "msg": "the early-buyer lock needs a window within the maximum and an unlock after it, within the maximum"
+    },
+    {
+      "code": 6024,
+      "name": "KitAccountsMissing",
+      "msg": "a launch with kit rules needs the kit's accounts"
+    },
+    {
+      "code": 6025,
+      "name": "UnexpectedKitAccounts",
+      "msg": "a kit account was passed for a launch without that rule"
+    },
+    {
+      "code": 6026,
+      "name": "WrongKitAccount",
+      "msg": "a kit account is not at its address"
+    },
+    {
+      "code": 6027,
+      "name": "WrongHolderVault",
+      "msg": "the holder vault passed is not the launch's"
+    },
+    {
+      "code": 6028,
+      "name": "CustomHookWithKitRules",
+      "msg": "a config with a custom hook can have no kit rule (holder rewards, max wallet, the locks)"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidCustomHook",
+      "msg": "the custom hook must be an executable program that is none of the protocol's"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidCustomHookFlags",
+      "msg": "the custom hook's flags must name at least one callback and no unknown bit"
+    },
+    {
+      "code": 6031,
+      "name": "HookRegistryMissing",
+      "msg": "the custom hook has no registry for this mint: prepare the hook for the mint first"
+    },
+    {
+      "code": 6032,
+      "name": "HookExtrasMismatch",
+      "msg": "the custom hook's extra accounts do not match its registry"
+    },
+    {
+      "code": 6033,
+      "name": "CustomHookAccountsMissing",
+      "msg": "a launch with a custom hook needs the hook's accounts"
+    },
+    {
+      "code": 6034,
+      "name": "UnexpectedCustomHookAccounts",
+      "msg": "custom hook accounts were passed for a launch without one"
+    },
+    {
+      "code": 6035,
+      "name": "ConfigMismatch",
+      "msg": "the arguments do not match the launch config"
+    },
+    {
+      "code": 6036,
+      "name": "WrongHookSigner",
+      "msg": "the hook signer passed is not the token program's signer for the custom hook"
+    },
+    {
+      "code": 6037,
+      "name": "InvalidLabel",
+      "msg": "the label is longer than 32 bytes"
+    }
+  ],
+  "types": [
+    {
+      "name": "Config",
+      "docs": [
+        "Program configuration at `[\"config\"]`. Launches snapshot the terms they are created with."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "admin",
+            "docs": [
+              "May change the config."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives launch fees (lamports); must also be the DEX config's treasury."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote every launch is paired with (bridged SOL)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "docs": [
+              "Lamports paid to launch."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee of launch pools."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_creator_fee_bps",
+            "docs": [
+              "Largest creator fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "docs": [
+              "Seconds of elevated LP fee after creation."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "docs": [
+              "LP fee at the start of the window."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "curve_bps",
+            "docs": [
+              "Share of the supply sold on the curve."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of a launched token, base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of a launched token."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "min_virtual_quote",
+            "docs": [
+              "Smallest virtual quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_virtual_quote",
+            "docs": [
+              "Largest virtual quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops new launches."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "launches",
+            "docs": [
+              "Launches so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rule_bounds",
+            "docs": [
+              "The bounds of token rules."
+            ],
+            "type": {
+              "defined": {
+                "name": "RuleBounds"
+              }
+            }
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigArgs",
+      "docs": [
+        "Arguments of `init_config` and `set_config`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "The admin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives launch fees; must also be the DEX config's treasury."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote every launch is paired with."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "docs": [
+              "Lamports paid to launch."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee of launch pools."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_creator_fee_bps",
+            "docs": [
+              "Largest creator fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "docs": [
+              "Seconds of elevated LP fee after creation."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "docs": [
+              "LP fee at the start of the window."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "curve_bps",
+            "docs": [
+              "Share of the supply sold on the curve."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of a launched token, base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of a launched token."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "min_virtual_quote",
+            "docs": [
+              "Smallest virtual quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_virtual_quote",
+            "docs": [
+              "Largest virtual quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops new launches."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "rule_bounds",
+            "docs": [
+              "The bounds of token rules, each within the hard ceilings."
+            ],
+            "type": {
+              "defined": {
+                "name": "RuleBounds"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_creator_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "type": "u16"
+          },
+          {
+            "name": "curve_bps",
+            "type": "u16"
+          },
+          {
+            "name": "supply",
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "min_virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "max_virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "rule_bounds",
+            "type": {
+              "defined": {
+                "name": "RuleBounds"
+              }
+            }
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateConfigArgs",
+      "docs": [
+        "Arguments of `create_config`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, within the launch config's bounds."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee in basis points of the quote, at most the config's maximum."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "custom_hook",
+            "docs": [
+              "The creator's own token hook program, for a build-your-own token; then no kit rule may be",
+              "on (holder rewards, max wallet, the creator wallet lock, the early-buyer lock), and the",
+              "program must be executable and none of the protocol's. Burn and the creator fee stay pool",
+              "hook rules and may be combined with it."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "docs": [
+              "The hook's flags (`bordrless_hook::token_flags`): at least one callback, no unknown bit;",
+              "0 without a custom hook."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "label",
+            "docs": [
+              "A short name (at most 32 bytes)."
+            ],
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateLaunchArgs",
+      "docs": [
+        "Arguments of `create_launch`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee in basis points of the quote, at most the config's maximum. With a",
+              "`LaunchConfig` it must equal the config's."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote reserve the curve opens with (sets the opening market cap), within the",
+              "config's bounds."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, within the config's bounds; fixed at launch. With a `LaunchConfig` they",
+              "must equal the config's."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreatorFeesClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_total",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delta",
+      "docs": [
+        "One cut an answer takes from the amount."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "docs": [
+              "How much (above zero)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "account",
+            "docs": [
+              "Index in the callback's account list (prefix first, then extras) of the holding that",
+              "receives it. Must be an extra."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Graduated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          },
+          {
+            "name": "topup",
+            "type": "u64"
+          },
+          {
+            "name": "burned",
+            "type": "u64"
+          },
+          {
+            "name": "base_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "lp_minted",
+            "type": "u64"
+          },
+          {
+            "name": "supply",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookReturn",
+      "docs": [
+        "What a callback may answer in its return data. Which fields a callback may fill depends on the",
+        "callback and the flags ([`Allowed`]); the calling program refuses an answer that fills any",
+        "other field."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deltas",
+            "docs": [
+              "Cuts from the amount (the transfer; a swap's input before, its output after), at most",
+              "[`MAX_DELTAS`]."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Delta"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn",
+            "docs": [
+              "Pool swap callbacks only: an amount to burn from the same side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "`before_swap` only: the LP fee to apply instead of the pool's."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_burn`): the source holding's new hook data",
+              "([`HOOK_DATA_LEN`] bytes)."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_mint`): the destination holding's new hook",
+              "data."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Launch",
+      "docs": [
+        "A launch at `[\"launch\", mint]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The token."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who launched it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The pool on the DEX."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "`STATUS_CURVE` or `STATUS_GRADUATED`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee on every swap, in basis points of the quote."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee of the pool."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "docs": [
+              "Sniper window."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "docs": [
+              "LP fee at the start of the window."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote reserve at opening."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "docs": [
+              "Virtual base reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_quote",
+            "docs": [
+              "Real quote reserve at which the launch graduates."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "curve_tokens",
+            "docs": [
+              "Tokens on the curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_tokens",
+            "docs": [
+              "Tokens reserved for graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_holding",
+            "docs": [
+              "The launch's holding of the token (the reserve, then nothing)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_holding",
+            "docs": [
+              "The launch's holding of the quote (creator fees)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_holding",
+            "docs": [
+              "The launch's holding of the pool's LP mint (locked for ever)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "graduated_at",
+            "docs": [
+              "Graduation time (0 until then)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_fees_accrued",
+            "docs": [
+              "Creator fees taken so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_fees_claimed",
+            "docs": [
+              "Creator fees claimed so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_topup",
+            "docs": [
+              "Base added to the pool at graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_burned",
+            "docs": [
+              "Base burned at graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, fixed at launch."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "modules",
+            "docs": [
+              "The kit modules of `rules` (0: no kit, no token hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kit_config",
+            "docs": [
+              "`PDA([\"kit\", mint], KIT_ID)`, derived whatever the modules (the pool hook's fixed key)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "holder_vault",
+            "docs": [
+              "`holding(quote_mint, kit_config)`, derived whatever the modules: the kit's reward vault",
+              "when holder rewards are on, where holder fees go."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "kit_caller_bump",
+            "docs": [
+              "Bump of `PDA([\"kit-caller\", mint], LAUNCH_ID)`, which signs the kit's `init` and",
+              "`graduate`; 0 without a kit."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The creator wallet unlocks at this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "docs": [
+              "Buys from the pool before this time are locked; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "docs": [
+              "... until this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_bought",
+            "docs": [
+              "The creator's own first buy took the normal LP fee inside the sniper window (once)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "holder_fees_accrued",
+            "docs": [
+              "Holder fees taken so far (bridged SOL, into the holder vault)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burned_on_trades",
+            "docs": [
+              "Tokens burned on trades (both sides; not the graduation burn)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "config",
+            "docs": [
+              "The `LaunchConfig` the launch was made from; the default key for inline rules."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "custom_hook",
+            "docs": [
+              "The creator's own token hook (from the config), when the token has one. It runs on every",
+              "transfer, mint and burn its flags name; nobody vets its code."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "docs": [
+              "The custom hook's flags; 0 without one."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchConfig",
+      "docs": [
+        "A launch config (`docs/hooks-v2.md` §5.7): the rules, the creator fee and, for a",
+        "build-your-own token, the creator's own token hook, made with the SDK by anyone as a keypair",
+        "account (so its key can be shared and pasted), fixed once created and usable for any number of",
+        "launches. `create_launch` takes one as an optional account; without one the rules come inline.",
+        "A config can never touch the protocol's share."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who made it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules (within the launch config's bounds when made, checked again at launch)."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee on every swap, in basis points of the quote."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "custom_hook",
+            "docs": [
+              "The creator's own token hook program (§5.8), when the config is for a build-your-own",
+              "token; then no kit module may be on (one token hook per mint). The mint is created with it",
+              "and no hook authority."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "docs": [
+              "The hook's flags (`bordrless_hook::token_flags`); 0 without a custom hook."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "label",
+            "docs": [
+              "A short name, for the site."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchConfigCreated",
+      "docs": [
+        "A `LaunchConfig` was made (by anyone, with the SDK)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "rules",
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "creator_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "custom_hook",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "type": "u16"
+          },
+          {
+            "name": "label",
+            "type": "string"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          },
+          {
+            "name": "supply",
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "creator_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "lp_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "type": "u64"
+          },
+          {
+            "name": "graduation_quote",
+            "type": "u64"
+          },
+          {
+            "name": "curve_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "reserve_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, fixed at launch."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "modules",
+            "docs": [
+              "The kit modules they installed (0: no kit, no token hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kit_config",
+            "docs": [
+              "The token's `KitConfig` when it has a kit."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "holder_vault",
+            "docs": [
+              "Where holder fees go (the kit's reward vault) when holder rewards are on."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The creator wallet unlocks at this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "docs": [
+              "Buys from the pool before this time are locked; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "docs": [
+              "... until this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "config",
+            "docs": [
+              "The `LaunchConfig` the launch was made from, when it was."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook",
+            "docs": [
+              "The creator's own token hook, when the token has one."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "docs": [
+              "Its flags; 0 without one."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchRules",
+      "docs": [
+        "The rules a launch fixes for its token (`docs/hooks-v2.md` §5.1): what the pool hook takes on",
+        "each side, and the kit modules the token gets. Holder rewards are on when either holder fee is",
+        "above 0."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "holder_fee_buy_bps",
+            "docs": [
+              "Holder fee on buys, from the quote input, paid to the holder vault."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holder_fee_sell_bps",
+            "docs": [
+              "Holder fee on sells, from the quote output after the protocol fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "burn_buy_bps",
+            "docs": [
+              "Burn on buys, from the token output."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "burn_sell_bps",
+            "docs": [
+              "Burn on sells, from the token input."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_wallet_bps",
+            "docs": [
+              "Max wallet in basis points of the supply; 0 = off. Lifts at graduation."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "creator_lock_secs",
+            "docs": [
+              "Creator wallet lock, counted from the launch; 0 = off."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "early_window_secs",
+            "docs": [
+              "Early-buyer window, counted from the launch; 0 = off."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "early_lock_secs",
+            "docs": [
+              "Early-buyer unlock, counted from the launch; above `early_window_secs` (0 when the lock is",
+              "off)."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "Before or after the operation."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Before"
+          },
+          {
+            "name": "After"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolHookArgs",
+      "docs": [
+        "Arguments of a pool hook callback."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "op",
+            "docs": [
+              "The operation."
+            ],
+            "type": {
+              "defined": {
+                "name": "PoolOp"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "docs": [
+              "Before or after it."
+            ],
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The pool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "base_mint",
+            "docs": [
+              "Base mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "Quote mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "actor",
+            "docs": [
+              "The trader or liquidity provider."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "docs": [
+              "Who receives: for a swap the owner of the holding the output is delivered to; for liquidity",
+              "the owner of the receiving holding (the LP holding on add, the base holding on remove); the",
+              "default key on initialize."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "direction",
+            "docs": [
+              "Swap direction: 0 base → quote (a sell), 1 quote → base (a buy)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "amount_in",
+            "docs": [
+              "Swap input (after any before-delta, before fees); liquidity base amount."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "amount_out",
+            "docs": [
+              "Swap output (known after); liquidity quote amount."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_reserve",
+            "docs": [
+              "Real base reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "docs": [
+              "Real quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "docs": [
+              "Virtual base offset."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote offset."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "The pool's LP fee (after a swap: the fee actually applied)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "protocol_fee_bps",
+            "docs": [
+              "The pool's protocol fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "swap_count",
+            "docs": [
+              "Swaps so far (before this one)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Pool creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "lp_amount",
+            "docs": [
+              "LP amount of a liquidity operation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Opaque data from the caller (v4's `hookData`)."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolOp",
+      "docs": [
+        "What a pool hook is being told about."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Initialize"
+          },
+          {
+            "name": "AddLiquidity"
+          },
+          {
+            "name": "RemoveLiquidity"
+          },
+          {
+            "name": "Swap"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RuleBounds",
+      "docs": [
+        "The bounds `create_launch` holds token rules to (§5.2), kept in the [`Config`]. `init_config`",
+        "and `set_config` keep each within the hard ceilings of [`crate::constants::ceilings`]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_holder_fee_bps",
+            "docs": [
+              "Largest holder fee per side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_burn_bps",
+            "docs": [
+              "Largest burn per side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_rules_fee_bps",
+            "docs": [
+              "Largest creator fee + holder fee + burn on one side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "min_max_wallet_bps",
+            "docs": [
+              "Smallest max wallet (when on)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_max_wallet_bps",
+            "docs": [
+              "Largest max wallet."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_creator_lock_secs",
+            "docs": [
+              "Longest creator wallet lock."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "max_early_window_secs",
+            "docs": [
+              "Longest early-buyer window."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "max_early_lock_secs",
+            "docs": [
+              "Latest early-buyer unlock, counted from the launch."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ]
+}

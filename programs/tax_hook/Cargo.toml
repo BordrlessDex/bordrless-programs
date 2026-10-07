@@ -1,0 +1,30 @@
+[package]
+name = "tax-hook"
+description = "An example Bordrless token hook: a programmable transfer fee paid to a collector, with a maximum wallet size. What a transfer hook on Token-2022 cannot do, in forty lines."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "tax_hook"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-hook/idl-build", "bordrless-token/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-security-txt = { workspace = true }
+anchor-lang = { workspace = true }
+bordrless-core = { path = "../../crates/bordrless-core" }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

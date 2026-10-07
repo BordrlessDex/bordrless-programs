@@ -1,0 +1,28 @@
+[package]
+name = "bordrless-bridge"
+description = "The Bordrless bridge: wraps SPL Token and Token-2022 mints and native SOL into Bordrless Token Standard mints one for one, and unwraps them."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bordrless_bridge"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-token/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-security-txt = { workspace = true }
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,32 @@
+[package]
+name = "bordrless-launch"
+description = "The Bordrless launchpad: creates a Bordrless Token Standard token with the rules it fixes at launch (installing the kit as its token hook when it has any) and its curve pool on the Bordrless DEX, runs the sniper fee, the creator fee, the holder fee and the burn as the pool's hook, graduates the pool with locked liquidity and pays creators."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bordrless_launch"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-hook/idl-build", "bordrless-token/idl-build", "bordrless-swap/idl-build", "bordrless-kit/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-security-txt = { workspace = true }
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+bordrless-core = { path = "../../crates/bordrless-core" }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
+bordrless-kit = { path = "../bordrless_kit", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

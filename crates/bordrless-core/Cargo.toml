@@ -1,0 +1,16 @@
+[package]
+name = "bordrless-core"
+description = "Pure no_std math and policy of the Bordrless programs: constant-product swaps with virtual reserves, fees, LP shares, the launch curve and its graduation. Mirrored by packages/shared in TypeScript."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

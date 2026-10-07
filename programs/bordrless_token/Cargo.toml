@@ -1,0 +1,28 @@
+[package]
+name = "bordrless-token"
+description = "The Bordrless Token Standard (BTS): mints, holdings, transfers, delegation, freezing, on-chain metadata, and the hook protocol that lets a program run before and after every transfer, mint and burn, take up to three cuts from a transfer and keep 64 bytes of state in every holding."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bordrless_token"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-hook/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-security-txt = { workspace = true }
+anchor-lang = { workspace = true, features = ["event-cpi", "init-if-needed"] }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+
+[lints]
+workspace = true

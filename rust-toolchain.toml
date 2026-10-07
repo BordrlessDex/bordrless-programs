@@ -1,0 +1,6 @@
+# Host toolchain for the workspace (LiteSVM 0.17's Agave 4.3 crates need >= 1.97.1). On-chain
+# builds use platform-tools v1.57's own rustc through `cargo build-sbf`.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

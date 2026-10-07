@@ -1,0 +1,59 @@
+# Anchor workspace for the Bordrless programs. The programs are built with `cargo build-sbf`
+# (scripts/solana/programs.sh); the Anchor CLI is used for `anchor idl build` only. Tests are Rust
+# LiteSVM tests (programs/tests), so no local validator is started.
+skip_local_validator = true
+
+[toolchain]
+anchor_version = "1.2.0"
+solana_version = "4.3.0"
+package_manager = "pnpm"
+
+[features]
+resolution = true
+skip-lint = false
+
+[workspace]
+members = [
+  "programs/bordrless_token",
+  "programs/bordrless_swap",
+  "programs/bordrless_bridge",
+  "programs/bordrless_launch",
+  "programs/bordrless_kit",
+  "programs/tax_hook",
+  "programs/hook_tester",
+]
+
+# One set of program IDs on every cluster (generated 2026-10-07; the keypairs are kept off the repo,
+# see keys/README.md). hook_tester is a test-only program for the LiteSVM suites: it is never
+# deployed, so it has no devnet or mainnet entry and the local validator does not load it.
+[programs.localnet]
+bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+bordrless_swap = "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+bordrless_bridge = "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
+tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
+hook_tester = "9xrQXAxhbRRCVfE5E7DFnxYHESmy4hrtcKpSvZUNmiWM"
+
+[programs.devnet]
+bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+bordrless_swap = "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+bordrless_bridge = "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
+tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
+
+[programs.mainnet]
+bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+bordrless_swap = "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+bordrless_bridge = "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
+tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test -p bordrless-program-tests"

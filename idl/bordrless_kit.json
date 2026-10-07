@@ -1,0 +1,1721 @@
+{
+  "address": "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH",
+  "metadata": {
+    "name": "bordrless_kit",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "The Bordrless kit: the token hook a launch installs for the rules it fixes at launch: holder rewards paid in SOL (an exact reward accounting kept in 64 bytes of each holding, claims, and shares streamed over an hour), max wallet until graduation, the creator wallet lock and the early-buyer lock."
+  },
+  "docs": [
+    "Instructions of the kit."
+  ],
+  "instructions": [
+    {
+      "name": "before_burn",
+      "docs": [
+        "Token hook: every burn of a kit mint with holder rewards or the early-buyer lock."
+      ],
+      "discriminator": [
+        7,
+        177,
+        19,
+        160,
+        28,
+        229,
+        57,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "C2Y3B3hZTesJQqLYrZ7qoaZUoRmwYWh5Qh3MuFxruouE"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "kit_config",
+          "docs": [
+            "The token's config (owner and discriminator checked); its mint is checked in the handler.",
+            "Only `init` creates a config, and only at `[\"kit\", mint]`, so this binds it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "for none); address-checked in the handler."
+          ],
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "before_transfer",
+      "docs": [
+        "Token hook: every transfer of a kit mint."
+      ],
+      "discriminator": [
+        23,
+        118,
+        189,
+        23,
+        179,
+        222,
+        94,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "C2Y3B3hZTesJQqLYrZ7qoaZUoRmwYWh5Qh3MuFxruouE"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "kit_config",
+          "docs": [
+            "The token's config (owner and discriminator checked); its mint is checked in the handler.",
+            "Only `init` creates a config, and only at `[\"kit\", mint]`, so this binds it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "for none); address-checked in the handler."
+          ],
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "claim",
+      "docs": [
+        "A holder claims the rewards it is owed."
+      ],
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The holder: neither the pool nor the launch (checked in the handler)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "kit_config",
+          "docs": [
+            "The token's config, with holder rewards on (checked before the vault, which a token",
+            "without holder rewards does not have)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "`write_hook_data`)."
+          ]
+        },
+        {
+          "name": "holding",
+          "docs": [
+            "The owner's holding of the token. Holdings exist only at `[\"holding\", mint, owner]`, so",
+            "the mint and the owner bind it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reward_mint"
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "and discriminator checked)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "The owner's holding of the reward mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "kit_hook_authority",
+          "address": "2repKA1JgDkBo4AffscVee342dcBcH6c2yfpUTRrAiEN"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "graduate",
+      "docs": [
+        "The launch graduated: lifts max wallet. Signed by the kit-caller PDA; once."
+      ],
+      "discriminator": [
+        45,
+        235,
+        225,
+        181,
+        17,
+        218,
+        64,
+        130
+      ],
+      "accounts": [
+        {
+          "name": "kit_caller",
+          "docs": [
+            "The launch program's kit-caller PDA for the config's mint, at the config's stored bump",
+            "(checked in the handler)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init",
+      "docs": [
+        "Installs the kit on a launch's mint: creates its `KitConfig`, the reward vault (holder",
+        "rewards) and the registry. Signed by the launch program's kit-caller PDA for the mint."
+      ],
+      "discriminator": [
+        220,
+        59,
+        207,
+        236,
+        108,
+        250,
+        47,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "kit_caller",
+          "docs": [
+            "`create_program_address([\"kit-caller\", mint, [args.kit_caller_bump]], LAUNCH_ID)`, signing",
+            "by CPI from the launch program (checked in the handler)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent: the creator."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's new mint: the kit as hook with the flags of the modules, no hook authority,",
+            "no mint authority, the whole supply minted (checked in the handler)."
+          ]
+        },
+        {
+          "name": "launch_reserve",
+          "docs": [
+            "The launch's holding of the mint, holding the whole supply."
+          ]
+        },
+        {
+          "name": "kit_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "docs": [
+            "accepted)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  114,
+                  100,
+                  114,
+                  108,
+                  101,
+                  115,
+                  115,
+                  45,
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_mint",
+          "docs": [
+            "The launch's quote mint: no hook, no hook authority, no freeze authority."
+          ]
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "token program; absent (the kit's id) otherwise."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "KitInitArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "share",
+      "docs": [
+        "Shares `amount` of the reward mint with the holders, released over one hour: the next",
+        "one, or the one after the share still streaming."
+      ],
+      "discriminator": [
+        45,
+        191,
+        153,
+        100,
+        101,
+        149,
+        30,
+        245
+      ],
+      "accounts": [
+        {
+          "name": "sharer",
+          "docs": [
+            "Shares from `source`, as its owner or delegate (the token program checks)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "kit_config",
+          "docs": [
+            "The token's config, with holder rewards on (checked before the vault)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "source",
+          "docs": [
+            "mint, the authority and the balance)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reward_mint"
+        },
+        {
+          "name": "reward_vault",
+          "docs": [
+            "and discriminator checked)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "KitConfig",
+      "discriminator": [
+        191,
+        147,
+        229,
+        38,
+        161,
+        20,
+        130,
+        147
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "KitGraduated",
+      "discriminator": [
+        190,
+        168,
+        138,
+        6,
+        100,
+        23,
+        112,
+        35
+      ]
+    },
+    {
+      "name": "KitInstalled",
+      "discriminator": [
+        6,
+        103,
+        147,
+        112,
+        106,
+        50,
+        0,
+        22
+      ]
+    },
+    {
+      "name": "RewardsClaimed",
+      "discriminator": [
+        75,
+        98,
+        88,
+        18,
+        219,
+        112,
+        88,
+        121
+      ]
+    },
+    {
+      "name": "RewardsShared",
+      "discriminator": [
+        108,
+        159,
+        44,
+        223,
+        54,
+        197,
+        102,
+        254
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BadHookSigner",
+      "msg": "the callback was not signed by the token program's signer for the kit"
+    },
+    {
+      "code": 6001,
+      "name": "WrongMint",
+      "msg": "the kit config or the mint passed is not this token's"
+    },
+    {
+      "code": 6002,
+      "name": "UnsupportedOperation",
+      "msg": "the kit answers before_transfer and before_burn only"
+    },
+    {
+      "code": 6003,
+      "name": "MissingRewardVault",
+      "msg": "holder rewards are on but the reward vault was not passed"
+    },
+    {
+      "code": 6004,
+      "name": "WrongRewardVault",
+      "msg": "the reward vault passed is not the config's"
+    },
+    {
+      "code": 6005,
+      "name": "DestinationNotAllowed",
+      "msg": "this token cannot be sent to that owner"
+    },
+    {
+      "code": 6006,
+      "name": "CreatorLocked",
+      "msg": "the creator's wallet is locked"
+    },
+    {
+      "code": 6007,
+      "name": "EarlyLocked",
+      "msg": "tokens bought in the early window are locked"
+    },
+    {
+      "code": 6008,
+      "name": "MaxWalletExceeded",
+      "msg": "the destination would hold more than the max wallet"
+    },
+    {
+      "code": 6009,
+      "name": "NotKitCaller",
+      "msg": "not the launch's kit caller for this mint"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidModules",
+      "msg": "invalid modules"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidMaxWallet",
+      "msg": "invalid max wallet"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidCreatorLock",
+      "msg": "invalid creator wallet lock"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidEarlyLock",
+      "msg": "invalid early-buyer lock"
+    },
+    {
+      "code": 6014,
+      "name": "SupplyOutOfBounds",
+      "msg": "the supply is out of bounds"
+    },
+    {
+      "code": 6015,
+      "name": "WrongMintSetup",
+      "msg": "the mint is not set up for the kit (hook, authorities, max supply or flags)"
+    },
+    {
+      "code": 6016,
+      "name": "WrongReserve",
+      "msg": "the launch reserve is not the launch's holding of the whole supply"
+    },
+    {
+      "code": 6017,
+      "name": "BadRewardMint",
+      "msg": "the reward mint must have no hook, no hook authority and no freeze authority"
+    },
+    {
+      "code": 6018,
+      "name": "AlreadyGraduated",
+      "msg": "the kit has already graduated"
+    },
+    {
+      "code": 6019,
+      "name": "NotAHolder",
+      "msg": "the pool and the launch earn no holder rewards"
+    },
+    {
+      "code": 6020,
+      "name": "RewardsOff",
+      "msg": "holder rewards are off for this token"
+    },
+    {
+      "code": 6021,
+      "name": "WrongHolding",
+      "msg": "the holding is not the owner's holding of this token"
+    },
+    {
+      "code": 6022,
+      "name": "WrongRewardMint",
+      "msg": "the reward mint passed is not the config's"
+    },
+    {
+      "code": 6023,
+      "name": "WrongDestination",
+      "msg": "the destination is not the owner's holding of the reward mint"
+    },
+    {
+      "code": 6024,
+      "name": "NothingToClaim",
+      "msg": "nothing to claim"
+    },
+    {
+      "code": 6025,
+      "name": "ShareTooSmall",
+      "msg": "a share must be at least 0.001 SOL"
+    },
+    {
+      "code": 6026,
+      "name": "NoEligibleHolders",
+      "msg": "nobody is eligible for holder rewards yet"
+    },
+    {
+      "code": 6027,
+      "name": "WrongProgram",
+      "msg": "wrong program account"
+    },
+    {
+      "code": 6028,
+      "name": "MathOverflow",
+      "msg": "math overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Delta",
+      "docs": [
+        "One cut an answer takes from the amount."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "docs": [
+              "How much (above zero)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "account",
+            "docs": [
+              "Index in the callback's account list (prefix first, then extras) of the holding that",
+              "receives it. Must be an extra."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Holding",
+      "docs": [
+        "A holding: the token account of `owner` for `mint`, at `[\"holding\", mint, owner]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump of the PDA."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "The owner."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delegate",
+            "docs": [
+              "Delegate, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "delegated_amount",
+            "docs": [
+              "What the delegate may still move."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "frozen",
+            "docs": [
+              "Frozen holdings cannot send, receive or burn."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "State the mint's hook keeps for this holder (`bordrless_hook::HOOK_DATA_LEN` bytes). Only",
+              "the mint's hook program changes it: by answering a `before_*` callback, or through",
+              "`write_hook_data`, and only while the mint has `WRITES_HOOK_DATA`. Zero until then."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookReturn",
+      "docs": [
+        "What a callback may answer in its return data. Which fields a callback may fill depends on the",
+        "callback and the flags ([`Allowed`]); the calling program refuses an answer that fills any",
+        "other field."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deltas",
+            "docs": [
+              "Cuts from the amount (the transfer; a swap's input before, its output after), at most",
+              "[`MAX_DELTAS`]."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Delta"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn",
+            "docs": [
+              "Pool swap callbacks only: an amount to burn from the same side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "`before_swap` only: the LP fee to apply instead of the pool's."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_burn`): the source holding's new hook data",
+              "([`HOOK_DATA_LEN`] bytes)."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_mint`): the destination holding's new hook",
+              "data."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "KitConfig",
+      "docs": [
+        "The kit's settings and reward accounting for one token, at `[\"kit\", mint]` (`docs/hooks-v2.md`",
+        "§4.3). Created only by `init`, which the launch's kit-caller PDA for the mint must sign."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump of `[\"kit\", mint]`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kit_caller_bump",
+            "docs": [
+              "Bump of `PDA([\"kit-caller\", mint], LAUNCH_ID)`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "modules",
+            "docs": [
+              "Bit set of [`modules`]."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "graduated",
+            "docs": [
+              "Set by `graduate`: max wallet no longer applies."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "eligible",
+            "docs": [
+              "Sum of the balances of every holding whose owner is not excluded (the pool, the launch)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_eligible",
+            "docs": [
+              "`supply / 1_000` at `init`: rewards are divided only while `eligible` is at least this."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The token."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch",
+            "docs": [
+              "The launch (excluded; its reserve only ever sends after `init`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The launch pool (excluded)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The creator (the creator wallet lock's wallet)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_mint",
+            "docs": [
+              "The launch's quote mint (bridged SOL, which has no hook): rewards are paid in it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_vault",
+            "docs": [
+              "`holding(reward_mint, kit_config)`; the default key when holder rewards are off."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "supply_at_init",
+            "docs": [
+              "The supply at `init` (all of it in the launch reserve)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_wallet_bps",
+            "docs": [
+              "Max wallet in basis points of `supply_at_init`; 0 when off."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_wallet_amount",
+            "docs": [
+              "`supply_at_init * max_wallet_bps / 10_000`; 0 when off. Fixed: burns never tighten it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The creator wallet unlocks at this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "docs": [
+              "Tokens bought from the pool before this time are locked; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "docs": [
+              "... until this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "acc_per_share",
+            "docs": [
+              "Rewards per eligible base unit, scaled by [`SCALE`]."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rem",
+            "docs": [
+              "The scaled remainder of the last division, below the eligible supply it was divided by."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "held",
+            "docs": [
+              "Lamports waiting while `eligible < min_eligible`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seen",
+            "docs": [
+              "`reward_vault.amount + total_claimed` at the last sync, counting shares as seen when they",
+              "arrive."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stream_remaining",
+            "docs": [
+              "Lamports of the running stream (the share or shares streaming now) not yet released to",
+              "holders. A later share never changes it, nor `stream_last` and `stream_end`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "stream_last",
+            "docs": [
+              "The running stream's last release."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stream_end",
+            "docs": [
+              "The running stream's end. While nobody is eligible it moves on with the clock."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "total_distributed",
+            "docs": [
+              "Lamports divided among holders so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed",
+            "docs": [
+              "Lamports claimed so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_shared",
+            "docs": [
+              "Lamports shared so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "`init` time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "stream_next",
+            "docs": [
+              "Lamports shared while the stream was running, waiting for it: they stream linearly over",
+              "the hour after `stream_end`, `[stream_end, stream_end + SHARE_STREAM_SECS]`, and become the",
+              "running stream at the first sync after `stream_end`. Taken from `reserved`, so the account",
+              "keeps its size and every other field its offset."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                56
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "KitGraduated",
+      "docs": [
+        "The launch graduated: max wallet no longer applies."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KitInitArgs",
+      "docs": [
+        "Arguments of `init`, passed by the launch inside `create_launch` and trusted because its",
+        "kit-caller PDA signs; the hard bounds are checked again ([`check_params`])."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "docs": [
+              "The launch PDA (excluded owner; holds the whole supply at `init`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The launch pool (excluded owner)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The creator."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_mint",
+            "docs": [
+              "The launch's quote mint, in which rewards are paid."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "modules",
+            "docs": [
+              "Bit set of [`modules`]: not zero, within `0b1111`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_wallet_bps",
+            "docs": [
+              "`1..=9_999` exactly when max wallet is on, else 0."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "`now < creator_unlock_at <= now + 365 days` exactly when the creator wallet lock is on,",
+              "else 0."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "docs": [
+              "`now < early_window_end < early_unlock_at <= now + 30 days` exactly when the early-buyer",
+              "lock is on, else both 0."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "docs": [
+              "See `early_window_end`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "kit_caller_bump",
+            "docs": [
+              "Bump of `PDA([\"kit-caller\", mint], LAUNCH_ID)`."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "KitInstalled",
+      "docs": [
+        "The kit was installed on a launch's mint, with every parameter."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "kit_config",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_vault",
+            "docs": [
+              "The default key when holder rewards are off."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "modules",
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "type": "u64"
+          },
+          {
+            "name": "min_eligible",
+            "type": "u64"
+          },
+          {
+            "name": "max_wallet_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_wallet_amount",
+            "type": "u64"
+          },
+          {
+            "name": "creator_unlock_at",
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "type": "i64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Mint",
+      "docs": [
+        "A mint. Address: any signer at creation (a keypair, or a PDA of the creating program)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Current supply."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_supply",
+            "docs": [
+              "Largest supply ever allowed; 0 means unlimited."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mint_authority",
+            "docs": [
+              "May mint; `None` once revoked."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "freeze_authority",
+            "docs": [
+              "May freeze and thaw holdings; `None` once revoked."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_authority",
+            "docs": [
+              "May change the hook; `None` locks the hook for ever."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "metadata_authority",
+            "docs": [
+              "May change the metadata; `None` fixes it for ever."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_program",
+            "docs": [
+              "The hook program, if any."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "hook_flags",
+            "docs": [
+              "Which callbacks run (`bordrless_hook::token_flags`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who paid for the creation."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hook_signer_bump",
+            "docs": [
+              "Bump of `[\"hook-authority\", hook_program]`, this program's signer of every callback to the",
+              "hook (one per hook program, so a hook can tell its own callbacks from a signer another hook",
+              "passed on); 0 without a hook. Set with the hook."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                31
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "Before or after the operation."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Before"
+          },
+          {
+            "name": "After"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardsClaimed",
+      "docs": [
+        "A holder claimed rewards."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "owed_left",
+            "docs": [
+              "What the holder is still owed after this claim (zero unless the vault ran short)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardsShared",
+      "docs": [
+        "Someone shared SOL with the holders; it reaches them over one hour, from now or, while an",
+        "earlier share still streams, from when that one ends (`KitConfig.stream_end`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "total_shared",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenHookArgs",
+      "docs": [
+        "Arguments of a token hook callback. Balances and hook data are those of the holdings before",
+        "(`Before`) or after (`After`) the operation; `delta` is what the deltas took, known only after."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "op",
+            "docs": [
+              "The operation."
+            ],
+            "type": {
+              "defined": {
+                "name": "TokenOp"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "docs": [
+              "Before or after it."
+            ],
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Source holding (the mint for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "Destination holding (the mint for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source_owner",
+            "docs": [
+              "Owner of the source holding (default for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_owner",
+            "docs": [
+              "Owner of the destination holding (default for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Who signed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority_is_delegate",
+            "docs": [
+              "Whether the signer acted as a delegate rather than the owner."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "The amount of the operation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delta",
+            "docs": [
+              "The sum of the deltas a `before_transfer` answer took (zero before)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_balance",
+            "docs": [
+              "Source balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "destination_balance",
+            "docs": [
+              "Destination balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of the mint."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of the mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "The source holding's hook data (zeros for a mint)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "The destination holding's hook data (zeros for a burn)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenOp",
+      "docs": [
+        "What a token hook is being told about."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Transfer"
+          },
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Burn"
+          }
+        ]
+      }
+    }
+  ]
+}
