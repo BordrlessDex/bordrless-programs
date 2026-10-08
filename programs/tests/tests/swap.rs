@@ -1,9 +1,11 @@
 //! The DEX: pools, swaps, liquidity, protocol fees, pausing.
 
 use anchor_lang::prelude::Pubkey;
-use bordrless_core::{fee_amount, initial_lp, swap_out, withdraw_for_lp};
+use bordrless_core::{fee_amount, initial_lp, policy, swap_out, withdraw_for_lp};
 use bordrless_program_tests::fixture::World;
+use bordrless_program_tests::hooks::SwapSpec;
 use bordrless_swap::client as swap;
+use bordrless_swap::constants::FEE_MODEL_FLAT;
 use bordrless_swap::error::SwapError;
 use bordrless_swap::events::{LiquidityAdded, LiquidityRemoved, PoolCreated, Swapped};
 use bordrless_swap::instructions::{
@@ -11,6 +13,7 @@ use bordrless_swap::instructions::{
 };
 use bordrless_swap::state::Pool;
 use bordrless_token::client as token;
+use hook_tester::client as tester;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
@@ -410,6 +413,151 @@ fn pool_lifecycle() {
             &[],
         )
         .ok();
+}
+
+/// The share model is the launchpad's alone (§3.1): a curve any other hook program creates as its
+/// own hook (any deployed program can sign with its own `["hook-authority"]`) is an ordinary pool
+/// for the fee. It pays the flat rate on its curve and after the hook finalizes it, so nobody can
+/// open a pool whose hook cuts nothing and so pays nothing.
+#[test]
+fn a_curve_another_hook_creates_pays_the_flat_rate() {
+    // The DEX names the launchpad by id (it cannot depend on the launch program).
+    assert_eq!(
+        bordrless_swap::constants::LAUNCHPAD_ID,
+        bordrless_launch::ID
+    );
+    let mut w = World::new();
+    let lp = w.env.funded(50_000_000_000);
+    let a = w.mint_to_owner(&lp, 6, A_SUPPLY, "AAA");
+    let b = w.mint_to_owner(&lp, 9, B_SUPPLY, "BBB");
+    let (authority, bump) = tester::hook_authority();
+    let keys = swap::CreatePoolKeys {
+        payer: lp.pubkey(),
+        authority: lp.pubkey(),
+        treasury: w.env.treasury.pubkey(),
+        base_mint: a,
+        quote_mint: b,
+        hook_caller: Some(authority),
+    };
+    let mut args = pool_args(A_DEPOSIT, 0);
+    args.virtual_quote = 10 * B_DEPOSIT;
+    args.hook_program = hook_tester::ID;
+    args.hook_flags = 0;
+    let pool = swap::pool_address(&a, &b, 30, Some(hook_tester::ID));
+    let lp_mint = swap::lp_mint_address(&pool);
+    let tx = w.env.send_paid_by(
+        &[tester::as_hook(swap::create_pool(&keys, args, vec![]))],
+        &lp,
+        &[],
+    );
+    println!(
+        "create_pool by another hook CU {} size {}",
+        tx.cu(),
+        tx.size
+    );
+    tx.ok();
+    let ev: PoolCreated = tx.event();
+    assert_eq!(
+        (
+            ev.curve,
+            ev.hook_program,
+            ev.fee_model,
+            ev.protocol_fee_bps,
+            ev.protocol_share_bps
+        ),
+        (
+            true,
+            Some(hook_tester::ID),
+            FEE_MODEL_FLAT,
+            policy::PROTOCOL_FEE_BPS,
+            0
+        )
+    );
+    let p: Pool = w.env.read(&pool);
+    assert_eq!(
+        (
+            p.curve,
+            p.fee_model,
+            p.protocol_fee_bps,
+            p.protocol_share_bps
+        ),
+        (true, FEE_MODEL_FLAT, policy::PROTOCOL_FEE_BPS, 0)
+    );
+
+    // A buy on the curve pays the flat rate of what reached the vault; its hook cut nothing.
+    let trader = w.env.funded(50_000_000_000);
+    let b_in = 1_000_000_000;
+    let ixs = [
+        token::create_holding(trader.pubkey(), a, trader.pubkey()),
+        token::create_holding(trader.pubkey(), b, trader.pubkey()),
+        token::transfer(
+            lp.pubkey(),
+            token::holding_address(&b, &lp.pubkey()),
+            token::holding_address(&b, &trader.pubkey()),
+            b,
+            None,
+            vec![],
+            10 * b_in,
+        ),
+    ];
+    w.env.send_paid_by(&ixs, &trader, &[&lp]).ok();
+    let tx = w.env.send_paid_by(
+        &[w.env
+            .swap_ix(&SwapSpec::new(trader.pubkey(), pool, 1, b_in))],
+        &trader,
+        &[],
+    );
+    tx.ok();
+    let ev: Swapped = tx.event();
+    let flat = fee_amount(b_in, policy::PROTOCOL_FEE_BPS).unwrap();
+    assert!(flat > 0);
+    assert_eq!(
+        (ev.received_in, ev.cuts_in, ev.cuts_out, ev.protocol_fee),
+        (b_in, 0, 0, flat)
+    );
+    let p: Pool = w.env.read(&pool);
+    assert_eq!(p.protocol_fees_quote, flat);
+    assert_eq!(
+        w.env.holding(&b, &pool),
+        p.quote_reserve + p.protocol_fees_quote
+    );
+
+    // The hook finalizes its curve: an ordinary pool now, still at the flat rate.
+    let ixs = [
+        token::create_holding(lp.pubkey(), lp_mint, lp.pubkey()),
+        tester::as_hook(swap::finalize_curve(
+            authority,
+            bump,
+            pool,
+            a,
+            b,
+            token::holding_address(&lp_mint, &lp.pubkey()),
+        )),
+    ];
+    w.env.send_paid_by(&ixs, &lp, &[]).ok();
+    let p: Pool = w.env.read(&pool);
+    assert_eq!((p.curve, p.fee_model), (false, FEE_MODEL_FLAT));
+    assert!(w.env.holding(&lp_mint, &lp.pubkey()) > 0);
+    let a_in = w.env.holding(&a, &trader.pubkey()) / 2;
+    let tx = w.env.send_paid_by(
+        &[w.env
+            .swap_ix(&SwapSpec::new(trader.pubkey(), pool, 0, a_in))],
+        &trader,
+        &[],
+    );
+    tx.ok();
+    let ev: Swapped = tx.event();
+    let flat = fee_amount(ev.amount_out, policy::PROTOCOL_FEE_BPS).unwrap();
+    assert!(flat > 0);
+    assert_eq!(
+        (ev.cuts_in, ev.cuts_out, ev.protocol_fee, ev.delivered_out),
+        (0, 0, flat, ev.amount_out - flat)
+    );
+    let p: Pool = w.env.read(&pool);
+    assert_eq!(
+        w.env.holding(&b, &pool),
+        p.quote_reserve + p.protocol_fees_quote
+    );
 }
 
 #[test]

@@ -15,6 +15,10 @@
 //! - [`hook_tester::route`] performs a DEX swap by CPI, as a router would (for the CPI-depth tests).
 //!   It cannot route a pool whose hook is this program: the DEX would call back into it, and a
 //!   program cannot appear twice on the CPI stack.
+//! - [`hook_tester::invoke_as_hook`] calls any program with this program's `["hook-authority"]`
+//!   signing, as any deployed program can with its own: the fee-model test creates a curve pool on
+//!   the DEX as its own hook and finalizes it, and shows it pays the flat rate, not the
+//!   launchpad's share.
 //! - [`hook_tester::probe_curve`] runs `Pubkey::is_on_curve` (the curve25519 validate-point
 //!   syscall the kit's wallets-only rule uses) on given keys, or skips it, so a test measures its
 //!   compute and checks it agrees with the host's curve arithmetic.
@@ -32,7 +36,7 @@ use anchor_lang::solana_program::program::{invoke, invoke_signed, set_return_dat
 use anchor_lang::InstructionData;
 use bordrless_hook::{
     hook_accounts_address, write_registry, AccountSource, ExtraAccount, HookAccountList,
-    PoolHookArgs, Seed, TokenHookArgs,
+    PoolHookArgs, Seed, TokenHookArgs, HOOK_AUTHORITY_SEED,
 };
 use bordrless_swap::instructions::SwapArgs;
 use bordrless_token::client as token_client;
@@ -320,6 +324,47 @@ pub mod hook_tester {
         Ok(())
     }
 
+    /// Calls the first of the remaining accounts as a program with `data`, passing the rest on as
+    /// they arrived, with this program's `["hook-authority"]` (at `bump`) signing wherever it
+    /// appears among them. What any deployed program can do with its own hook authority: create a
+    /// curve pool on the DEX as its own hook (`create_pool` with `hook_caller`), finalize it. The
+    /// fee-model test shows such a pool pays the flat rate, not the launchpad's share.
+    pub fn invoke_as_hook<'info>(
+        ctx: Context<'info, InvokeAsHook<'info>>,
+        bump: u8,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let authority = Pubkey::create_program_address(&[HOOK_AUTHORITY_SEED, &[bump]], &crate::ID)
+            .map_err(|_| TesterError::BadParams)?;
+        require_keys_eq!(
+            ctx.accounts.hook_authority.key(),
+            authority,
+            TesterError::BadParams
+        );
+        let (program, accounts) = ctx
+            .remaining_accounts
+            .split_first()
+            .ok_or(TesterError::BadParams)?;
+        let metas: Vec<AccountMeta> = accounts
+            .iter()
+            .map(|info| AccountMeta {
+                pubkey: *info.key,
+                is_signer: info.is_signer || *info.key == authority,
+                is_writable: info.is_writable,
+            })
+            .collect();
+        let mut infos = vec![ctx.accounts.hook_authority.to_account_info()];
+        infos.extend(accounts.iter().cloned());
+        infos.push(program.clone());
+        let ix = Instruction {
+            program_id: *program.key,
+            accounts: metas,
+            data,
+        };
+        invoke_signed(&ix, &infos, &[&[HOOK_AUTHORITY_SEED, &[bump]]])?;
+        Ok(())
+    }
+
     /// Answers, one byte per key, whether each key is on the ed25519 curve (`Pubkey::is_on_curve`,
     /// which compiles to the curve25519 validate-point syscall on chain). With `check` false it
     /// answers zeros without checking, so the difference in compute units measures the check.
@@ -597,6 +642,14 @@ pub struct Route<'info> {
     /// CHECK: the DEX (address-checked).
     #[account(address = bordrless_swap::ID @ TesterError::BadParams)]
     pub swap_program: UncheckedAccount<'info>,
+}
+
+/// Accounts of `invoke_as_hook`: this program's hook authority (checked in the handler), then (as
+/// remaining accounts) the program to call and its accounts.
+#[derive(Accounts)]
+pub struct InvokeAsHook<'info> {
+    /// CHECK: `["hook-authority", bump]` of this program (checked in the handler); signs the CPI.
+    pub hook_authority: UncheckedAccount<'info>,
 }
 
 /// Accounts of `probe_curve`: none.

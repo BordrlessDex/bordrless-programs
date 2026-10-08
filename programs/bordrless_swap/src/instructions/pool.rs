@@ -196,9 +196,13 @@ pub fn process_create_pool<'info>(
     } else {
         require!(args.quote_amount > 0, SwapError::ZeroAmount);
     }
-    // The protocol fee model the pool keeps for life: a launch pool (a curve a hook program
-    // creates) pays the config's share of what its hooks cut; every other pool the flat rate.
-    let (fee_model, protocol_fee_bps, protocol_share_bps) = if curve {
+    // The protocol fee model the pool keeps for life: a launch pool (a curve the launchpad
+    // creates as its own hook, its hook authority signing) pays the config's share of what its
+    // hooks cut; every other pool, a curve another hook program creates included, the flat rate.
+    // Any program can sign with its own ["hook-authority"], so "a curve by a hook" alone would
+    // let anyone open a pool whose hook cuts nothing and so pays nothing, for life.
+    let launch_pool = curve && by_hook && hook_program_opt == Some(LAUNCHPAD_ID);
+    let (fee_model, protocol_fee_bps, protocol_share_bps) = if launch_pool {
         (FEE_MODEL_SHARE, 0, config.launch_protocol_share_bps)
     } else {
         (FEE_MODEL_FLAT, config.protocol_fee_bps, 0)

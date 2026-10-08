@@ -141,6 +141,30 @@ pub fn route(
     }
 }
 
+/// `invoke_as_hook`: `ix` performed by CPI from this program with its `["hook-authority"]`
+/// signing wherever `ix` names it as a signer (the transaction itself does not carry that
+/// signature). Every other signer of `ix` still signs the transaction.
+pub fn as_hook(ix: Instruction) -> Instruction {
+    let (authority, bump) = hook_authority();
+    let mut accounts = vec![
+        AccountMeta::new_readonly(authority, false),
+        AccountMeta::new_readonly(ix.program_id, false),
+    ];
+    accounts.extend(ix.accounts.into_iter().map(|meta| AccountMeta {
+        is_signer: meta.is_signer && meta.pubkey != authority,
+        ..meta
+    }));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::InvokeAsHook {
+            bump,
+            data: ix.data,
+        }
+        .data(),
+    }
+}
+
 /// `write_hook_data_as` signed by this program's `["hook-authority"]` at its canonical bump: what
 /// the token program accepts for a mint whose hook is this program.
 pub fn write_hook_data(mint: Pubkey, holding: Pubkey, data: [u8; 64]) -> Instruction {

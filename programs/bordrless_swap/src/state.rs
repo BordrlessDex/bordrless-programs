@@ -28,8 +28,8 @@ pub struct Config {
     /// Pools created so far.
     pub pools_created: u64,
     /// Bordrless's share of what the hooks cut on each swap of a launch pool created from now on,
-    /// in basis points of the cuts (2,500 = a quarter): a curve a hook program creates (the
-    /// launchpad's pools), which keeps the model after graduation. A launch whose rules collect
+    /// in basis points of the cuts (2,500 = a quarter): the curve the launchpad creates as its hook
+    /// (`FEE_MODEL_SHARE`), which keeps the model after graduation. A launch whose rules collect
     /// nothing pays nothing.
     pub launch_protocol_share_bps: u16,
     /// Reserved.

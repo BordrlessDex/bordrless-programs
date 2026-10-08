@@ -22,7 +22,7 @@ pub struct ConfigArgs {
     pub pool_creation_fee_lamports: u64,
     /// Stops swaps and liquidity changes.
     pub paused: bool,
-    /// Bordrless's share of what the hooks cut on launch pools (curves a hook program creates)
+    /// Bordrless's share of what the hooks cut on launch pools (the curves the launchpad creates as its hook)
     /// created from now on, in basis points of the cuts.
     pub launch_protocol_share_bps: u16,
 }

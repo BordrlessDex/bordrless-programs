@@ -24,14 +24,14 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `bordrless_kit` | `14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH` | The launch rules as a token hook: holder rewards, max wallet, wallet locks |
 | `tax_hook` | `8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7` | An example token hook: a programmable transfer fee with a wallet cap |
 
-Deployed to mainnet-beta on 7 Oct 2026. Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX upgraded on 8 Oct 2026). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
 | Program | Executable hash (sha256, `solana-verify get-program-hash`) |
 | --- | --- |
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
-| `bordrless_swap` | `7207b660be98fef7684c551cd350f5d1fea03f4a4acf7197f32cc5b98a7b3cf6` |
+| `bordrless_swap` | `3cc585c7880262876b95ee7def18e98fedb3e8b49604636f3bb79285f98e4fd6` |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
 | `bordrless_launch` | `bf9b521b3f11f88e1da5228a14626a99660a412462534007201670f67aeb318d` |
 | `bordrless_kit` | `2bf33657166878c7d4b2634c64b61d6ee898d20ccae99db6398e99d0e69e621c` |

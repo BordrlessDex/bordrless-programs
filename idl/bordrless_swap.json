@@ -1229,8 +1229,8 @@
             "name": "launch_protocol_share_bps",
             "docs": [
               "Bordrless's share of what the hooks cut on each swap of a launch pool created from now on,",
-              "in basis points of the cuts (2,500 = a quarter): a curve a hook program creates (the",
-              "launchpad's pools), which keeps the model after graduation. A launch whose rules collect",
+              "in basis points of the cuts (2,500 = a quarter): the curve the launchpad creates as its hook",
+              "(`FEE_MODEL_SHARE`), which keeps the model after graduation. A launch whose rules collect",
               "nothing pays nothing."
             ],
             "type": "u16"
@@ -1303,7 +1303,7 @@
           {
             "name": "launch_protocol_share_bps",
             "docs": [
-              "Bordrless's share of what the hooks cut on launch pools (curves a hook program creates)",
+              "Bordrless's share of what the hooks cut on launch pools (the curves the launchpad creates as its hook)",
               "created from now on, in basis points of the cuts."
             ],
             "type": "u16"

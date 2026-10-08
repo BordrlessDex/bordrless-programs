@@ -19,8 +19,16 @@ pub const MAX_PROTOCOL_SHARE_BPS: u16 = 10_000;
 /// `Pool.fee_model`: a flat rate of the quote (`protocol_fee_bps`): the pools anyone opens.
 pub const FEE_MODEL_FLAT: u8 = 0;
 /// `Pool.fee_model`: a share of what the pool's hooks cut (`protocol_share_bps`), in the quote:
-/// launch pools (a curve a hook program creates). A pool whose hooks cut nothing pays nothing.
+/// the pools the launchpad opens (a curve created by `LAUNCHPAD_ID` as its own hook). A launch
+/// whose rules collect nothing pays nothing. A curve any other hook program creates is an
+/// ordinary pool for the fee: the flat rate, so nobody can open a fee-free pool by deploying a
+/// program that signs with its own `["hook-authority"]`.
 pub const FEE_MODEL_SHARE: u8 = 1;
+/// The launchpad (`bordrless_launch`): the one hook program whose curves get the share model.
+/// The test suite checks it equals `bordrless_launch::ID` (the DEX cannot depend on the launch
+/// program, which depends on the DEX).
+pub const LAUNCHPAD_ID: anchor_lang::prelude::Pubkey =
+    anchor_lang::prelude::Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
 /// Discriminator length.
 pub const DISCRIMINATOR_LEN: usize = 8;
 /// Name of every LP mint.
