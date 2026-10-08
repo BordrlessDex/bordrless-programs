@@ -11,6 +11,9 @@ the amount, a burn on a swap, a swap's fee, and 64 bytes of state inside every h
 
 The TypeScript client is [`@bordrless/sdk`](https://github.com/BordrlessDex/bordrless-sdk).
 
+**Integrating Bordrless tokens** into a trading terminal, aggregator, indexer or wallet? Start with
+the [integration guides](https://github.com/BordrlessDex/bordrless-sdk/tree/main/docs/integration).
+
 ## Program addresses
 
 The same addresses on mainnet-beta, devnet and localnet.
