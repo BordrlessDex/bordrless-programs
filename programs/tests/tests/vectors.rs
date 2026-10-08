@@ -381,11 +381,12 @@ fn swap_cases() -> Vec<J> {
                                 min_eligible,
                             );
                             if let (Some(out), Some(delivered)) = (q.amount_out, q.delivered) {
-                                // What is delivered is what the curve gave less every cut.
+                                // What is delivered is what the curve gave less every cut (a
+                                // sell's LP fee, Bordrless's, leaves the output too).
                                 let cuts = if buy {
                                     q.burn
                                 } else {
-                                    q.protocol_fee + q.creator_fee + q.holder_fee
+                                    q.lp_fee + q.protocol_fee + q.creator_fee + q.holder_fee
                                 };
                                 assert_eq!(delivered + cuts, out);
                                 let ins = if buy {

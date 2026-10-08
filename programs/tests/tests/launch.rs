@@ -114,14 +114,14 @@ fn launch_trades_and_graduates() {
     assert_eq!((ev.burn_in, ev.burn_out), (0, 0));
     assert!(ev.deltas_out.is_empty());
     assert_eq!(ev.received_in, SOL - creator_fee);
-    // Bordrless takes a quarter of what the launch's rules collected: of a 1% creator fee on 1
-    // SOL, 0.25% of the trade.
+    // Bordrless takes a quarter of what the launch's rules collected (of a 1% creator fee on 1
+    // SOL, 0.25% of the trade) and the LP fee on what reached the vault, in SOL: nothing
+    // compounds in the pool, whose LP is locked for ever.
     assert_eq!(ev.cuts_in, creator_fee);
-    assert_eq!(
-        ev.protocol_fee,
-        protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap()
-    );
-    assert_eq!(ev.protocol_fee, SOL / 400);
+    let share = protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap();
+    assert_eq!(share, SOL / 400);
+    let lp_fee = fee_amount(SOL - creator_fee, policy::LP_FEE_BPS).unwrap();
+    assert_eq!((ev.lp_fee, ev.protocol_fee), (0, share + lp_fee));
     assert_eq!(w.launch(&mint).creator_fees_accrued, creator_fee);
     assert_eq!(
         w.env.holding(&w.sol, &launch::launch_address(&mint)),
@@ -130,7 +130,7 @@ fn launch_trades_and_graduates() {
     let creator_tokens = w.env.holding(&mint, &creator.pubkey());
     assert!(creator_tokens > 0);
 
-    // A sniper five seconds in pays the elevated LP fee, which stays in the pool.
+    // A sniper five seconds in pays the elevated LP fee, which goes to Bordrless in SOL.
     w.env.warp(5);
     let sniper = w.wallet_with_sol(10 * SOL);
     let before = w.launch_pool(&mint);
@@ -160,23 +160,26 @@ fn launch_trades_and_graduates() {
     let tx = w.buy(&buyer, &mint, SOL);
     tx.ok();
     assert_eq!(tx.event::<Swapped>().lp_fee_bps, policy::LP_FEE_BPS);
-    // The sell: the LP fee stays in the pool in tokens; the hook takes the creator fee from the
-    // curve's output in SOL; Bordrless's share of it is held back from the delivery.
+    // The sell: the tokens go into the curve whole; the LP fee (Bordrless's) leaves its output in
+    // SOL; the hook takes the creator fee from the rest; Bordrless's share of it is held back
+    // from the delivery.
     let held = w.env.holding(&mint, &buyer.pubkey());
     let before = w.launch_pool(&mint);
     let accrued = w.launch(&mint).creator_fees_accrued;
     let tokens = held / 2;
-    let lp_fee = fee_amount(tokens, policy::LP_FEE_BPS).unwrap();
     let out_gross = swap_out(
-        tokens - lp_fee,
+        tokens,
         before.base_reserve,
         before.virtual_base,
         before.quote_reserve,
         before.virtual_quote,
     )
     .unwrap();
-    let creator_fee = fee_amount(out_gross, 100).unwrap();
-    let protocol_fee = protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap();
+    let lp_fee = fee_amount(out_gross, policy::LP_FEE_BPS).unwrap();
+    let told = out_gross - lp_fee;
+    let creator_fee = fee_amount(told, 100).unwrap();
+    let share = protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap();
+    let protocol_fee = lp_fee + share;
     let sol_before = w.env.holding(&w.sol, &buyer.pubkey());
     let tx = w.sell(&buyer, &mint, tokens);
     tx.ok();
@@ -193,7 +196,7 @@ fn launch_trades_and_graduates() {
         (
             0,
             tokens,
-            lp_fee,
+            0,
             out_gross,
             protocol_fee,
             out_gross - protocol_fee - creator_fee
@@ -240,11 +243,21 @@ fn launch_trades_and_graduates() {
 
     // Buy until the pool has raised the threshold.
     let mut rounds = 0;
-    while w.launch_pool(&mint).quote_reserve < w.launch(&mint).graduation_quote {
+    // Ready once the reserve meets the threshold or the curve sells out (the LP fee does not
+    // compound, so the two come together); no buy is larger than what the curve can still fill.
+    while {
         let p = w.launch_pool(&mint);
-        let remaining = w.launch(&mint).graduation_quote - p.quote_reserve;
+        p.quote_reserve < w.launch(&mint).graduation_quote && p.base_reserve > 0
+    } {
+        let p = w.launch_pool(&mint);
+        let remaining = w
+            .launch(&mint)
+            .graduation_quote
+            .saturating_sub(p.quote_reserve);
         // A little more than what is missing (fees are taken off the way in), never a dust trade.
-        let step = (remaining + remaining / 50).clamp(SOL / 20, 10 * SOL);
+        let step = (remaining + remaining / 50)
+            .clamp(SOL / 20, 10 * SOL)
+            .min(w.crossing_buy_amount(&mint, &buyer.pubkey()));
         w.buy(&buyer, &mint, step).ok();
         rounds += 1;
         assert!(rounds < 50);
@@ -445,9 +458,10 @@ fn launch_pools_share_their_cuts_and_ordinary_pools_pay_the_dex_rate() {
     tx.ok();
     let ev: Swapped = tx.event();
     let creator_fee = fee_amount(SOL, 100).unwrap();
+    let lp_fee = fee_amount(SOL - creator_fee, policy::LP_FEE_BPS).unwrap();
     assert_eq!(
         ev.protocol_fee,
-        protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap()
+        protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap() + lp_fee
     );
     assert_eq!(
         w.launch_pool(&mint).protocol_fees_quote,
@@ -456,10 +470,20 @@ fn launch_pools_share_their_cuts_and_ordinary_pools_pay_the_dex_rate() {
     w.env.warp(policy::SNIPER_WINDOW_SECS);
     let buyer = w.wallet_with_sol(200 * SOL);
     let mut rounds = 0;
-    while w.launch_pool(&mint).quote_reserve < w.launch(&mint).graduation_quote {
+    // Ready once the reserve meets the threshold or the curve sells out (the LP fee does not
+    // compound, so the two come together); no buy is larger than what the curve can still fill.
+    while {
         let p = w.launch_pool(&mint);
-        let remaining = w.launch(&mint).graduation_quote - p.quote_reserve;
-        let step = (remaining + remaining / 50).clamp(SOL / 20, 10 * SOL);
+        p.quote_reserve < w.launch(&mint).graduation_quote && p.base_reserve > 0
+    } {
+        let p = w.launch_pool(&mint);
+        let remaining = w
+            .launch(&mint)
+            .graduation_quote
+            .saturating_sub(p.quote_reserve);
+        let step = (remaining + remaining / 50)
+            .clamp(SOL / 20, 10 * SOL)
+            .min(w.crossing_buy_amount(&mint, &buyer.pubkey()));
         w.buy(&buyer, &mint, step).ok();
         rounds += 1;
         assert!(rounds < 50);
@@ -480,7 +504,7 @@ fn launch_pools_share_their_cuts_and_ordinary_pools_pay_the_dex_rate() {
     let ev: Swapped = tx.event();
     assert_eq!(
         ev.protocol_fee,
-        protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap()
+        protocol_share(creator_fee, policy::LAUNCH_PROTOCOL_SHARE_BPS).unwrap() + lp_fee
     );
     assert_eq!(
         w.launch_pool(&mint).protocol_fees_quote,

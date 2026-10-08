@@ -211,8 +211,12 @@ pub fn process_graduate<'info>(ctx: Context<'info, Graduate<'info>>) -> Result<(
         LaunchError::WrongHolding
     );
     require!(pool.curve, LaunchError::AlreadyGraduated);
+    // Ready when the pool has raised the threshold, or when its curve has sold out: a launch
+    // pool's LP fee is Bordrless's and does not compound, so the reserve reaches the threshold
+    // exactly as the last curve token sells, and a hook's cut on buys (whose share leaves the
+    // reserve) can keep it just below for good.
     require!(
-        pool.quote_reserve >= ctx.accounts.launch.graduation_quote,
+        pool.quote_reserve >= ctx.accounts.launch.graduation_quote || pool.base_reserve == 0,
         LaunchError::NotReady
     );
     let kit = kit_accounts(ctx.accounts)?;

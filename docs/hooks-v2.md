@@ -247,8 +247,9 @@ from `before_burn`; nothing else.
 ### 3.1 Swaps
 
 The protocol fee is always taken in the pool's quote token. On a buy (quote in) it comes from what
-reaches the vault, as in v1; on a sell (base in) it comes from the curve's output. The LP fee stays
-on the input side in both directions. `Pool.protocol_fees_base` no longer exists.
+reaches the vault, as in v1; on a sell (base in) it comes from the curve's output. On an ordinary
+pool the LP fee stays on the input side in both directions and compounds into the reserves; on a
+launch pool it is Bordrless's, in SOL (below). `Pool.protocol_fees_base` no longer exists.
 
 Two protocol fee models (`Pool.fee_model`, fixed at creation; 2026-10-07, the product owner's
 decision: "we earn 25% of their total fees, not 0.25%"). The DEX config holds `protocol_fee_bps`
@@ -265,6 +266,26 @@ held - delivered` on the output side (`held` is the share a sell held back, belo
 are valued at the swap's own price (`quote_value`: `ceil(cut * quote_leg / base_leg)` over the
 quote and base the curve exchanged). Burns and the LP fee are not fees anyone collects, so they
 are not shared. **A launch whose rules collect nothing pays Bordrless nothing: there is no floor.**
+
+**The LP fee of a launch pool is Bordrless's** (upgrade of 2026-10-08, the product owner's
+decision: the 0.3% "is meant to be taken by protocol", paid to the treasury in SOL). A launch pool's
+liquidity is locked for ever (the first LP is minted to the launch, which cannot spend it), so a fee
+compounding into it paid nobody. Under the share model (`swap_amounts_shared` in `bordrless-core`)
+the LP fee, at the rate the pool hook sets (0.3%, or the sniper fee in the first 30 seconds), is
+taken in the quote (SOL) and added to the protocol fee: on a buy from what reached the vault,
+before the curve; on a sell from the curve's output, before `after_swap` is told the rest. Nothing
+compounds: a buy's reserve gains `received - lp_fee - share`, a sell's input reserve gains all of
+`received`. `Swapped` reports `lp_fee: 0` and `protocol_fee` = the LP fee plus the share;
+`lp_fee_bps` is still the rate charged. Ordinary pools (`FEE_MODEL_FLAT`) are unchanged.
+
+The fees accrue as bridged SOL in the pool's quote vault (`protocol_fees_quote`). **Anyone** may
+send `collect_protocol_fees_sol` for a pool quoted in bridged SOL (`NotBridgedSol` otherwise): the
+pool signs the bridge's `unwrap_sol` of `protocol_fees_quote`, the lamports land in the pool
+account, and the DEX moves them to the config's `fee_collector` (`address`-checked, `WrongHolding`
+otherwise), a wallet. The reserves, the pool's own lamports and every other balance are unchanged;
+`ProtocolFeesCollected` is emitted. The admin-only `collect_protocol_fees` (into the collector's
+holding of the quote) still works for every pool. The backend's worker sends the SOL collection
+every 10 minutes for pools holding at least 0.01 SOL of fees (`apps/server/src/keeper/fees.ts`).
 `create_pool` writes `fee_model`, `protocol_fee_bps` (0 under the share model) and
 `protocol_share_bps` (0 under the flat model) into the pool, which keeps them for life, so a launch
 pool shares its cuts on its curve and after graduation. Quotes, the indexer and the site read the
@@ -285,9 +306,10 @@ A buy (quote in, base out), in this order:
    (the input mint must have been passed writable, else `MintNotWritable`).
 2. The rest (`received`) reaches the quote vault; `cuts_in` is measured.
    `lp_fee = fee_amount(received, lp_fee_bps)`. Flat model: `protocol_fee = fee_amount(received,
-   protocol_fee_bps)`. Share model: `protocol_in = protocol_share(cuts_in, share_bps)`. The curve
-   runs on `received - lp_fee - protocol_in`; the protocol fee is kept apart from the reserves (the
-   trader pays it).
+   protocol_fee_bps)`. Share model: `protocol_in = lp_fee + protocol_share(cuts_in, share_bps)` (the
+   LP fee is Bordrless's). The curve runs on `received - lp_fee - protocol_share(cuts_in)`; the
+   protocol fee is kept apart from the reserves (the trader pays it). Only the flat model's LP fee
+   enters the reserve.
 3. `after_swap` answer, taken from the curve's output: each delta from the output vault to the
    named holding (the pool signs); then the burn from the output vault (the pool signs; the output
    mint writable, else `MintNotWritable`).
@@ -301,10 +323,11 @@ A sell (base in, quote out), in this order:
 
 1. `before_swap` answer, taken from the input, as above (for launch pools: the burn).
 2. The rest (`received`) reaches the base vault; `cuts_in` is measured.
-   `lp_fee = fee_amount(received, lp_fee_bps)`; the curve runs on `received - lp_fee` and gives
-   `out_gross` in quote.
+   Flat model: `lp_fee = fee_amount(received, lp_fee_bps)`; the curve runs on `received - lp_fee`.
+   Share model: the curve runs on all of `received`. It gives `out_gross` in quote.
 3. Flat model: `protocol_fee = fee_amount(out_gross, protocol_fee_bps)`. Share model:
-   `protocol_in = protocol_share(quote_value(cuts_in, out_gross, net_in), share_bps)` (0 on a kit
+   `protocol_in = fee_amount(out_gross, lp_fee_bps) + protocol_share(quote_value(cuts_in,
+   out_gross, net_in), share_bps)` (the LP fee, Bordrless's, plus a share that is 0 on a kit
    launch). It stays in the quote vault, apart from the reserves. `after_swap` is told
    `amount_out = out_gross - protocol_in`.
 4. `after_swap` answer, taken from that output, as above (for launch pools: the creator and holder
@@ -773,6 +796,12 @@ collect nothing. The ordinary flat 1% is for pools anyone opens on the DEX:
   `Launch`.
 
 ### 5.5 Graduation
+
+A launch is ready when its pool's quote reserve reaches `graduation_quote` **or its curve has sold
+out** (`base_reserve == 0`). Since the LP fee no longer compounds, the reserve reaches the threshold
+only as the last curve tokens are bought, and a creator's own hook cutting buys could keep it just
+short for ever; the sell-out rule closes that. The reserve's top-up is `min(reserve tokens, what
+the price needs)`, as before.
 
 As v1, plus, for a launch with a kit (`launch.modules != 0`): the accounts `kit_program`,
 `kit_config` (mut, `address = launch.kit_config`), `reward_vault` (address-checked when rewards are

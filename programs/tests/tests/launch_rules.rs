@@ -491,13 +491,14 @@ fn the_pool_hook_takes_each_side_at_its_own_rates() {
     assert_eq!(q.holder_fee, fee_amount(SOL, 100).unwrap());
     tally(&q);
     assert_eq!(balance(&w, &l.holder_vault), q.holder_fee);
-    // A sell: the burn from the input at the sell rate; the creator and holder fees from the
-    // curve's output (a kit token's input side cuts nothing, so the DEX takes nothing off it),
-    // the holder fee at the sell rate; Bordrless's quarter of the two held back from the delivery.
+    // A sell: the burn from the input at the sell rate; the LP fee (Bordrless's) from the curve's
+    // output, then the creator and holder fees from the rest (a kit token's input side cuts
+    // nothing), the holder fee at the sell rate; Bordrless's quarter of the two held back from the
+    // delivery.
     let tokens = w.env.holding(&mint, &a.pubkey()) / 2;
     let (q, _) = checked_swap(&mut w, &mint, &a, false, tokens);
     assert_eq!(q.burn, tokens / 100);
-    let told = q.amount_out.unwrap();
+    let told = q.amount_out.unwrap() - q.lp_fee;
     assert_eq!(
         (q.creator_fee, q.holder_fee),
         (
@@ -795,7 +796,7 @@ fn graduation_with_every_rule() {
     owners.push(last.pubkey());
     let p = w.launch_pool(&mint);
     let l = w.launch(&mint);
-    assert!(p.curve && p.quote_reserve >= l.graduation_quote);
+    assert!(p.curve && (p.quote_reserve >= l.graduation_quote || p.base_reserve == 0));
     check_kit(&w.env, &k, &owners);
     let kit_before = w.env.kit_config(&mint);
 
@@ -1220,14 +1221,14 @@ fn protocol_fees_from_a_kit_token_pool_go_to_the_collector_of_the_day() {
     let deployer = w.env.deployer.insecure_clone();
     let admin = deployer.pubkey();
     let traders: Vec<Keypair> = (0..3).map(|_| trader(&mut w, &mint, 20 * SOL)).collect();
-    // Buys and sells: the protocol fee is in SOL on both sides, a share of the creator and holder
-    // fees, from a buy's input and a sell's output.
+    // Buys and sells: the protocol fee is in SOL on both sides, the LP fee and a share of the
+    // creator and holder fees, from a buy's input and a sell's output.
     let trade = |w: &mut World, t: &Keypair, lamports: u64| -> u64 {
         let (q, _) = checked_swap(w, &mint, t, true, lamports);
         let held = w.env.holding(&mint, &t.pubkey());
         let (s, _) = checked_swap(w, &mint, t, false, held / 2);
         assert!(s.protocol_fee > 0);
-        q.protocol_fee + s.protocol_fee
+        q.lp_fee + q.protocol_fee + s.lp_fee + s.protocol_fee
     };
     let mut fees = 0;
     for (i, t) in traders.iter().enumerate() {

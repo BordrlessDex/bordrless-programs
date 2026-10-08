@@ -367,6 +367,13 @@ pub fn protocol_share(value: u64, share_bps: u16) -> Option<u64> {
 /// the curve's output before the `after_swap` hook is told. `SwapAmounts.protocol_fee` is this
 /// input-side share only; the output side's share is [`output_share`], known after the hook has
 /// answered.
+///
+/// The LP fee is Bordrless's too under the share model, in the quote (the launch's LP tokens are
+/// locked for ever, so a fee left in the pool would go to nobody): on a buy it leaves what reached
+/// the vault before the curve, on a sell it leaves the curve's output (`fee_amount(out_gross,
+/// lp_fee_bps)`), and the base a sell brings goes into the curve whole. Its rate is the pool's, or
+/// the pool hook's override (a launch's sniper fee). It is in `protocol_fee`, and `lp_fee` is 0:
+/// nothing stays in the pool for its LPs.
 pub fn swap_amounts_shared(
     buy: bool,
     received: u64,
@@ -375,55 +382,66 @@ pub fn swap_amounts_shared(
     cuts_in: u64,
     reserves: &Reserves,
 ) -> Result<SwapAmounts, SwapFailure> {
-    let lp_fee = fee_amount(received, lp_fee_bps).ok_or(SwapFailure::FeesExceedInput)?;
-    let protocol_in = if buy {
-        protocol_share(cuts_in, share_bps).ok_or(SwapFailure::FeesExceedInput)?
-    } else {
-        0
-    };
-    let net_in = received
-        .checked_sub(lp_fee)
-        .and_then(|rest| rest.checked_sub(protocol_in))
-        .filter(|net| *net > 0)
-        .ok_or(SwapFailure::FeesExceedInput)?;
     let r = reserves;
-    let out_gross = if buy {
-        swap_out(
+    if buy {
+        // The quote that reached the vault: the LP fee and the share of the input's cuts leave it
+        // for Bordrless, the rest goes into the curve and the reserve.
+        let lp_fee = fee_amount(received, lp_fee_bps).ok_or(SwapFailure::FeesExceedInput)?;
+        let share = protocol_share(cuts_in, share_bps).ok_or(SwapFailure::FeesExceedInput)?;
+        let net_in = received
+            .checked_sub(lp_fee)
+            .and_then(|rest| rest.checked_sub(share))
+            .filter(|net| *net > 0)
+            .ok_or(SwapFailure::FeesExceedInput)?;
+        let out_gross = swap_out(
             net_in,
             r.quote_reserve,
             r.virtual_quote,
             r.base_reserve,
             r.virtual_base,
         )
+        .ok_or(SwapFailure::InsufficientLiquidity)?;
+        Ok(SwapAmounts {
+            lp_fee: 0,
+            protocol_fee: lp_fee + share,
+            net_in,
+            out_gross,
+            amount_out: out_gross,
+            to_reserve_in: net_in,
+        })
     } else {
-        swap_out(
+        // The base that reached the vault goes into the curve whole; the LP fee and the share of
+        // the input's cuts (valued at the swap's own price) leave the quote it gives.
+        let net_in = Some(received)
+            .filter(|net| *net > 0)
+            .ok_or(SwapFailure::FeesExceedInput)?;
+        let out_gross = swap_out(
             net_in,
             r.base_reserve,
             r.virtual_base,
             r.quote_reserve,
             r.virtual_quote,
         )
-    }
-    .ok_or(SwapFailure::InsufficientLiquidity)?;
-    let (protocol_fee, amount_out) = if buy {
-        (protocol_in, out_gross)
-    } else {
+        .ok_or(SwapFailure::InsufficientLiquidity)?;
+        let lp_fee = fee_amount(out_gross, lp_fee_bps).ok_or(SwapFailure::FeeExceedsOutput)?;
         let value = quote_value(cuts_in, out_gross, net_in).ok_or(SwapFailure::FeeExceedsOutput)?;
-        let fee = protocol_share(value, share_bps).ok_or(SwapFailure::FeeExceedsOutput)?;
-        let rest = out_gross
+        let share = protocol_share(value, share_bps).ok_or(SwapFailure::FeeExceedsOutput)?;
+        let fee = lp_fee
+            .checked_add(share)
+            .ok_or(SwapFailure::FeeExceedsOutput)?;
+        let amount_out = out_gross
             .checked_sub(fee)
             .filter(|rest| *rest > 0)
             .ok_or(SwapFailure::FeeExceedsOutput)?;
-        (fee, rest)
-    };
-    Ok(SwapAmounts {
-        lp_fee,
-        protocol_fee,
-        net_in,
-        out_gross,
-        amount_out,
-        to_reserve_in: received - protocol_in,
-    })
+        Ok(SwapAmounts {
+            lp_fee: 0,
+            protocol_fee: fee,
+            net_in,
+            out_gross,
+            amount_out,
+            to_reserve_in: received,
+        })
+    }
 }
 
 /// The output side's share under the share model: `share_bps` of `cuts_out`, what the hooks cut
@@ -1124,48 +1142,59 @@ mod tests {
     }
 
     #[test]
-    fn the_share_model_takes_a_quarter_of_the_cuts_and_nothing_without_them() {
+    fn the_share_model_takes_the_lp_fee_and_a_quarter_of_the_cuts_in_the_quote() {
         let r = opening();
         let share = LAUNCH_PROTOCOL_SHARE_BPS;
-        // A buy of 1 SOL with a 1% creator fee: the hook cut 10,000,000 lamports from the input,
-        // Bordrless takes 25% of that, 0.25% of the trade, before the curve.
+        // A buy of 1 SOL with a 1% creator fee: the hook cut 10,000,000 lamports from the input;
+        // Bordrless takes 25% of that (0.25% of the trade) and the LP fee on what reached the
+        // vault, both before the curve, and only the rest enters the reserve: nothing compounds.
         let creator_fee = fee_amount(1_000_000_000, 100).unwrap();
         let received = 1_000_000_000 - creator_fee;
         let a = swap_amounts_shared(true, received, LP_FEE_BPS, share, creator_fee, &r).unwrap();
-        assert_eq!(a.protocol_fee, 2_500_000);
-        assert_eq!(a.protocol_fee, 1_000_000_000 / 400);
         let lp_fee = fee_amount(received, LP_FEE_BPS).unwrap();
+        assert_eq!(a.protocol_fee, 2_500_000 + lp_fee);
+        assert_eq!(a.lp_fee, 0);
         assert_eq!(a.net_in, received - lp_fee - 2_500_000);
-        assert_eq!(a.to_reserve_in, received - 2_500_000);
+        assert_eq!(a.to_reserve_in, a.net_in);
         assert_eq!(a.amount_out, a.out_gross);
-        // No cuts (a Plain launch with creator fee 0): no protocol fee at all.
+        // No cuts (a Plain launch with creator fee 0): the LP fee alone, still Bordrless's.
         let b = swap_amounts_shared(true, 1_000_000_000, LP_FEE_BPS, share, 0, &r).unwrap();
-        assert_eq!((b.protocol_fee, b.to_reserve_in), (0, 1_000_000_000));
+        let lp_b = fee_amount(1_000_000_000, LP_FEE_BPS).unwrap();
+        assert_eq!((b.protocol_fee, b.lp_fee), (lp_b, 0));
         assert_eq!(
-            b.net_in,
-            1_000_000_000 - fee_amount(1_000_000_000, LP_FEE_BPS).unwrap()
+            (b.net_in, b.to_reserve_in),
+            (1_000_000_000 - lp_b, 1_000_000_000 - lp_b)
         );
-        // A sell whose input side cut nothing (the launch hook only burns there): the hook is told
-        // the whole curve output; the output side's share comes from what the hook then cuts.
+        // A sell whose input side cut nothing (the launch hook only burns there): the tokens go
+        // into the curve whole, the LP fee leaves its output in the quote, and the hook is told
+        // the rest; the output side's share comes from what the hook then cuts.
         let traded = Reserves {
             base_reserve: r.base_reserve - b.out_gross,
             quote_reserve: b.to_reserve_in,
             ..r
         };
         let s = swap_amounts_shared(false, b.out_gross / 2, LP_FEE_BPS, share, 0, &traded).unwrap();
-        assert_eq!((s.protocol_fee, s.amount_out), (0, s.out_gross));
+        assert_eq!(
+            (s.net_in, s.to_reserve_in, s.lp_fee),
+            (b.out_gross / 2, b.out_gross / 2, 0)
+        );
+        let lp_s = fee_amount(s.out_gross, LP_FEE_BPS).unwrap();
+        assert_eq!((s.protocol_fee, s.amount_out), (lp_s, s.out_gross - lp_s));
         let (c, h) = creator_and_holder_fees(s.amount_out, 100, 100, 1, 1);
         let p_out = output_share(false, share, c + h, s.net_in, s.out_gross).unwrap();
         assert_eq!(p_out, fee_amount(c + h, share).unwrap());
         assert!(p_out * 4 >= c + h && p_out * 4 < c + h + 4);
         // A base-side cut (a token hook of the creator's own) is valued at the swap's price,
-        // rounded up: on a sell its share leaves the output before the hook is told; on a buy it
-        // is set aside after the swap.
+        // rounded up: on a sell its share leaves the output, with the LP fee, before the hook is
+        // told; on a buy it is set aside after the swap.
         let cut_in = 1_000_000u64;
         let s2 = swap_amounts_shared(false, b.out_gross / 2, LP_FEE_BPS, share, cut_in, &traded)
             .unwrap();
         let value = quote_value(cut_in, s2.out_gross, s2.net_in).unwrap();
-        assert_eq!(s2.protocol_fee, fee_amount(value, share).unwrap());
+        assert_eq!(
+            s2.protocol_fee,
+            fee_amount(value, share).unwrap() + fee_amount(s2.out_gross, LP_FEE_BPS).unwrap()
+        );
         assert_eq!(s2.amount_out, s2.out_gross - s2.protocol_fee);
         assert_eq!(
             output_share(true, share, cut_in, a.net_in, a.out_gross).unwrap(),

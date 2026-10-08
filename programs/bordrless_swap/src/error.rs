@@ -79,6 +79,8 @@ pub enum SwapError {
     FeeExceedsOutput,
     #[msg("the hook signer is not this program's signer for the pool's hook program")]
     BadHookSigner,
+    #[msg("the pool's quote is not bridged SOL")]
+    NotBridgedSol,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.

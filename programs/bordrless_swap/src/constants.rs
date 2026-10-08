@@ -38,3 +38,34 @@ pub const LP_SYMBOL: &str = "BLP";
 /// The upgradeable loader.
 pub const BPF_LOADER_UPGRADEABLE_ID: anchor_lang::prelude::Pubkey =
     anchor_lang::prelude::Pubkey::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111");
+
+/// The bridge (`bordrless_bridge`): `collect_protocol_fees_sol` calls its `unwrap_sol`. Constants
+/// rather than a crate dependency; the unit tests check each against the bridge's own.
+pub const BRIDGE_ID: anchor_lang::prelude::Pubkey =
+    anchor_lang::prelude::Pubkey::from_str_const("CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7");
+/// Bridged SOL: the bridge's `["wrapped", NATIVE_MINT]`, the quote of every launch pool.
+pub const BRIDGED_SOL_MINT: anchor_lang::prelude::Pubkey =
+    anchor_lang::prelude::Pubkey::from_str_const("A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i");
+/// The bridge's `unwrap_sol` instruction discriminator.
+pub const UNWRAP_SOL_DISCRIMINATOR: [u8; 8] = [99, 40, 14, 105, 45, 107, 172, 201];
+
+#[cfg(test)]
+mod bridge_tests {
+    use anchor_lang::Discriminator;
+
+    #[test]
+    fn the_bridge_constants_are_the_bridges() {
+        let native = anchor_lang::prelude::Pubkey::from_str_const(
+            "So11111111111111111111111111111111111111112",
+        );
+        assert_eq!(super::BRIDGE_ID, bordrless_bridge::ID);
+        assert_eq!(
+            super::BRIDGED_SOL_MINT,
+            bordrless_bridge::client::wrapped_mint_address(&native)
+        );
+        assert_eq!(
+            super::UNWRAP_SOL_DISCRIMINATOR,
+            bordrless_bridge::instruction::UnwrapSol::DISCRIMINATOR
+        );
+    }
+}

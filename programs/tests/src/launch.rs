@@ -130,11 +130,12 @@ pub struct LaunchSwap {
     pub holder_fee_on: bool,
     /// What reached the input vault.
     pub received: u64,
-    /// The LP fee, in the input token.
+    /// The LP fee, Bordrless's on a launch pool, always in the quote: on a buy from what reached
+    /// the vault, before the curve; on a sell from the curve's output, before the hook is told.
     pub lp_fee: u64,
     /// Bordrless's share of the creator and holder fees (`LAUNCH_PROTOCOL_SHARE_BPS` of them,
     /// rounded up), always in the quote: on a buy from what reached the vault, before the curve;
-    /// on a sell held back from the delivery.
+    /// on a sell held back from the delivery. Bordrless's whole take is this plus `lp_fee`.
     pub protocol_fee: u64,
     /// What went into the curve (negative when the fees take more than what arrived).
     pub net_in: i128,
@@ -147,10 +148,12 @@ pub struct LaunchSwap {
 }
 
 impl LaunchSwap {
-    /// What enters the input reserve: what reached the vault, less a buy's protocol fee.
+    /// What enters the input reserve: on a buy what goes into the curve (what reached the vault,
+    /// less the LP fee and the share, both Bordrless's; 0 when they take it all), on a sell what
+    /// reached the vault.
     pub fn to_reserve_in(&self, buy: bool) -> u64 {
         if buy {
-            self.received - self.protocol_fee
+            u64::try_from(self.net_in.max(0)).unwrap_or(u64::MAX)
         } else {
             self.received
         }
@@ -179,9 +182,10 @@ pub fn curve_output(r: &Reserves, buy: bool, net_in: u64) -> u128 {
 
 /// A swap of `amount_in` on a launch pool with `reserves` (§3.1, §5.4), under the share model: a
 /// buy pays the creator and holder fees from its input, Bordrless's share of them and the LP fee
-/// on what reached the vault, the curve, then the burn from the output; a sell pays the burn from
-/// its input, the LP fee on what reached the vault, the curve, then the creator and holder fees
-/// from the output and Bordrless's share of them held back from the delivery. The kit takes no
+/// (Bordrless's too) on what reached the vault, the curve, then the burn from the output; a sell
+/// pays the burn from its input, the curve on all the rest, the LP fee from the curve's output,
+/// then the creator and holder fees from what is left and Bordrless's share of them held back from
+/// the delivery. The kit takes no
 /// cut of its own, so the hooks' cuts are exactly those fees. `eligible` is the kit's count before
 /// the trade; a sell's input leaves it before `after_swap` reads it (every seller is a holder).
 #[allow(clippy::too_many_arguments)]
@@ -208,7 +212,12 @@ pub fn quote_launch_swap(
         rates.holder_fee_sell_bps
     };
     let holder_fee_on = side_bps > 0 && eligible_at_fees >= min_eligible;
-    let lp_fee = fee_amount(received, lp_fee_bps).expect("a fee below 100%");
+    // A buy's LP fee is on the quote that reached the vault; a sell's on the curve's output.
+    let buy_lp_fee = if buy {
+        fee_amount(received, lp_fee_bps).expect("a fee below 100%")
+    } else {
+        0
+    };
     // A buy's cuts are the hook's quote fees; a sell's input side cuts nothing (the burn is not
     // a cut), so its share is taken from the output.
     let input_protocol_fee = if buy {
@@ -217,14 +226,14 @@ pub fn quote_launch_swap(
     } else {
         0
     };
-    let net_in = i128::from(received) - i128::from(lp_fee) - i128::from(input_protocol_fee);
+    let net_in = i128::from(received) - i128::from(buy_lp_fee) - i128::from(input_protocol_fee);
     let failed = |failure: &'static str, protocol_fee: u64| LaunchSwap {
         creator_fee: before.creator_fee,
         holder_fee: before.holder_fee,
         burn: before.burn,
         holder_fee_on,
         received,
-        lp_fee,
+        lp_fee: buy_lp_fee,
         protocol_fee,
         net_in,
         amount_out: None,
@@ -251,7 +260,7 @@ pub fn quote_launch_swap(
             burn: after.burn,
             holder_fee_on,
             received,
-            lp_fee,
+            lp_fee: buy_lp_fee,
             protocol_fee: input_protocol_fee,
             net_in,
             amount_out: Some(out),
@@ -259,14 +268,24 @@ pub fn quote_launch_swap(
             failure: None,
         };
     }
-    let after = launch_after_swap(false, out, rates, eligible_at_fees, min_eligible);
+    // A sell: the LP fee leaves the curve's output before the hook is told the rest.
+    let lp_fee = fee_amount(out, lp_fee_bps).expect("a fee below 100%");
+    if lp_fee >= out {
+        return LaunchSwap {
+            lp_fee,
+            ..failed("no_output", 0)
+        };
+    }
+    let told = out - lp_fee;
+    let after = launch_after_swap(false, told, rates, eligible_at_fees, min_eligible);
     let protocol_fee = protocol_share(after.creator_fee + after.holder_fee, protocol_share_bps)
         .expect("a share below 100%");
-    if after.creator_fee + after.holder_fee + protocol_fee >= out {
+    if after.creator_fee + after.holder_fee + protocol_fee >= told {
         // The fees were computed before the share took the rest: they are carried.
         return LaunchSwap {
             creator_fee: after.creator_fee,
             holder_fee: after.holder_fee,
+            lp_fee,
             ..failed("no_output", protocol_fee)
         };
     }
@@ -280,7 +299,7 @@ pub fn quote_launch_swap(
         protocol_fee,
         net_in,
         amount_out: Some(out),
-        delivered: Some(out - after.creator_fee - after.holder_fee - protocol_fee),
+        delivered: Some(told - after.creator_fee - after.holder_fee - protocol_fee),
         failure: None,
     }
 }
@@ -468,8 +487,9 @@ pub fn expect_swapped(ev: &Swapped, q: &LaunchSwap, l: &Launch, buy: bool, lp_fe
         (
             u8::from(buy),
             q.received,
-            q.lp_fee,
-            q.protocol_fee,
+            // A launch pool's LP fee is Bordrless's: the event reports it in `protocol_fee`.
+            0,
+            q.lp_fee + q.protocol_fee,
             lp_fee_bps,
             q.amount_out.unwrap(),
             q.delivered.unwrap()
@@ -654,27 +674,30 @@ impl World {
         }
     }
 
-    /// The buy by `buyer` (whose holdings exist, with bridged SOL) that raises the rest of the
-    /// curve of `mint`, within max wallet: the smallest input after which the pool can graduate.
+    /// The buy by `buyer` (whose holdings exist, with bridged SOL) after which the launch of `mint`
+    /// can graduate, within max wallet: the smallest input that raises the rest of the threshold,
+    /// or, when the curve sells out first (a launch pool's LP fee does not compound, so the
+    /// reserve meets the threshold as the last curve token sells), the buy that takes what the
+    /// curve has left.
     pub fn crossing_buy_amount(&self, mint: &Pubkey, buyer: &Pubkey) -> u64 {
         let l = self.launch(mint);
         let p = self.launch_pool(mint);
         let missing = l.graduation_quote.saturating_sub(p.quote_reserve);
-        let (mut lo, mut hi) = (0u64, 1u64);
-        while self.launch_quote(mint, buyer, true, hi).to_reserve_in(true) < missing {
-            lo = hi;
-            hi *= 2;
+        let fill = self.max_buy_for(mint, buyer);
+        let reaches = |amount: u64| {
+            let q = self.launch_quote(mint, buyer, true, amount);
+            q.failure.is_none() && q.to_reserve_in(true) >= missing
+        };
+        if !reaches(fill) {
+            return fill;
         }
+        let (mut lo, mut hi) = (0u64, fill);
         while hi - lo > 1 {
             let mid = lo + (hi - lo) / 2;
-            if self
-                .launch_quote(mint, buyer, true, mid)
-                .to_reserve_in(true)
-                < missing
-            {
-                lo = mid;
-            } else {
+            if reaches(mid) {
                 hi = mid;
+            } else {
+                lo = mid;
             }
         }
         hi
@@ -726,8 +749,16 @@ impl Market for LaunchMarket {
         if amount < self.min_buy.max(1) {
             return None;
         }
-        // Never more than the pool can fill.
+        // Never more than the pool can fill: a buy too large for what the curve has left buys what
+        // remains instead (the site offers it), which sells the curve out and graduates it.
         let mut q = w.launch_quote(&k.mint, &who, true, amount);
+        if q.failure == Some("insufficient_liquidity") {
+            let rest = w.max_buy_for(&k.mint, &who).min(have);
+            if rest >= self.min_buy.max(1) {
+                amount = rest;
+                q = w.launch_quote(&k.mint, &who, true, amount);
+            }
+        }
         while q.failure == Some("insufficient_liquidity") {
             amount /= 2;
             if amount < self.min_buy.max(1) {
@@ -741,7 +772,10 @@ impl Market for LaunchMarket {
         let l = w.launch(&k.mint);
         let p = w.launch_pool(&k.mint);
         let mut ixs = vec![w.launch_swap_ix(&who, &k.mint, 1, amount, 0)];
-        let graduates = p.curve && p.quote_reserve + q.to_reserve_in(true) >= l.graduation_quote;
+        // Ready once the reserve meets the threshold or the curve sells out.
+        let graduates = p.curve
+            && (p.quote_reserve + q.to_reserve_in(true) >= l.graduation_quote
+                || q.amount_out == Some(p.base_reserve));
         if graduates {
             ixs.push(w.graduate_ix(&who, &k.mint));
         }

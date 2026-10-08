@@ -86,7 +86,9 @@ fn a_launch_with_holder_rewards_burns_and_the_early_lock_walks_through_graduatio
     // first minute locked for an hour.
     let walk = Walk {
         seed: 41,
-        steps: 400,
+        // 800: the LP and sniper fees go to Bordrless rather than into the pool, so the curve
+        // fills on real buys alone and takes longer to sell out.
+        steps: 800,
         holders: 8,
         holder_sol: 20 * SOL,
         buy_max: SOL,

@@ -792,6 +792,7 @@ name = "bordrless-swap"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "bordrless-bridge",
  "bordrless-core",
  "bordrless-hook",
  "bordrless-token",

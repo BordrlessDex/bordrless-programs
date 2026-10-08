@@ -71,10 +71,11 @@ struct Expected {
 
 /// A swap of `amount_in` on a pool with `r` (§3.1, §5.4) under the share model. A buy: creator
 /// and holder fees from the input; the rest reaches the vault; the LP fee on it and Bordrless's
-/// share of the two fees (`share_bps` of them, rounded up) off it; the curve; the burn from the
-/// output. A sell: the burn from the input; the rest reaches the vault; the LP fee on it; the
-/// curve; creator and holder fees from the output, with the holders counted once the seller's
-/// tokens are out; Bordrless's share of the two fees held back from the delivery.
+/// share of the two fees (`share_bps` of them, rounded up) off it, both Bordrless's; the curve;
+/// the burn from the output. A sell: the burn from the input; the rest reaches the vault and goes
+/// into the curve whole; the LP fee (Bordrless's) on the curve's output; creator and holder fees
+/// from what is left, with the holders counted once the seller's tokens are out; Bordrless's share
+/// of the two fees held back from the delivery.
 #[allow(clippy::too_many_arguments)]
 fn oracle_swap(
     r: &Reserves,
@@ -135,8 +136,7 @@ fn oracle_swap(
     }
     e.burn = oracle_burn(amount_in, rates.burn_sell_bps);
     e.received = amount_in - e.burn;
-    e.lp_fee = fee_up(e.received, lp_bps) as u64;
-    let net = i128::from(e.received) - i128::from(e.lp_fee);
+    let net = i128::from(e.received);
     if e.received == 0 || net <= 0 {
         e.failure = Some("fees_exceed_input");
         return e;
@@ -151,9 +151,15 @@ fn oracle_swap(
         return e;
     }
     let out = out as u64;
+    e.lp_fee = fee_up(out, lp_bps) as u64;
+    if e.lp_fee >= out {
+        e.failure = Some("no_output");
+        return e;
+    }
+    let told = out - e.lp_fee;
     let holders = eligible.saturating_sub(amount_in) >= min_eligible;
     let (c, h) = oracle_fees(
-        out,
+        told,
         rates.creator_fee_bps,
         rates.holder_fee_sell_bps,
         holders,
@@ -161,12 +167,12 @@ fn oracle_swap(
     e.creator_fee = c;
     e.holder_fee = h;
     e.protocol_fee = fee_up(c + h, share_bps) as u64;
-    if u128::from(c) + u128::from(h) + u128::from(e.protocol_fee) >= u128::from(out) {
+    if u128::from(c) + u128::from(h) + u128::from(e.protocol_fee) >= u128::from(told) {
         e.failure = Some("no_output");
         return e;
     }
     e.out_gross = Some(out);
-    e.delivered = Some(out - c - h - e.protocol_fee);
+    e.delivered = Some(told - c - h - e.protocol_fee);
     e
 }
 
@@ -422,8 +428,9 @@ fn launch_swaps_on_chain_pay_what_the_oracle_says() {
                 e.holder_fee,
                 e.burn,
                 e.received,
-                e.lp_fee,
-                e.protocol_fee,
+                // A launch pool's LP fee is Bordrless's: the event reports it in `protocol_fee`.
+                0,
+                e.lp_fee + e.protocol_fee,
                 e.out_gross,
                 e.delivered,
             ),

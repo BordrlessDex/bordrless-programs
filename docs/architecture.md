@@ -128,7 +128,9 @@ Constant-product pools (`x · y = k`) between two BTS mints, with:
 - **Virtual reserves** `virtual_base`, `virtual_quote`: offsets added to the real reserves when
   pricing, which is how a launch pool is a bonding curve. A swap can never pay out more than the
   real reserve.
-- **Fees** on the input amount: an LP fee (`lp_fee_bps`, stays in the pool and raises `k`) and a
+- **Fees** on the input amount: an LP fee (`lp_fee_bps`; on an ordinary pool it stays in the pool
+  and raises `k`, on a launch pool it is Bordrless's, in SOL, paid out by the permissionless
+  `collect_protocol_fees_sol`) and a
   protocol fee (`protocol_fee_bps`, snapshotted from the config at creation, accrued separately and
   collected by the admin; the config holds two rates: 1% for ordinary pools, 0.25% for launch
   pools, the curves a hook program creates). A hook may override the LP fee per swap.

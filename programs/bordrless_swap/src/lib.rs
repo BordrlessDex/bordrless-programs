@@ -83,6 +83,12 @@ pub mod bordrless_swap {
         pool::process_collect_protocol_fees(ctx, quote_hook_accounts)
     }
 
+    /// Anyone: unwraps the accrued protocol fees of a pool quoted in bridged SOL and pays them to
+    /// the fee collector the config names, as SOL. Nothing else can receive them.
+    pub fn collect_protocol_fees_sol(ctx: Context<CollectProtocolFeesSol>) -> Result<()> {
+        pool::process_collect_protocol_fees_sol(ctx)
+    }
+
     /// Adds liquidity at the pool's ratio and mints LP.
     pub fn add_liquidity<'info>(
         ctx: Context<'info, Liquidity<'info>>,

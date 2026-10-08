@@ -26,5 +26,8 @@ bordrless-core = { path = "../../crates/bordrless-core" }
 bordrless-hook = { path = "../../crates/bordrless-hook" }
 bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
 
+[dev-dependencies]
+bordrless-bridge = { path = "../bordrless_bridge", features = ["no-entrypoint"] }
+
 [lints]
 workspace = true

@@ -363,6 +363,39 @@ pub fn finalize_curve(
     }
 }
 
+/// `collect_protocol_fees_sol`: anyone (`cranker`) unwraps a pool's accrued protocol fees (the pool's
+/// quote must be bridged SOL) and pays them to `fee_collector`, the wallet the config names, as SOL.
+pub fn collect_protocol_fees_sol(
+    cranker: Pubkey,
+    pool: Pubkey,
+    fee_collector: Pubkey,
+) -> Instruction {
+    use crate::constants::{BRIDGED_SOL_MINT, BRIDGE_ID};
+    let native = Pubkey::from_str_const("So11111111111111111111111111111111111111112");
+    let bridge = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &BRIDGE_ID).0;
+    let accounts = with_events(vec![
+        AccountMeta::new_readonly(cranker, true),
+        AccountMeta::new_readonly(config_address(), false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new(vault_address(&pool, &BRIDGED_SOL_MINT), false),
+        AccountMeta::new(fee_collector, false),
+        AccountMeta::new_readonly(BRIDGE_ID, false),
+        AccountMeta::new_readonly(bridge(&[b"config"]), false),
+        AccountMeta::new(bridge(&[b"wrapper", native.as_ref()]), false),
+        AccountMeta::new(bridge(&[b"sol-vault"]), false),
+        AccountMeta::new(BRIDGED_SOL_MINT, false),
+        AccountMeta::new_readonly(bridge(&[b"__event_authority"]), false),
+        AccountMeta::new_readonly(bordrless_token::ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+        AccountMeta::new_readonly(anchor_lang::system_program::ID, false),
+    ]);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CollectProtocolFeesSol {}.data(),
+    }
+}
+
 /// `collect_protocol_fees`: the pool's protocol fees (always in its quote token) to the holding of
 /// `fee_collector` (the config's) for the quote mint. `quote_hook` is the quote mint's token-hook
 /// slice ([`token_hook_slice`]; empty for a mint without a hook), as a swap passes it.

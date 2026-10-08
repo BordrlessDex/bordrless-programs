@@ -5,7 +5,8 @@
 //! pays the LP fee and the protocol fee; the curve runs on what is left; the `after_swap` answer's
 //! deltas, then its burn, leave the base vault (the pool signs); the rest goes to the recipient.
 //!
-//! A sell (base in, quote out): the input as for a buy; the LP fee on `received`; the curve; the
+//! A sell (base in, quote out): the input as for a buy; the LP fee on `received` (flat model;
+//! under the share model it leaves the curve's output with the protocol fee); the curve; the
 //! protocol fee from the curve's output, kept in the quote vault (so the protocol fee is always in
 //! the quote token); the `after_swap` answer is taken from what is left of the output; the rest
 //! goes to the recipient.
@@ -18,8 +19,10 @@
 //! before the curve; a sell's input share leaves the curve's output before the hook is told; a
 //! sell's output share is held back from the delivery; a buy's output share (and a sell's share of
 //! a quote hook's own cut on the delivery) is set aside from the quote reserve after the swap.
-//! Burns and the LP fee are not cuts anyone collects, so they are not shared; a pool whose hooks
-//! cut nothing pays nothing.
+//! Burns are not cuts anyone collects, so they are not shared. Under the share model the LP fee is
+//! Bordrless's too (a launch pool's liquidity is locked for ever, so nothing compounds): taken in
+//! the quote, from a buy's `received` before the curve or a sell's curve output before the hook is
+//! told, and added to the protocol fee; a pool whose hooks cut nothing pays the LP fee alone.
 //!
 //! Amounts are measured, never assumed: `received` is what the input vault gained, and
 //! `min_amount_out` is checked against what the recipient's holding gained, so a token whose own
@@ -260,10 +263,11 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
         .and_then(|rest| rest.checked_sub(received))
         .ok_or(SwapError::MathOverflow)?;
 
-    // 3. The fees and the curve: the LP fee on the input; the protocol fee in quote. Flat model:
-    //    a rate of the input of a buy or of the curve's output of a sell. Share model: the pool's
-    //    share of `cuts_in` (a buy's quote cut before the curve; a sell's base cut valued at the
-    //    swap's price, from the curve's output before the hook is told).
+    // 3. The fees and the curve; the protocol fee is in quote. Flat model: the LP fee on the input,
+    //    and a rate of the input of a buy or of the curve's output of a sell. Share model: the LP
+    //    fee (Bordrless's, in quote: a buy's from the input, a sell's from the curve's output) plus
+    //    the pool's share of `cuts_in` (a buy's quote cut before the curve; a sell's base cut valued
+    //    at the swap's price, from the curve's output before the hook is told).
     let reserves = Reserves {
         base_reserve: pool.base_reserve,
         quote_reserve: pool.quote_reserve,
@@ -279,7 +283,8 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     }
     .map_err(swap_failure)?;
 
-    // 4. Reserves: `received` less a buy's protocol fee enters the input reserve; the curve's
+    // 4. Reserves: `to_reserve_in` enters the input reserve (`received` less a buy's protocol fee,
+    //    and less the LP fee too under the share model); the curve's
     //    whole output leaves the output reserve (the hook's cut, the sell's protocol fee and the
     //    delivery all come out of it); the protocol fee is set aside in the quote vault.
     {

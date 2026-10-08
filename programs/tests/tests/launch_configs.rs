@@ -173,11 +173,11 @@ fn bordrless_takes_a_quarter_of_what_each_preset_collects() {
             trader(&mut w, &mint, 5 * SOL),
         );
         // The first buy: nobody is eligible, so the creator fee alone is collected; Bordrless
-        // takes a quarter of it, from the input, before the curve.
+        // takes a quarter of it and the LP fee, from the input, before the curve.
         let (q, tx) = checked_swap(&mut w, &mint, &a, true, SOL / 10);
         let ev: Swapped = tx.event();
         assert_eq!(q.holder_fee, 0);
-        assert_eq!(ev.protocol_fee, share(q.creator_fee));
+        assert_eq!(ev.protocol_fee, share(q.creator_fee) + q.lp_fee);
         assert_eq!(ev.cuts_in, q.creator_fee);
         // The second buy: `a` holds above the threshold, so a buy-side holder fee is collected
         // too (not for Paid to hold, which pays holders on sells only).
@@ -185,15 +185,18 @@ fn bordrless_takes_a_quarter_of_what_each_preset_collects() {
         assert_eq!(q2.holder_fee > 0, r.holder_fee_buy_bps > 0, "{}", p.name);
         assert_eq!(
             tx2.event::<Swapped>().protocol_fee,
-            share(q2.creator_fee + q2.holder_fee)
+            share(q2.creator_fee + q2.holder_fee) + q2.lp_fee
         );
-        // A sell: the fees come from the output and Bordrless's share is held back from the
-        // delivery.
+        // A sell: the LP fee and the rules' fees come from the output, and Bordrless's share is
+        // held back from the delivery.
         let held = w.env.holding(&mint, &a.pubkey());
         let (q3, tx3) = checked_swap(&mut w, &mint, &a, false, held / 2);
         let ev3: Swapped = tx3.event();
         assert_eq!(q3.holder_fee > 0, r.holder_fee_sell_bps > 0, "{}", p.name);
-        assert_eq!(ev3.protocol_fee, share(q3.creator_fee + q3.holder_fee));
+        assert_eq!(
+            ev3.protocol_fee,
+            share(q3.creator_fee + q3.holder_fee) + q3.lp_fee
+        );
         assert_eq!(ev3.cuts_out, q3.creator_fee + q3.holder_fee);
         assert_eq!(
             ev3.delivered_out,
@@ -214,7 +217,7 @@ fn bordrless_takes_a_quarter_of_what_each_preset_collects() {
         );
     }
 
-    // A Plain launch with no creator fee collects nothing, so Bordrless gets nothing.
+    // A Plain launch with no creator fee collects nothing, so Bordrless gets the LP fee alone.
     let creator = w.wallet_with_sol(20 * SOL);
     let (free, tx) = w.create_launch(&creator, "FREE", 0, VQ);
     tx.ok();
@@ -222,18 +225,26 @@ fn bordrless_takes_a_quarter_of_what_each_preset_collects() {
     let t = trader(&mut w, &free, 5 * SOL);
     let (q, tx) = checked_swap(&mut w, &free, &t, true, SOL);
     let ev: Swapped = tx.event();
-    assert_eq!((q.creator_fee, q.holder_fee, ev.protocol_fee), (0, 0, 0));
+    assert_eq!((q.creator_fee, q.holder_fee), (0, 0));
+    assert_eq!(
+        ev.protocol_fee,
+        fee_amount(SOL, policy::LP_FEE_BPS).unwrap()
+    );
     assert!(ev.deltas_in.is_empty() && ev.cuts_in == 0 && ev.cuts_out == 0);
     let held = w.env.holding(&free, &t.pubkey());
-    let (_, tx) = checked_swap(&mut w, &free, &t, false, held / 2);
-    let ev: Swapped = tx.event();
-    assert_eq!((ev.protocol_fee, ev.cuts_in, ev.cuts_out), (0, 0, 0));
-    assert_eq!(ev.delivered_out, ev.amount_out);
-    assert_eq!(w.launch_pool(&free).protocol_fees_quote, 0);
+    let (q_sell, tx) = checked_swap(&mut w, &free, &t, false, held / 2);
+    let ev_sell: Swapped = tx.event();
+    assert_eq!((ev_sell.cuts_in, ev_sell.cuts_out), (0, 0));
+    assert_eq!(ev_sell.protocol_fee, q_sell.lp_fee);
+    assert_eq!(ev_sell.delivered_out, ev_sell.amount_out - q_sell.lp_fee);
+    assert_eq!(
+        w.launch_pool(&free).protocol_fees_quote,
+        ev.protocol_fee + ev_sell.protocol_fee
+    );
     pool_is_sound(&w, &free);
 
     // A 1% creator fee: on a 1 SOL buy the creator gets 10,000,000 lamports and Bordrless
-    // 2,500,000, a quarter of that and 0.25% of the trade.
+    // 2,500,000, a quarter of that and 0.25% of the trade, plus the 0.3% LP fee on the rest.
     let (one, tx) = w.create_launch(&creator, "ONE", 100, VQ);
     tx.ok();
     w.env.warp(31);
@@ -241,9 +252,13 @@ fn bordrless_takes_a_quarter_of_what_each_preset_collects() {
     let (q, tx) = checked_swap(&mut w, &one, &t, true, SOL);
     let ev: Swapped = tx.event();
     assert_eq!(q.creator_fee, 10_000_000);
-    assert_eq!(ev.protocol_fee, 2_500_000);
-    assert_eq!(ev.protocol_fee, SOL / 400);
-    assert_eq!(ev.protocol_fee * 4, q.creator_fee);
+    assert_eq!(share(q.creator_fee), 2_500_000);
+    assert_eq!(share(q.creator_fee), SOL / 400);
+    assert_eq!(
+        q.lp_fee,
+        fee_amount(SOL - 10_000_000, policy::LP_FEE_BPS).unwrap()
+    );
+    assert_eq!(ev.protocol_fee, 2_500_000 + q.lp_fee);
 }
 
 #[test]
@@ -323,12 +338,15 @@ fn a_token_launched_from_a_config() {
     let m: Mint = w.env.read(&mint);
     assert_eq!((m.hook_program, m.hook_authority), (Some(KIT_ID), None));
     // Trades follow the config's rules: a burn on both sides, holder rewards, the creator fee,
-    // and Bordrless's quarter of the two fees.
+    // and Bordrless's quarter of the two fees with the LP fee.
     w.env.warp(31);
     let t = trader(&mut w, &mint, 5 * SOL);
     let (q, tx) = checked_swap(&mut w, &mint, &t, true, SOL / 2);
     assert!(q.burn > 0 && q.creator_fee > 0);
-    assert_eq!(tx.event::<Swapped>().protocol_fee, share(q.creator_fee));
+    assert_eq!(
+        tx.event::<Swapped>().protocol_fee,
+        share(q.creator_fee) + q.lp_fee
+    );
     // A config is reusable: a second launch from the same one.
     let (mint2, tx) = w.create_launch_from_config(&creator, "CFG2", VQ, &config);
     tx.ok();
@@ -516,7 +534,10 @@ fn a_custom_hook_launch_runs_the_creators_hook_everywhere() {
     let t = trader(&mut w, &mint, 10 * SOL);
     let (q, tx) = checked_swap(&mut w, &mint, &t, true, SOL / 2);
     assert!(q.burn > 0 && q.creator_fee == fee_amount(SOL / 2, 100).unwrap());
-    assert_eq!(tx.event::<Swapped>().protocol_fee, share(q.creator_fee));
+    assert_eq!(
+        tx.event::<Swapped>().protocol_fee,
+        share(q.creator_fee) + q.lp_fee
+    );
     let s: Script = w.env.read(&tester::script_address(&mint));
     // The buy: the burn from the output, then the delivery.
     assert_eq!(s.calls, 4);
@@ -534,7 +555,10 @@ fn a_custom_hook_launch_runs_the_creators_hook_everywhere() {
     let held = w.env.holding(&mint, &t.pubkey());
     let (q2, tx2) = checked_swap(&mut w, &mint, &t, false, held / 2);
     assert!(q2.burn > 0);
-    assert_eq!(tx2.event::<Swapped>().protocol_fee, share(q2.creator_fee));
+    assert_eq!(
+        tx2.event::<Swapped>().protocol_fee,
+        share(q2.creator_fee) + q2.lp_fee
+    );
     // The sell: the burn from the input, then the transfer in.
     let s: Script = w.env.read(&tester::script_address(&mint));
     assert_eq!(s.calls, 6);
@@ -693,25 +717,28 @@ fn tax_hook_prepared_for_a_launch_mint_takes_its_cut_and_bordrless_a_quarter_of_
         p0.virtual_base,
     )
     .unwrap();
-    assert_eq!((ev.lp_fee, ev.amount_out), (lp_fee, out));
+    assert_eq!((ev.lp_fee, ev.amount_out), (0, out));
     let tax_out = fee_amount(out, 100).unwrap();
     assert_eq!((ev.cuts_out, ev.delivered_out), (tax_out, out - tax_out));
     assert_eq!(w.env.holding(&mint, &collector.pubkey()), tax_out);
     assert_eq!(w.env.holding(&mint, &t.pubkey()), out - tax_out);
     let p_out = share(quote_value(tax_out, net_in, out).unwrap());
     assert!(p_out > 0);
-    assert_eq!(ev.protocol_fee, p_in + p_out);
+    assert_eq!(ev.protocol_fee, p_in + lp_fee + p_out);
     let p1 = w.launch_pool(&mint);
     assert_eq!(
         p1.protocol_fees_quote,
-        p0.protocol_fees_quote + p_in + p_out
+        p0.protocol_fees_quote + p_in + lp_fee + p_out
     );
-    assert_eq!(p1.quote_reserve, p0.quote_reserve + received - p_in - p_out);
+    assert_eq!(
+        p1.quote_reserve,
+        p0.quote_reserve + received - p_in - lp_fee - p_out
+    );
     assert_eq!(p1.base_reserve, p0.base_reserve - out);
     pool_is_sound(&w, &mint);
     println!(
         "taxed buy of 1 SOL: creator fee {creator_fee}, tax {tax_out} tokens worth {} lamports, \
-         Bordrless {p_in} + {p_out}",
+         Bordrless {p_in} + LP fee {lp_fee} + {p_out}",
         quote_value(tax_out, net_in, out).unwrap()
     );
 
@@ -732,8 +759,7 @@ fn tax_hook_prepared_for_a_launch_mint_takes_its_cut_and_bordrless_a_quarter_of_
         (ev.cuts_in, ev.received_in, ev.burn_in),
         (tax_in, received, 0)
     );
-    let lp_fee = fee_amount(received, policy::LP_FEE_BPS).unwrap();
-    let net_in = received - lp_fee;
+    let net_in = received;
     let out = swap_out(
         net_in,
         p0.base_reserve,
@@ -744,7 +770,8 @@ fn tax_hook_prepared_for_a_launch_mint_takes_its_cut_and_bordrless_a_quarter_of_
     .unwrap();
     assert_eq!(ev.amount_out, out);
     let p_in = share(quote_value(tax_in, out, net_in).unwrap());
-    let told = out - p_in;
+    let lp_fee = fee_amount(out, policy::LP_FEE_BPS).unwrap();
+    let told = out - p_in - lp_fee;
     let creator_fee = fee_amount(told, 100).unwrap();
     let p_out = share(creator_fee);
     assert_eq!(
@@ -755,7 +782,7 @@ fn tax_hook_prepared_for_a_launch_mint_takes_its_cut_and_bordrless_a_quarter_of_
         }]
     );
     assert_eq!(ev.cuts_out, creator_fee);
-    assert_eq!(ev.protocol_fee, p_in + p_out);
+    assert_eq!(ev.protocol_fee, p_in + lp_fee + p_out);
     assert_eq!(ev.delivered_out, told - creator_fee - p_out);
     assert_eq!(
         w.env.holding(&w.sol, &t.pubkey()),
@@ -768,7 +795,7 @@ fn tax_hook_prepared_for_a_launch_mint_takes_its_cut_and_bordrless_a_quarter_of_
     let p1 = w.launch_pool(&mint);
     assert_eq!(
         p1.protocol_fees_quote,
-        p0.protocol_fees_quote + p_in + p_out
+        p0.protocol_fees_quote + p_in + lp_fee + p_out
     );
     assert_eq!(p1.quote_reserve, p0.quote_reserve - out);
     assert_eq!(p1.base_reserve, p0.base_reserve + received);
@@ -1057,7 +1084,10 @@ fn a_honeypot_hook_lets_buys_through_refuses_sells_and_leaves_the_pool_sound() {
         trader(&mut w, &mint, 5 * SOL),
     );
     let (q, tx) = checked_swap(&mut w, &mint, &buyer, true, SOL);
-    assert_eq!(tx.event::<Swapped>().protocol_fee, share(q.creator_fee));
+    assert_eq!(
+        tx.event::<Swapped>().protocol_fee,
+        share(q.creator_fee) + q.lp_fee
+    );
     let held = w.env.holding(&mint, &buyer.pubkey());
     assert!(held > 0);
     // A sell is refused by the creator's hook: nothing moves.

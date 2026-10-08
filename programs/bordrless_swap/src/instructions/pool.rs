@@ -626,3 +626,116 @@ pub fn process_collect_protocol_fees<'info>(
     });
     Ok(())
 }
+
+/// Accounts of `collect_protocol_fees_sol`: the pool, the fee collector the config names (a wallet,
+/// paid in SOL), and the bridge's `unwrap_sol` accounts for the pool as its user. Anyone may send it:
+/// the fees can only go to the configured collector.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct CollectProtocolFeesSol<'info> {
+    /// Whoever sends it; it pays the transaction fee and receives nothing.
+    pub cranker: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, constraint = pool.quote_mint == BRIDGED_SOL_MINT @ SwapError::NotBridgedSol)]
+    pub pool: Account<'info, Pool>,
+    /// CHECK: address-checked: the pool's quote vault, its holding of bridged SOL.
+    #[account(mut, address = pool.quote_vault @ SwapError::WrongVault)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the fee collector the config names; it receives the SOL.
+    #[account(mut, address = config.fee_collector @ SwapError::WrongHolding)]
+    pub collector: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the bridge.
+    #[account(address = BRIDGE_ID)]
+    pub bridge_program: UncheckedAccount<'info>,
+    /// CHECK: the bridge's config (the bridge checks it).
+    pub bridge_config: UncheckedAccount<'info>,
+    /// CHECK: the SOL wrapper (the bridge checks it).
+    #[account(mut)]
+    pub sol_wrapper: UncheckedAccount<'info>,
+    /// CHECK: the bridge's SOL vault (the bridge checks it).
+    #[account(mut)]
+    pub sol_vault: UncheckedAccount<'info>,
+    /// CHECK: address-checked: bridged SOL, the pool's quote mint.
+    #[account(mut, address = pool.quote_mint @ SwapError::WrongHolding)]
+    pub bridged_sol_mint: UncheckedAccount<'info>,
+    /// CHECK: the bridge's event authority (the bridge checks it).
+    pub bridge_event_authority: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the token program.
+    #[account(address = bordrless_token::ID)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the token program's event authority (the token program checks it).
+    pub token_event_authority: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// `collect_protocol_fees_sol`: the pool's `protocol_fees_quote` (bridged SOL in its quote vault),
+/// unwrapped by the bridge with the pool as its user and paid to the fee collector as SOL. The
+/// pool's own lamports are left as they were.
+pub fn process_collect_protocol_fees_sol(ctx: Context<CollectProtocolFeesSol>) -> Result<()> {
+    let amount = ctx.accounts.pool.protocol_fees_quote;
+    if amount > 0 {
+        let pool_info = ctx.accounts.pool.to_account_info();
+        let seeds = PoolSeeds::of(&ctx.accounts.pool);
+        let pool_seeds = seeds.seeds();
+        // The bridge's `unwrap_sol` with the pool as its user, from the accounts passed (the
+        // bridge checks every one of them).
+        let mut data = UNWRAP_SOL_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(&amount.to_le_bytes());
+        let ro = |info: &AccountInfo| AccountMeta::new_readonly(info.key(), false);
+        let rw = |info: &AccountInfo| AccountMeta::new(info.key(), false);
+        let ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: BRIDGE_ID,
+            accounts: vec![
+                AccountMeta::new(pool_info.key(), true),
+                ro(&ctx.accounts.bridge_config),
+                rw(&ctx.accounts.sol_wrapper),
+                rw(&ctx.accounts.sol_vault),
+                rw(&ctx.accounts.bridged_sol_mint),
+                rw(&ctx.accounts.quote_vault),
+                ro(&ctx.accounts.token_program),
+                ro(&ctx.accounts.token_event_authority),
+                ro(&ctx.accounts.system_program),
+                ro(&ctx.accounts.bridge_event_authority),
+                ro(&ctx.accounts.bridge_program),
+            ],
+            data,
+        };
+        anchor_lang::solana_program::program::invoke_signed(
+            &ix,
+            &[
+                pool_info.clone(),
+                ctx.accounts.bridge_config.to_account_info(),
+                ctx.accounts.sol_wrapper.to_account_info(),
+                ctx.accounts.sol_vault.to_account_info(),
+                ctx.accounts.bridged_sol_mint.to_account_info(),
+                ctx.accounts.quote_vault.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_event_authority.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.bridge_event_authority.to_account_info(),
+                ctx.accounts.bridge_program.to_account_info(),
+            ],
+            &[&pool_seeds],
+        )?;
+        // The SOL landed on the pool's account, which this program owns: hand it on.
+        let collector = ctx.accounts.collector.to_account_info();
+        let pool_lamports = pool_info.lamports();
+        **pool_info.try_borrow_mut_lamports()? = pool_lamports
+            .checked_sub(amount)
+            .ok_or(SwapError::MathOverflow)?;
+        let collector_lamports = collector.lamports();
+        **collector.try_borrow_mut_lamports()? = collector_lamports
+            .checked_add(amount)
+            .ok_or(SwapError::MathOverflow)?;
+    }
+    let pool = &mut ctx.accounts.pool;
+    pool.protocol_fees_quote = 0;
+    emit_cpi!(ProtocolFeesCollected {
+        pool: pool.key(),
+        quote_amount: amount,
+        collector: ctx.accounts.config.fee_collector,
+        ts: Clock::get()?.unix_timestamp
+    });
+    Ok(())
+}

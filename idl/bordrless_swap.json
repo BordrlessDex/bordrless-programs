@@ -202,6 +202,102 @@
       ]
     },
     {
+      "name": "collect_protocol_fees_sol",
+      "docs": [
+        "Anyone: unwraps the accrued protocol fees of a pool quoted in bridged SOL and pays them to",
+        "the fee collector the config names, as SOL. Nothing else can receive them."
+      ],
+      "discriminator": [
+        115,
+        215,
+        2,
+        183,
+        45,
+        136,
+        241,
+        31
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; it pays the transaction fee and receives nothing."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "collector",
+          "writable": true
+        },
+        {
+          "name": "bridge_program",
+          "address": "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        },
+        {
+          "name": "bridge_config"
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true
+        },
+        {
+          "name": "bridged_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "bridge_event_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "create_pool",
       "docs": [
         "Creates a pool with its first deposit. A pool with virtual reserves (a curve) can only be",
@@ -1097,6 +1193,11 @@
       "code": 6036,
       "name": "BadHookSigner",
       "msg": "the hook signer is not this program's signer for the pool's hook program"
+    },
+    {
+      "code": 6037,
+      "name": "NotBridgedSol",
+      "msg": "the pool's quote is not bridged SOL"
     }
   ],
   "types": [
