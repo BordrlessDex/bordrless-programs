@@ -1137,6 +1137,33 @@ fn wallets_only_with_holder_rewards() {
     l.send(a, c.pool, 1).unwrap();
 }
 
+#[test]
+fn only_a_companion_creator_is_excluded() {
+    let mut l = Ledger::new(modules::HOLDER_REWARDS | modules::MAX_WALLET);
+    // A companion's creator address: it may hold, uncapped, outside `eligible`.
+    let companion = pda();
+    l.kit.config.creator = companion;
+    l.kit.config.creator_is_companion = true;
+    let c = l.kit.config.clone();
+    assert!(c.is_excluded(&companion));
+    let eligible = l.kit.config.eligible;
+    l.send(c.pool, companion, c.max_wallet_amount + 1).unwrap();
+    assert_eq!(l.kit.config.eligible, eligible);
+    // What it releases to a wallet counts from then on.
+    let dev = wallet();
+    l.send(companion, dev, 10).unwrap();
+    assert_eq!(l.kit.config.eligible, eligible + 10);
+    // Any other creator, a program's address included, is not excluded: it can't hold, as before.
+    let other = pda();
+    l.kit.config.creator = other;
+    l.kit.config.creator_is_companion = false;
+    assert!(!l.kit.config.is_excluded(&other));
+    assert_eq!(
+        code(l.send(dev, other, 1)),
+        kit(KitError::DestinationNotAllowed)
+    );
+}
+
 /// A seeded walk through every operation on the pure rules, with the invariants after each step
 /// and each claim paying what the mirror computed. The LiteSVM suite runs the same walk on chain.
 #[test]

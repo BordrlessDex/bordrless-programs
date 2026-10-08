@@ -222,6 +222,7 @@ impl Env {
             ("tax_hook", tax_hook::ID),
             ("half_life", half_life::ID),
             ("hook_tester", hook_tester::ID),
+            ("bordrless_companion", bordrless_companion::ID),
         ];
         for (name, id) in programs {
             svm.add_program(id, bytes_of(name))
@@ -308,6 +309,32 @@ impl Env {
         tables: &[AddressLookupTableAccount],
     ) -> Tx {
         self.send_full(ixs, fee_payer, signers, false, tables)
+    }
+
+    /// The serialized size of a v0 transaction of `ixs` with `tables`, signed, without sending it.
+    pub fn v0_size(
+        &self,
+        ixs: &[Instruction],
+        fee_payer: &Keypair,
+        signers: &[&Keypair],
+        tables: &[AddressLookupTableAccount],
+    ) -> usize {
+        let message = v0::Message::try_compile(
+            &fee_payer.pubkey(),
+            ixs,
+            tables,
+            self.svm.latest_blockhash(),
+        )
+        .expect("compile v0 message");
+        let mut keypairs: Vec<&Keypair> = vec![fee_payer];
+        for s in signers {
+            if !keypairs.iter().any(|k| k.pubkey() == s.pubkey()) {
+                keypairs.push(s);
+            }
+        }
+        let tx =
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &keypairs).expect("sign");
+        wire_size(&tx)
     }
 
     fn send_full(

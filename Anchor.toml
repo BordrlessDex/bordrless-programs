@@ -21,6 +21,7 @@ members = [
   "programs/bordrless_kit",
   "programs/tax_hook",
   "programs/half_life",
+  "programs/bordrless_companion",
   "programs/hook_tester",
 ]
 
@@ -36,6 +37,7 @@ bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
 tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
 hook_tester = "9xrQXAxhbRRCVfE5E7DFnxYHESmy4hrtcKpSvZUNmiWM"
+bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [programs.devnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
@@ -45,6 +47,7 @@ bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
 bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
 tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
+bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [programs.mainnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
@@ -54,6 +57,7 @@ bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
 bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
 tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
+bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [provider]
 cluster = "localnet"

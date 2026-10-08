@@ -1,0 +1,33 @@
+[package]
+name = "bordrless-companion"
+description = "Bordrless companions: a launch's creator is a program, so its creator fees are bought back and burned, streamed to holders or vested to its launcher by code, every step permissionless. Reward and buyback tokens with no keeper and no backend to trust."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bordrless_companion"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-token/idl-build", "bordrless-swap/idl-build", "bordrless-kit/idl-build", "bordrless-launch/idl-build", "bordrless-bridge/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-security-txt = { workspace = true }
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+bordrless-core = { path = "../../crates/bordrless-core" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
+bordrless-kit = { path = "../bordrless_kit", features = ["no-entrypoint"] }
+bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
+bordrless-bridge = { path = "../bordrless_bridge", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

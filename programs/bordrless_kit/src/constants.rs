@@ -10,8 +10,13 @@ pub const KIT_SEED: &[u8] = b"kit";
 /// `["kit-caller", mint]` under [`LAUNCH_ID`]: the only signer `init` and `graduate` accept.
 pub const KIT_CALLER_SEED: &[u8] = b"kit-caller";
 /// The launchpad (`bordrless_launch`). A constant: the kit has no crate dependency on the launch.
-pub const LAUNCH_ID: Pubkey =
-    Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
+pub const LAUNCH_ID: Pubkey = Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
+/// The companion program (`bordrless_companion`, docs/companions.md): a launch whose creator is
+/// `PDA(["creator", mint], COMPANION_ID)` has its creator excluded like the pool. A constant: the
+/// companion depends on the kit, not the other way round (its tests check the two agree).
+pub const COMPANION_ID: Pubkey =
+    Pubkey::from_str_const("6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo");
+pub const COMPANION_CREATOR_SEED: &[u8] = b"creator";
 /// The DEX (`bordrless_swap`).
 pub const SWAP_ID: Pubkey = Pubkey::from_str_const("GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk");
 /// The bridge (`bordrless_bridge`).

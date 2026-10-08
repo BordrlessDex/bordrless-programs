@@ -1,0 +1,1962 @@
+{
+  "address": "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo",
+  "metadata": {
+    "name": "bordrless_companion",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Bordrless companions: a launch's creator is a program, so its creator fees are bought back and burned, streamed to holders or vested to its launcher by code, every step permissionless. Reward and buyback tokens with no keeper and no backend to trust."
+  },
+  "instructions": [
+    {
+      "name": "buyback",
+      "docs": [
+        "Anyone: buys the token back with the pending buyback (capped, spaced) and burns it."
+      ],
+      "discriminator": [
+        106,
+        117,
+        64,
+        30,
+        56,
+        69,
+        7,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_fees",
+      "docs": [
+        "Anyone: claims the creator fees and splits them."
+      ],
+      "discriminator": [
+        82,
+        251,
+        233,
+        156,
+        12,
+        52,
+        184,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create",
+      "docs": [
+        "Makes a companion for `mint` (not created yet): the split, the bounty, the buyback limits,",
+        "the vesting; funds its creator address and creates its bridged-SOL holding."
+      ],
+      "discriminator": [
+        24,
+        30,
+        200,
+        40,
+        5,
+        28,
+        7,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "beneficiary"
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint, a fresh keypair: it signs here, so only whoever holds it can make its",
+            "companion (nobody can make one first and become its beneficiary), and the launch later."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bridged_sol_mint",
+          "address": "A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i"
+        },
+        {
+          "name": "creator_quote",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "dev_buy",
+      "docs": [
+        "The beneficiary's buy, held by the companion and vesting to them."
+      ],
+      "discriminator": [
+        204,
+        237,
+        9,
+        67,
+        164,
+        234,
+        146,
+        78
+      ],
+      "accounts": [
+        {
+          "name": "beneficiary",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "lamports",
+          "type": "u64"
+        },
+        {
+          "name": "min_out",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "launch",
+      "docs": [
+        "Creates the launch through the launchpad, the creator address signing as its creator. The",
+        "remaining accounts are `create_launch`'s."
+      ],
+      "discriminator": [
+        153,
+        241,
+        93,
+        225,
+        22,
+        69,
+        74,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "launcher",
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch_program",
+          "address": "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateLaunchArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "docs": [
+        "Anyone: sends the beneficiary the dev bag's vested tokens."
+      ],
+      "discriminator": [
+        253,
+        249,
+        15,
+        206,
+        28,
+        127,
+        193,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "share",
+      "docs": [
+        "Anyone: streams the holders' part to holders through the kit."
+      ],
+      "discriminator": [
+        45,
+        191,
+        153,
+        100,
+        101,
+        149,
+        30,
+        245
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw",
+      "docs": [
+        "Anyone: pays the beneficiary their part as SOL."
+      ],
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "sender",
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Companion",
+      "discriminator": [
+        189,
+        21,
+        247,
+        69,
+        245,
+        100,
+        10,
+        15
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BeneficiaryPaid",
+      "discriminator": [
+        127,
+        40,
+        255,
+        171,
+        177,
+        3,
+        249,
+        87
+      ]
+    },
+    {
+      "name": "BoughtBack",
+      "discriminator": [
+        188,
+        156,
+        61,
+        154,
+        116,
+        184,
+        186,
+        21
+      ]
+    },
+    {
+      "name": "BuybackWaited",
+      "discriminator": [
+        137,
+        48,
+        208,
+        101,
+        18,
+        161,
+        174,
+        228
+      ]
+    },
+    {
+      "name": "CompanionCreated",
+      "discriminator": [
+        18,
+        250,
+        223,
+        113,
+        68,
+        37,
+        5,
+        147
+      ]
+    },
+    {
+      "name": "CompanionLaunched",
+      "discriminator": [
+        237,
+        84,
+        30,
+        223,
+        78,
+        19,
+        44,
+        137
+      ]
+    },
+    {
+      "name": "DevBought",
+      "discriminator": [
+        215,
+        158,
+        136,
+        63,
+        247,
+        229,
+        43,
+        133
+      ]
+    },
+    {
+      "name": "DevReleased",
+      "discriminator": [
+        48,
+        1,
+        177,
+        68,
+        163,
+        5,
+        177,
+        131
+      ]
+    },
+    {
+      "name": "FeesClaimed",
+      "discriminator": [
+        22,
+        104,
+        110,
+        222,
+        38,
+        157,
+        14,
+        62
+      ]
+    },
+    {
+      "name": "SharedWithHolders",
+      "discriminator": [
+        85,
+        12,
+        180,
+        138,
+        177,
+        26,
+        242,
+        171
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BadSplit",
+      "msg": "the split must add up to 10,000 basis points"
+    },
+    {
+      "code": 6001,
+      "name": "BountyTooHigh",
+      "msg": "the bounty is at most 1% of what a step moves"
+    },
+    {
+      "code": 6002,
+      "name": "BadBuybackLimits",
+      "msg": "buybacks need a cap above zero and at least a minute between them"
+    },
+    {
+      "code": 6003,
+      "name": "VestTooLong",
+      "msg": "a dev bag vests over a year at most"
+    },
+    {
+      "code": 6004,
+      "name": "MissingAccount",
+      "msg": "an account the step needs was not passed"
+    },
+    {
+      "code": 6005,
+      "name": "WrongCreator",
+      "msg": "the launch's creator must be this companion's creator address"
+    },
+    {
+      "code": 6006,
+      "name": "WrongMint",
+      "msg": "the launch's mint must be this companion's mint"
+    },
+    {
+      "code": 6007,
+      "name": "AlreadyLaunched",
+      "msg": "this companion has launched already"
+    },
+    {
+      "code": 6008,
+      "name": "NotLaunched",
+      "msg": "this companion has not launched yet"
+    },
+    {
+      "code": 6009,
+      "name": "CreatorLockUnsupported",
+      "msg": "a companion launch can't use the creator wallet lock: the companion's own vesting replaces it"
+    },
+    {
+      "code": 6010,
+      "name": "HolderRewardsOff",
+      "msg": "a share for holders needs holder rewards on"
+    },
+    {
+      "code": 6011,
+      "name": "CustomHookUnsupported",
+      "msg": "a companion launch can't use a custom token hook yet"
+    },
+    {
+      "code": 6012,
+      "name": "NothingToDo",
+      "msg": "nothing to do yet"
+    },
+    {
+      "code": 6013,
+      "name": "BuybackNotDue",
+      "msg": "too early: the next buyback is not due yet"
+    },
+    {
+      "code": 6014,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6015,
+      "name": "Underfunded",
+      "msg": "the creator address must keep its rent-exempt minimum"
+    },
+    {
+      "code": 6016,
+      "name": "AuthorShareUnsupported",
+      "msg": "a companion launch can't come from a listed config that pays an author"
+    },
+    {
+      "code": 6017,
+      "name": "BeneficiaryNotAWallet",
+      "msg": "with holder rewards on, the beneficiary must be a wallet (the dev bag can only go to one)"
+    },
+    {
+      "code": 6018,
+      "name": "DevBuyWindowClosed",
+      "msg": "the dev's buy is made within ten minutes of the launch"
+    },
+    {
+      "code": 6019,
+      "name": "DevBagOverMaxWallet",
+      "msg": "the dev bag would hold more than max wallet allows a wallet before graduation"
+    },
+    {
+      "code": 6020,
+      "name": "EarlyLocked",
+      "msg": "tokens bought in the early-buyer window stay until it unlocks"
+    },
+    {
+      "code": 6021,
+      "name": "NoQuote",
+      "msg": "the pool can't quote a buyback right now"
+    }
+  ],
+  "types": [
+    {
+      "name": "BeneficiaryPaid",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BoughtBack",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "burned",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuybackWaited",
+      "docs": [
+        "A buyback that waited: the price was above the reference (which moved toward it, when due)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "reference",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Companion",
+      "docs": [
+        "`PDA([\"companion\", mint])`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "creator_bump",
+            "docs": [
+              "Bump of `PDA([\"creator\", mint])`, the launch's creator."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "beneficiary",
+            "docs": [
+              "Who launched it: receives the beneficiary's part of the fees and the vested dev bag."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "split",
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "docs": [
+              "What a step pays whoever sends it, of what it moves (at most `MAX_BOUNTY_BPS`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_buyback",
+            "docs": [
+              "The most one buyback spends (lamports of bridged SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyback_interval",
+            "docs": [
+              "The least time between buybacks."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "vest_secs",
+            "docs": [
+              "The dev bag vests linearly over this many seconds from the launch (0: at once)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "launched",
+            "type": "bool"
+          },
+          {
+            "name": "launched_at",
+            "type": "i64"
+          },
+          {
+            "name": "dev_tokens",
+            "docs": [
+              "Tokens bought for the dev bag, and released to the beneficiary so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dev_released",
+            "type": "u64"
+          },
+          {
+            "name": "pending_buyback",
+            "docs": [
+              "Bridged SOL held for each purpose (in the creator's holding)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_holders",
+            "type": "u64"
+          },
+          {
+            "name": "pending_beneficiary",
+            "type": "u64"
+          },
+          {
+            "name": "last_buyback_at",
+            "type": "i64"
+          },
+          {
+            "name": "claimed_total",
+            "docs": [
+              "Running totals."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "spent_total",
+            "type": "u64"
+          },
+          {
+            "name": "burned_total",
+            "type": "u64"
+          },
+          {
+            "name": "shared_total",
+            "type": "u64"
+          },
+          {
+            "name": "paid_beneficiary_total",
+            "type": "u64"
+          },
+          {
+            "name": "bounties_total",
+            "type": "u64"
+          },
+          {
+            "name": "reference_price",
+            "docs": [
+              "The buyback's reference price (quote per base unit times `PRICE_SCALE`), set at the launch and",
+              "moved toward the pool's price by at most `REFERENCE_STEP_BPS` at a time, once an interval."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "reference_at",
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompanionCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "beneficiary",
+            "type": "pubkey"
+          },
+          {
+            "name": "split",
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_buyback",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_interval",
+            "type": "i64"
+          },
+          {
+            "name": "vest_secs",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompanionLaunched",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateArgs",
+      "docs": [
+        "Arguments of `create`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "split",
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_buyback",
+            "docs": [
+              "The most one buyback spends, lamports (ignored without a buyback share)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyback_interval",
+            "docs": [
+              "The least time between buybacks, seconds."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "vest_secs",
+            "docs": [
+              "The dev bag vests over this many seconds from the launch."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "fund",
+            "docs": [
+              "Lamports for the creator address: the launch's fee and rent (it pays them as the launch's",
+              "creator) and its own rent-exempt minimum, which it keeps."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateLaunchArgs",
+      "docs": [
+        "Arguments of `create_launch`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee in basis points of the quote, at most the config's maximum. With a",
+              "`LaunchConfig` it must equal the config's."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote reserve the curve opens with (sets the opening market cap), within the",
+              "config's bounds."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, within the config's bounds; fixed at launch. With a `LaunchConfig` they",
+              "must equal the config's."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DevBought",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "tokens",
+            "type": "u64"
+          },
+          {
+            "name": "dev_tokens",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DevReleased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "tokens",
+            "type": "u64"
+          },
+          {
+            "name": "released",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeesClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimed",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "to_buyback",
+            "type": "u64"
+          },
+          {
+            "name": "to_holders",
+            "type": "u64"
+          },
+          {
+            "name": "to_beneficiary",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Launch",
+      "docs": [
+        "A launch at `[\"launch\", mint]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The token."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who launched it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The pool on the DEX."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "`STATUS_CURVE` or `STATUS_GRADUATED`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee on every swap, in basis points of the quote."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee of the pool."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "docs": [
+              "Sniper window."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "docs": [
+              "LP fee at the start of the window."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote reserve at opening."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "docs": [
+              "Virtual base reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_quote",
+            "docs": [
+              "Real quote reserve at which the launch graduates."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "curve_tokens",
+            "docs": [
+              "Tokens on the curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_tokens",
+            "docs": [
+              "Tokens reserved for graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_holding",
+            "docs": [
+              "The launch's holding of the token (the reserve, then nothing)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_holding",
+            "docs": [
+              "The launch's holding of the quote (creator fees)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_holding",
+            "docs": [
+              "The launch's holding of the pool's LP mint (locked for ever)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "graduated_at",
+            "docs": [
+              "Graduation time (0 until then)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_fees_accrued",
+            "docs": [
+              "Creator fees taken so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_fees_claimed",
+            "docs": [
+              "Creator fees claimed so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_topup",
+            "docs": [
+              "Base added to the pool at graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_burned",
+            "docs": [
+              "Base burned at graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, fixed at launch."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "modules",
+            "docs": [
+              "The kit modules of `rules` (0: no kit, no token hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kit_config",
+            "docs": [
+              "`PDA([\"kit\", mint], KIT_ID)`, derived whatever the modules (the pool hook's fixed key)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "holder_vault",
+            "docs": [
+              "`holding(quote_mint, kit_config)`, derived whatever the modules: the kit's reward vault",
+              "when holder rewards are on, where holder fees go."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "kit_caller_bump",
+            "docs": [
+              "Bump of `PDA([\"kit-caller\", mint], LAUNCH_ID)`, which signs the kit's `init` and",
+              "`graduate`; 0 without a kit."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The creator wallet unlocks at this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "docs": [
+              "Buys from the pool before this time are locked; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "docs": [
+              "... until this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_bought",
+            "docs": [
+              "The creator's own first buy took the normal LP fee inside the sniper window (once)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "holder_fees_accrued",
+            "docs": [
+              "Holder fees taken so far (bridged SOL, into the holder vault)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burned_on_trades",
+            "docs": [
+              "Tokens burned on trades (both sides; not the graduation burn)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "config",
+            "docs": [
+              "The `LaunchConfig` the launch was made from; the default key for inline rules."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "custom_hook",
+            "docs": [
+              "The creator's own token hook (from the config), when the token has one. It runs on every",
+              "transfer, mint and burn its flags name; nobody vets its code."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "docs": [
+              "The custom hook's flags; 0 without one."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "author_share_bps",
+            "docs": [
+              "The config author's share of the creator fee (basis points of it), from a listed config",
+              "whose author is not the launch's creator; 0 otherwise. Fixed at launch: every claim pays",
+              "the author this part of what it takes."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "author_fees_paid",
+            "docs": [
+              "Creator fees paid to the config's author so far (quote)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                22
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchRules",
+      "docs": [
+        "The rules a launch fixes for its token (`docs/hooks-v2.md` §5.1): what the pool hook takes on",
+        "each side, and the kit modules the token gets. Holder rewards are on when either holder fee is",
+        "above 0."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "holder_fee_buy_bps",
+            "docs": [
+              "Holder fee on buys, from the quote input, paid to the holder vault."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holder_fee_sell_bps",
+            "docs": [
+              "Holder fee on sells, from the quote output after the protocol fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "burn_buy_bps",
+            "docs": [
+              "Burn on buys, from the token output."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "burn_sell_bps",
+            "docs": [
+              "Burn on sells, from the token input."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_wallet_bps",
+            "docs": [
+              "Max wallet in basis points of the supply; 0 = off. Lifts at graduation."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "creator_lock_secs",
+            "docs": [
+              "Creator wallet lock, counted from the launch; 0 = off."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "early_window_secs",
+            "docs": [
+              "Early-buyer window, counted from the launch; 0 = off."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "early_lock_secs",
+            "docs": [
+              "Early-buyer unlock, counted from the launch; above `early_window_secs` (0 when the lock is",
+              "off)."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SharedWithHolders",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Split",
+      "docs": [
+        "What every creator fee claim pays for, in basis points summing to 10,000."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyback_bps",
+            "docs": [
+              "Bought back on the token's own pool and burned."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holders_bps",
+            "docs": [
+              "Streamed to holders through the kit's reward pool."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "beneficiary_bps",
+            "docs": [
+              "Accrued to the beneficiary, who is paid it as SOL."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    }
+  ]
+}

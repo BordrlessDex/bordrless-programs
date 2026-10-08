@@ -1127,6 +1127,15 @@
             "type": "u64"
           },
           {
+            "name": "creator_is_companion",
+            "docs": [
+              "The launch's creator is a companion's creator address (`PDA([\"creator\", mint], COMPANION_ID)`,",
+              "docs/companions.md), decided once at `init`: the companion holds the creator's dev bag and what",
+              "it buys back to burn, so it is excluded like the pool and the launch. Taken from `reserved`."
+            ],
+            "type": "bool"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Reserved."
@@ -1134,7 +1143,7 @@
             "type": {
               "array": [
                 "u8",
-                56
+                55
               ]
             }
           }

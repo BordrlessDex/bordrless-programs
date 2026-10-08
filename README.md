@@ -27,8 +27,9 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `bordrless_kit` | `14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH` | The launch rules as a token hook: holder rewards, max wallet, wallet locks |
 | `tax_hook` | `8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7` | An example token hook: a programmable transfer fee with a wallet cap |
 | `half_life` | `53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8` | [Half-Life](programs/half_life): an exit fee that halves every 6 hours held, burned |
+| `bordrless_companion` | `6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo` | [Companions](docs/companions.md): a launch's creator as a program, so its fees buy back, reward holders or vest, with no keeper |
 
-Deployed to mainnet-beta on 7 Oct 2026 (the DEX upgraded and Half-Life added on 8 Oct 2026). Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -38,9 +39,10 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_swap` | `5d63e257c01aff1bcf86ca554ce3230be7339bced1427954e08300b6b4828d12` |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
 | `bordrless_launch` | `0b8c7165dcab083d052cac20d2bd19b2d43174a8168c18717c9e1d8907c8e288` |
-| `bordrless_kit` | `2bf33657166878c7d4b2634c64b61d6ee898d20ccae99db6398e99d0e69e621c` |
+| `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
+| `bordrless_companion` | `aad5bd80eabde4029591daa54248938c488c40a695c8da7d7d7dfd77ad32ae2a` |
 
 The IDLs are in [`idl/`](idl).
 
@@ -65,6 +67,7 @@ taken from the amount itself into a furnace anyone can burn. Launch with it from
 | `crates/bordrless-core` | The pure math and policy |
 | `docs/hooks-v2.md` | The protocol (v2) and the launch rules. Where it and `architecture.md` differ, it wins |
 | `docs/architecture.md` | The original design: programs, hook protocol, curve and graduation |
+| `docs/companions.md` | Companions: a launch's creator as a program, and what the audit made it refuse |
 | `idl/` | Anchor IDLs of the deployed programs |
 | `scripts/solana` | Toolchain install, build, test and deploy |
 

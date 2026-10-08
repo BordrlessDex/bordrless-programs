@@ -728,6 +728,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bordrless-companion"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-bridge",
+ "bordrless-core",
+ "bordrless-kit",
+ "bordrless-launch",
+ "bordrless-swap",
+ "bordrless-token",
+ "solana-security-txt",
+]
+
+[[package]]
 name = "bordrless-core"
 version = "0.1.0"
 
@@ -767,6 +781,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "bordrless-bridge",
+ "bordrless-companion",
  "bordrless-core",
  "bordrless-hook",
  "bordrless-kit",

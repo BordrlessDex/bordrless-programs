@@ -80,8 +80,12 @@ pub struct KitConfig {
     /// running stream at the first sync after `stream_end`. Taken from `reserved`, so the account
     /// keeps its size and every other field its offset.
     pub stream_next: u64,
+    /// The launch's creator is a companion's creator address (`PDA(["creator", mint], COMPANION_ID)`,
+    /// docs/companions.md), decided once at `init`: the companion holds the creator's dev bag and what
+    /// it buys back to burn, so it is excluded like the pool and the launch. Taken from `reserved`.
+    pub creator_is_companion: bool,
     /// Reserved.
-    pub reserved: [u8; 56],
+    pub reserved: [u8; 55],
 }
 
 /// Arguments of `init`, passed by the launch inside `create_launch` and trusted because its
@@ -230,7 +234,13 @@ impl KitConfig {
             total_shared: 0,
             created_at: now,
             stream_next: 0,
-            reserved: [0; 56],
+            creator_is_companion: args.creator
+                == Pubkey::find_program_address(
+                    &[COMPANION_CREATOR_SEED, mint.as_ref()],
+                    &COMPANION_ID,
+                )
+                .0,
+            reserved: [0; 55],
         })
     }
 
@@ -244,10 +254,13 @@ impl KitConfig {
         self.has(modules::HOLDER_REWARDS)
     }
 
-    /// Whether `owner` is excluded (the pool or the launch): never settled, capped, counted in
-    /// `eligible`, and never able to claim.
+    /// Whether `owner` is excluded (the pool, the launch, or a companion that is the launch's
+    /// creator, holding a vesting dev bag or what it buys back to burn): never settled, capped,
+    /// counted in `eligible`, and never able to claim. Any other creator is a holder like anyone.
     pub fn is_excluded(&self, owner: &Pubkey) -> bool {
-        *owner == self.pool || *owner == self.launch
+        *owner == self.pool
+            || *owner == self.launch
+            || (self.creator_is_companion && *owner == self.creator)
     }
 
     /// Whether the token may never be sent to `owner` (§4.5): the launch, this config (at
