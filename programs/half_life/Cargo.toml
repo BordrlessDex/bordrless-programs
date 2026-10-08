@@ -1,0 +1,30 @@
+[package]
+name = "half-life"
+description = "Half-Life: a Bordrless token hook whose exit fee halves every six hours a token is held, the age travelling with the tokens in each holding's hook data, the fee burned through a furnace."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "half_life"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-hook/idl-build", "bordrless-token/idl-build", "bordrless-launch/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+solana-security-txt = { workspace = true }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

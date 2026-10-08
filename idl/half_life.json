@@ -1,0 +1,777 @@
+{
+  "address": "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8",
+  "metadata": {
+    "name": "half_life",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Half-Life: a Bordrless token hook whose exit fee halves every six hours a token is held, the age travelling with the tokens in each holding's hook data, the fee burned through a furnace."
+  },
+  "docs": [
+    "Instructions of the Half-Life hook."
+  ],
+  "instructions": [
+    {
+      "name": "before_transfer",
+      "docs": [
+        "`before_transfer`: the exit fee to the furnace, and the two holdings' arrival times."
+      ],
+      "discriminator": [
+        23,
+        118,
+        189,
+        23,
+        179,
+        222,
+        94,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "FBZPj9PmV9dXL8U4qmRffXdXm11e23KEBnNgEVXxhfhF"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  97,
+                  108,
+                  102,
+                  45,
+                  108,
+                  105,
+                  102,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "furnace_holding",
+          "writable": true
+        },
+        {
+          "name": "launch"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "light",
+      "docs": [
+        "Lights the furnace of `mint`: creates the furnace's holding of the mint, which needs the",
+        "mint to exist. Anyone may call it, and the payer pays the holding's rent. Until it is lit,",
+        "transfers that owe a fee fail."
+      ],
+      "discriminator": [
+        2,
+        254,
+        244,
+        177,
+        101,
+        93,
+        194,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the holding's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  97,
+                  108,
+                  102,
+                  45,
+                  108,
+                  105,
+                  102,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "furnace_owner"
+        },
+        {
+          "name": "furnace_holding",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "prepare",
+      "docs": [
+        "Prepares the hook for `mint`, which need not exist yet (a launch's mint: the launchpad",
+        "creates it naming this program as its hook): the state and the extra-accounts registry.",
+        "Anyone may call it, once per mint; it has no parameters, so what it prepares is the same",
+        "for everyone."
+      ],
+      "discriminator": [
+        121,
+        155,
+        156,
+        90,
+        164,
+        252,
+        220,
+        109
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  97,
+                  108,
+                  102,
+                  45,
+                  108,
+                  105,
+                  102,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "stoke",
+      "docs": [
+        "Burns everything in the furnace. Anyone may call it."
+      ],
+      "discriminator": [
+        17,
+        241,
+        45,
+        45,
+        218,
+        55,
+        159,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  97,
+                  108,
+                  102,
+                  45,
+                  108,
+                  105,
+                  102,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "furnace_owner"
+        },
+        {
+          "name": "furnace_holding",
+          "writable": true
+        },
+        {
+          "name": "this_program",
+          "address": "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
+        },
+        {
+          "name": "hook_signer",
+          "address": "FBZPj9PmV9dXL8U4qmRffXdXm11e23KEBnNgEVXxhfhF"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "HalfLifeState",
+      "discriminator": [
+        43,
+        14,
+        83,
+        195,
+        28,
+        226,
+        223,
+        83
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Stoked",
+      "discriminator": [
+        254,
+        69,
+        112,
+        59,
+        35,
+        119,
+        106,
+        8
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "WrongAccount",
+      "msg": "an account is not the one this mint's hook expects"
+    },
+    {
+      "code": 6001,
+      "name": "BadHookSigner",
+      "msg": "the hook signer is not the token program's signer for this hook"
+    },
+    {
+      "code": 6002,
+      "name": "NotATransfer",
+      "msg": "only transfers call this hook"
+    },
+    {
+      "code": 6003,
+      "name": "FurnaceNotLit",
+      "msg": "this transfer owes an exit fee and the furnace is not lit yet: call light first"
+    },
+    {
+      "code": 6004,
+      "name": "FurnaceEmpty",
+      "msg": "the furnace is empty"
+    }
+  ],
+  "types": [
+    {
+      "name": "Delta",
+      "docs": [
+        "One cut an answer takes from the amount."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "docs": [
+              "How much (above zero)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "account",
+            "docs": [
+              "Index in the callback's account list (prefix first, then extras) of the holding that",
+              "receives it. Must be an extra."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HalfLifeState",
+      "docs": [
+        "The hook's state for one mint, at `[\"half-life\", mint]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "furnace_bump",
+            "docs": [
+              "Bump of the furnace owner."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch",
+            "docs": [
+              "The launch program's `[\"launch\", mint]`: exempt."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The launch pool, once read from the launch account (default until then): exempt."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "furnace_owner",
+            "docs": [
+              "The furnace's owner, `[\"furnace\", mint]` under this program: exempt."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "furnace_holding",
+            "docs": [
+              "The furnace's holding of the mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fed",
+            "docs": [
+              "Exit fees sent to the furnace, all time."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burned",
+            "docs": [
+              "Tokens the furnace has burned, all time."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prepared_by",
+            "docs": [
+              "Who prepared the hook for the mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookReturn",
+      "docs": [
+        "What a callback may answer in its return data. Which fields a callback may fill depends on the",
+        "callback and the flags ([`Allowed`]); the calling program refuses an answer that fills any",
+        "other field."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deltas",
+            "docs": [
+              "Cuts from the amount (the transfer; a swap's input before, its output after), at most",
+              "[`MAX_DELTAS`]."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Delta"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn",
+            "docs": [
+              "Pool swap callbacks only: an amount to burn from the same side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "`before_swap` only: the LP fee to apply instead of the pool's."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_burn`): the source holding's new hook data",
+              "([`HOOK_DATA_LEN`] bytes)."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_mint`): the destination holding's new hook",
+              "data."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "Before or after the operation."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Before"
+          },
+          {
+            "name": "After"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Stoked",
+      "docs": [
+        "The furnace burned."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "burned_total",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenHookArgs",
+      "docs": [
+        "Arguments of a token hook callback. Balances and hook data are those of the holdings before",
+        "(`Before`) or after (`After`) the operation; `delta` is what the deltas took, known only after."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "op",
+            "docs": [
+              "The operation."
+            ],
+            "type": {
+              "defined": {
+                "name": "TokenOp"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "docs": [
+              "Before or after it."
+            ],
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Source holding (the mint for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "Destination holding (the mint for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source_owner",
+            "docs": [
+              "Owner of the source holding (default for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_owner",
+            "docs": [
+              "Owner of the destination holding (default for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Who signed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority_is_delegate",
+            "docs": [
+              "Whether the signer acted as a delegate rather than the owner."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "The amount of the operation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delta",
+            "docs": [
+              "The sum of the deltas a `before_transfer` answer took (zero before)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_balance",
+            "docs": [
+              "Source balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "destination_balance",
+            "docs": [
+              "Destination balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of the mint."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of the mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "The source holding's hook data (zeros for a mint)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "The destination holding's hook data (zeros for a burn)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenOp",
+      "docs": [
+        "What a token hook is being told about."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Transfer"
+          },
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Burn"
+          }
+        ]
+      }
+    }
+  ]
+}

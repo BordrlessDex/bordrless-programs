@@ -23,8 +23,9 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `bordrless_launch` | `1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC` | The launchpad: launches, fee schedule and rules as a pool hook, graduation |
 | `bordrless_kit` | `14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH` | The launch rules as a token hook: holder rewards, max wallet, wallet locks |
 | `tax_hook` | `8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7` | An example token hook: a programmable transfer fee with a wallet cap |
+| `half_life` | `53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8` | [Half-Life](programs/half_life): an exit fee that halves every 6 hours held, burned |
 
-Deployed to mainnet-beta on 7 Oct 2026 (the DEX upgraded on 8 Oct 2026). Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX upgraded and Half-Life added on 8 Oct 2026). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -36,14 +37,25 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_launch` | `bf9b521b3f11f88e1da5228a14626a99660a412462534007201670f67aeb318d` |
 | `bordrless_kit` | `2bf33657166878c7d4b2634c64b61d6ee898d20ccae99db6398e99d0e69e621c` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
+| `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
 
 The IDLs are in [`idl/`](idl).
+
+## Half-Life
+
+A token hook Bordrless ships to launch with, and the example of what a hook here can do that a
+Token-2022 transfer hook cannot. **Sell or send tokens the moment you get them and 20% of them
+burns; the fee halves every six hours you hold and is gone after two days.** Each holding
+remembers its tokens' age in its own hook data, the age travels with the tokens, and the fee is
+taken from the amount itself into a furnace anyone can burn. Launch with it from the launch config
+`ABz5Je9FznnotUQxxaj28vn18t1Wv9SsDzEfDxGLRJY`. The full explainer:
+[programs/half_life](programs/half_life).
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `programs/bordrless_*`, `programs/tax_hook` | The deployed programs (Anchor 1.2) |
+| `programs/bordrless_*`, `programs/tax_hook`, `programs/half_life` | The deployed programs (Anchor 1.2) |
 | `programs/hook_tester` | Test-only: a hook with scripted answers and a router, never deployed |
 | `programs/tests` | LiteSVM suites that load the built `.so` files |
 | `crates/bordrless-hook` | The hook protocol: callback args, return deltas, the extra-accounts registry. Start here to write a hook |

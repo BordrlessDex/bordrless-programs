@@ -21,7 +21,7 @@ set -euo pipefail
 TOOLS_VERSION="v1.57"
 SBF_ARCH="v3"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-PROGRAMS=(bordrless_token bordrless_swap bordrless_bridge bordrless_launch bordrless_kit tax_hook hook_tester)
+PROGRAMS=(bordrless_token bordrless_swap bordrless_bridge bordrless_launch bordrless_kit tax_hook half_life hook_tester)
 TEST_ONLY=(hook_tester)
 DEPLOY_DIR="$ROOT/target/deploy"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/bordrless/target}"

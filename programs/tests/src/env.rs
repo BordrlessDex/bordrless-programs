@@ -210,7 +210,7 @@ impl Default for Env {
 
 impl Env {
     /// A fresh SVM with the programs loaded (upgrade authority [`Env::deployer`]) and the clock at
-    /// [`T0`]: the six deployed ones and the test-only `hook_tester`.
+    /// [`T0`]: the deployed ones and the test-only `hook_tester`.
     pub fn new() -> Self {
         let mut svm = LiteSVM::new();
         let programs = [
@@ -220,6 +220,7 @@ impl Env {
             ("bordrless_launch", bordrless_launch::ID),
             ("bordrless_kit", bordrless_kit::ID),
             ("tax_hook", tax_hook::ID),
+            ("half_life", half_life::ID),
             ("hook_tester", hook_tester::ID),
         ];
         for (name, id) in programs {

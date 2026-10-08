@@ -16,13 +16,14 @@ pub use events::*;
 use std::path::PathBuf;
 
 /// The programs, by crate library name (the stem of each `.so`). `hook_tester` is test-only.
-pub const PROGRAMS: [&str; 7] = [
+pub const PROGRAMS: [&str; 8] = [
     "bordrless_token",
     "bordrless_swap",
     "bordrless_bridge",
     "bordrless_launch",
     "bordrless_kit",
     "tax_hook",
+    "half_life",
     "hook_tester",
 ];
 

@@ -23,7 +23,7 @@ case "$CLUSTER" in
   mainnet) URL="${SOLANA_MAINNET_RPC:?set SOLANA_MAINNET_RPC to a keyed mainnet RPC}" ;;
   *) echo "cluster must be devnet or mainnet" >&2; exit 2 ;;
 esac
-PROGRAMS=(bordrless_token bordrless_swap bordrless_bridge bordrless_launch bordrless_kit tax_hook)
+PROGRAMS=(bordrless_token bordrless_swap bordrless_bridge bordrless_launch bordrless_kit tax_hook half_life)
 if (($# > 2)); then PROGRAMS=("${@:3}"); fi
 
 echo "deployer $(solana-keygen pubkey "$DEPLOYER"), balance $(solana balance -u "$URL" -k "$DEPLOYER")"

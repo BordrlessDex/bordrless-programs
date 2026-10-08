@@ -773,6 +773,7 @@ dependencies = [
  "bordrless-launch",
  "bordrless-swap",
  "bordrless-token",
+ "half-life",
  "hook-tester",
  "litesvm",
  "solana-account",
@@ -1480,6 +1481,17 @@ dependencies = [
  "rand_core 0.6.4",
  "rand_xorshift",
  "subtle",
+]
+
+[[package]]
+name = "half-life"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-hook",
+ "bordrless-launch",
+ "bordrless-token",
+ "solana-security-txt",
 ]
 
 [[package]]

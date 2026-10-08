@@ -17,6 +17,7 @@ bordrless-bridge = { path = "../bordrless_bridge", features = ["no-entrypoint"] 
 bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
 bordrless-kit = { path = "../bordrless_kit", features = ["no-entrypoint"] }
 tax-hook = { path = "../tax_hook", features = ["no-entrypoint"] }
+half-life = { path = "../half_life", features = ["no-entrypoint"] }
 hook-tester = { path = "../hook_tester", features = ["no-entrypoint"] }
 solana-account = "=4.7.0"
 solana-hash.workspace = true
