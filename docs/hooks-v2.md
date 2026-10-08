@@ -949,6 +949,25 @@ Limits on mainnet today: 64 trace entries, invoke height 5, 1,232 bytes, 64 acco
 
 ## 7. Policy and site rules
 
+
+**Who may upgrade a custom hook (upgrade of 2026-10-08).** A token's hook runs on every transfer,
+so a hook someone could upgrade could be swapped for other code after the token launched.
+`create_config` and `create_listed_config` therefore take the hook's ProgramData account
+(`PDA([hook], BPFLoaderUpgradeab1e...)`) as their one remaining account, and refuse
+(`HookUpgradeable`) a hook whose upgrade authority is anyone other than:
+- no one (immutable; the BPF loader 2, or a finalized loader-v4 program, likewise);
+- Bordrless Studio's upgrade key `CS1NRyXNCPxEUP4CRoa26cHQSeSJCxXh5SPijwFhDW6W`, which holds every
+  "managed" Studio hook and upgrades it only to a version Studio reviewed and rebuilt;
+- the protocol's upgrade authority `5xsibKwtiN6ruxsYrEyWVpV3KcwuzSPbQd1n28a7spEd` (Half-Life,
+  tax_hook).
+
+These are `HOOK_UPGRADE_AUTHORITIES`. A missing or wrong ProgramData account is
+`HookProgramDataMissing`. `create_launch` doesn't check again: once a config is made, only those keys,
+or no one, can change who upgrades its hook. The backend's marketplace watch takes a listing down if
+that ever changes, or if a Studio hook's code on chain stops matching its build. Studio deploys a hook
+immutable (the default) or managed; it never hands the upgrade authority to the owner. Tested in
+`programs/tests/tests/hook_authority.rs`.
+
 ### 7.1 Choices
 
 | Rule | Choices | Default |

@@ -1333,6 +1333,16 @@
       "code": 6041,
       "name": "NotAuthor",
       "msg": "the signer is not the config's author"
+    },
+    {
+      "code": 6042,
+      "name": "HookUpgradeable",
+      "msg": "the custom hook can be upgraded by someone other than Bordrless: make it immutable or deploy it with Studio"
+    },
+    {
+      "code": 6043,
+      "name": "HookProgramDataMissing",
+      "msg": "the custom hook's program data account is missing or wrong"
     }
   ],
   "types": [

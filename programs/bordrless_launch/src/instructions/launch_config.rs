@@ -83,6 +83,70 @@ pub fn check_custom_hook(
     Ok(())
 }
 
+/// The program data address of an upgradeable program: `PDA([program], upgradeable loader)`.
+pub fn programdata_address(program: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[program.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0
+}
+
+/// Who may upgrade the custom hook (§5.8): no one, Studio's upgrade key or the protocol's (see
+/// `HOOK_UPGRADE_AUTHORITIES`), else `HookUpgradeable`. `programdata` is the account at
+/// [`programdata_address`], which every client passes with a custom hook (for a program that is not
+/// upgradeable it is an unused address, read for nothing).
+///
+/// The upgradeable loader: the program account names its program data (`[2u32, programdata]`),
+/// whose header is `[3u32, slot u64, Option<Pubkey>]`. The BPF loader 2 is immutable. Loader v4:
+/// `[slot u64, authority, status u64]`, status 2 being finalized.
+pub fn check_hook_authority(program: &AccountInfo, programdata: &AccountInfo) -> Result<()> {
+    require_keys_eq!(
+        *programdata.key,
+        programdata_address(program.key),
+        LaunchError::HookProgramDataMissing
+    );
+    let allowed = |key: &[u8]| HOOK_UPGRADE_AUTHORITIES.iter().any(|a| a.as_ref() == key);
+    if *program.owner == BPF_LOADER_2_ID {
+        return Ok(());
+    }
+    if *program.owner == LOADER_V4_ID {
+        let data = program.try_borrow_data()?;
+        require!(data.len() >= 48, LaunchError::HookUpgradeable);
+        let status = u64::from_le_bytes(data[40..48].try_into().unwrap());
+        require!(
+            status == 2 || allowed(&data[8..40]),
+            LaunchError::HookUpgradeable
+        );
+        return Ok(());
+    }
+    require_keys_eq!(
+        *program.owner,
+        BPF_LOADER_UPGRADEABLE_ID,
+        LaunchError::HookUpgradeable
+    );
+    {
+        let data = program.try_borrow_data()?;
+        require!(
+            data.len() >= 36
+                && data[..4] == 2u32.to_le_bytes()
+                && data[4..36] == programdata.key.to_bytes(),
+            LaunchError::HookProgramDataMissing
+        );
+    }
+    require_keys_eq!(
+        *programdata.owner,
+        BPF_LOADER_UPGRADEABLE_ID,
+        LaunchError::HookProgramDataMissing
+    );
+    let data = programdata.try_borrow_data()?;
+    require!(
+        data.len() >= 13 && data[..4] == 3u32.to_le_bytes(),
+        LaunchError::HookProgramDataMissing
+    );
+    match data[12] {
+        0 => Ok(()),
+        1 if data.len() >= 45 && allowed(&data[13..45]) => Ok(()),
+        _ => err!(LaunchError::HookUpgradeable),
+    }
+}
+
 /// `create_config`.
 pub fn process_create_config(ctx: Context<CreateConfig>, args: CreateConfigArgs) -> Result<()> {
     make_config(ctx, args, 0)
@@ -126,6 +190,14 @@ fn make_config(
         &args.rules,
         program.as_ref(),
     )?;
+    // A custom hook's program data follows as the one remaining account: who may upgrade it.
+    if let Some(program) = &program {
+        let programdata = ctx
+            .remaining_accounts
+            .first()
+            .ok_or(LaunchError::HookProgramDataMissing)?;
+        check_hook_authority(program, programdata)?;
+    }
     let creator = ctx.accounts.creator.key();
     let key = ctx.accounts.launch_config.key();
     let lc = &mut ctx.accounts.launch_config;

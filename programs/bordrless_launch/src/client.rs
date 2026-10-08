@@ -11,6 +11,7 @@ use bordrless_swap::instructions::SwapArgs;
 use bordrless_token::client as token_client;
 
 use crate::constants::*;
+use crate::instructions::launch_config::programdata_address;
 use crate::instructions::{ConfigArgs, CreateConfigArgs, CreateLaunchArgs};
 use crate::state::{Launch, LaunchConfig, LaunchRules};
 
@@ -188,15 +189,20 @@ pub fn create_config(
         Some(hook) => AccountMeta::new_readonly(hook, false),
         None => absent(),
     };
+    let mut accounts = with_events(vec![
+        AccountMeta::new(creator, true),
+        AccountMeta::new_readonly(config_address(), false),
+        AccountMeta::new(launch_config, true),
+        hook_program,
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    // A custom hook's program data follows: the program checks who may upgrade the hook.
+    if let Some(hook) = args.custom_hook {
+        accounts.push(AccountMeta::new_readonly(programdata_address(&hook), false));
+    }
     Instruction {
         program_id: crate::ID,
-        accounts: with_events(vec![
-            AccountMeta::new(creator, true),
-            AccountMeta::new_readonly(config_address(), false),
-            AccountMeta::new(launch_config, true),
-            hook_program,
-            AccountMeta::new_readonly(system_program::ID, false),
-        ]),
+        accounts,
         data: crate::instruction::CreateConfig { args }.data(),
     }
 }

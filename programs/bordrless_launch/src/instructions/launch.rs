@@ -410,7 +410,8 @@ fn check_kit_accounts(
 /// with one, the remaining accounts are the hook program (the config's, executable), the token
 /// program's signer for it, the hook's registry for this mint (owned by the hook, a registry that
 /// decodes: the hook must have been prepared for the mint) and exactly the registry's number of
-/// extras.
+/// extras. Who may upgrade the hook was checked when the config was made (`check_hook_authority`):
+/// no one, or Bordrless only, so it still holds.
 fn check_custom_hook_accounts<'info>(
     remaining: &[AccountInfo<'info>],
     hook: Option<(Pubkey, u16)>,

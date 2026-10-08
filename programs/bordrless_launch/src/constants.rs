@@ -72,6 +72,23 @@ pub const STATUS_GRADUATED: u8 = 1;
 /// Longest `LaunchConfig.label`, in bytes.
 pub const LABEL_MAX: usize = 32;
 
+/// Who may hold a custom hook's upgrade authority (§5.8): a hook must be immutable, or upgradeable
+/// only by Bordrless Studio's upgrade key (a hook Studio deployed as "managed", upgraded only
+/// through Studio's review and rebuild) or by the protocol's own upgrade authority (Half-Life,
+/// tax_hook). A hook anyone else can upgrade could be swapped for other code after its token
+/// launched, so `create_config` and `create_launch` refuse it.
+pub const HOOK_UPGRADE_AUTHORITIES: [Pubkey; 2] = [
+    Pubkey::from_str_const("CS1NRyXNCPxEUP4CRoa26cHQSeSJCxXh5SPijwFhDW6W"),
+    Pubkey::from_str_const("5xsibKwtiN6ruxsYrEyWVpV3KcwuzSPbQd1n28a7spEd"),
+];
+
+/// The BPF loader 2 and loader v4 (whose programs `check_hook_authority` reads; the upgradeable
+/// loader is `BPF_LOADER_UPGRADEABLE_ID` above).
+pub const BPF_LOADER_2_ID: Pubkey =
+    Pubkey::from_str_const("BPFLoader2111111111111111111111111111111111");
+pub const LOADER_V4_ID: Pubkey =
+    Pubkey::from_str_const("LoaderV411111111111111111111111111111111111");
+
 /// The most a listed config's author may take of a launch's creator fee: half of it.
 pub const MAX_AUTHOR_SHARE_BPS: u16 = 5_000;
 /// The programs a `LaunchConfig` may not name as a custom token hook: the protocol's own (the

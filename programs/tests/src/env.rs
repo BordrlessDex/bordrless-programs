@@ -240,8 +240,16 @@ impl Env {
         };
         env.fund(env.deployer.pubkey(), 100_000_000_000);
         env.fund(env.treasury.pubkey(), 10_000_000);
+        // The protocol's programs are upgradeable by the deployer; the hooks as on mainnet: by the
+        // protocol's own upgrade authority, one of those `create_config` allows for a custom hook.
+        let hooks = [tax_hook::ID, half_life::ID, hook_tester::ID];
         for (_, id) in programs {
-            env.set_upgrade_authority(id, Some(env.deployer.pubkey()));
+            let authority = if hooks.contains(&id) {
+                bordrless_launch::constants::HOOK_UPGRADE_AUTHORITIES[1]
+            } else {
+                env.deployer.pubkey()
+            };
+            env.set_upgrade_authority(id, Some(authority));
         }
         env.sync_clock();
         env

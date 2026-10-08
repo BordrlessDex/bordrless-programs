@@ -91,4 +91,8 @@ pub enum LaunchError {
     AuthorAccountsMissing,
     #[msg("the signer is not the config's author")]
     NotAuthor,
+    #[msg("the custom hook can be upgraded by someone other than Bordrless: make it immutable or deploy it with Studio")]
+    HookUpgradeable,
+    #[msg("the custom hook's program data account is missing or wrong")]
+    HookProgramDataMissing,
 }
