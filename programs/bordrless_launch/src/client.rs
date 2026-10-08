@@ -201,6 +201,23 @@ pub fn create_config(
     }
 }
 
+/// `create_listed_config`: as [`create_config`], with the author's share of the creator fee
+/// (basis points of it) on every launch someone else makes from it.
+pub fn create_listed_config(
+    creator: Pubkey,
+    launch_config: Pubkey,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+) -> Instruction {
+    let mut ix = create_config(creator, launch_config, args.clone());
+    ix.data = crate::instruction::CreateListedConfig {
+        args,
+        author_share_bps,
+    }
+    .data();
+    ix
+}
+
 /// The kit accounts of `create_launch` for a launch of `mint` whose rules install `modules`:
 /// the kit, its config, its registry, the reward vault (holder rewards only), the kit-caller PDA
 /// and the kit's event authority; each absent (this program's id) without kit modules.
@@ -392,6 +409,53 @@ pub fn claim_creator_fees(creator: Pubkey, mint: Pubkey, quote_mint: Pubkey) -> 
         program_id: crate::ID,
         accounts: with_events(accounts),
         data: crate::instruction::ClaimCreatorFees {}.data(),
+    }
+}
+
+/// `claim_creator_fees` for a launch made from a listed config by someone else: the config and
+/// the author's holding of the quote follow, and the claim pays the author their share.
+pub fn claim_creator_fees_shared(
+    creator: Pubkey,
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    launch_config: Pubkey,
+    author: Pubkey,
+) -> Instruction {
+    let mut ix = claim_creator_fees(creator, mint, quote_mint);
+    ix.accounts
+        .push(AccountMeta::new_readonly(launch_config, false));
+    ix.accounts.push(AccountMeta::new(
+        token_client::holding_address(&quote_mint, &author),
+        false,
+    ));
+    ix
+}
+
+/// `claim_author_fees`: the listed config's author takes their share of the launch's creator
+/// fees; the creator's part is paid to the creator at the same time.
+pub fn claim_author_fees(
+    author: Pubkey,
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    launch_config: Pubkey,
+    creator: Pubkey,
+) -> Instruction {
+    let launch = launch_address(&mint);
+    let accounts = vec![
+        AccountMeta::new_readonly(author, true),
+        AccountMeta::new(launch, false),
+        AccountMeta::new_readonly(launch_config, false),
+        AccountMeta::new_readonly(quote_mint, false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &launch), false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &creator), false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &author), false),
+        AccountMeta::new_readonly(bordrless_token::ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+    ];
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(accounts),
+        data: crate::instruction::ClaimAuthorFees {}.data(),
     }
 }
 

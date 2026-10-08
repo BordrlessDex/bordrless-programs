@@ -83,4 +83,12 @@ pub enum LaunchError {
     WrongHookSigner,
     #[msg("the label is longer than 32 bytes")]
     InvalidLabel,
+    #[msg("a listed config's author share is between 1 and 5,000 basis points of the creator fee")]
+    InvalidAuthorShare,
+    #[msg("this launch pays no config author")]
+    NoAuthorShare,
+    #[msg("a launch that pays its config's author needs the config and the author's holding")]
+    AuthorAccountsMissing,
+    #[msg("the signer is not the config's author")]
+    NotAuthor,
 }

@@ -102,6 +102,28 @@ pub struct Graduated {
     pub ts: i64,
 }
 
+/// A listed config (`create_listed_config`), after its `LaunchConfigCreated`.
+#[event]
+pub struct ConfigListed {
+    pub config: Pubkey,
+    pub author: Pubkey,
+    pub author_share_bps: u16,
+    pub ts: i64,
+}
+
+/// A config author's part of a claim of creator fees (whoever claimed).
+#[event]
+pub struct AuthorFeesPaid {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    pub author: Pubkey,
+    pub amount: u64,
+    pub paid_total: u64,
+    pub slot: u64,
+    pub ts: i64,
+}
+
 #[event]
 pub struct CreatorFeesClaimed {
     pub launch: Pubkey,

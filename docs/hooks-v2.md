@@ -847,6 +847,28 @@ the site showed is what launches. The bounds and the creator fee are checked aga
 since the launch config may have changed since the `LaunchConfig` was made. `Launch.config` keeps
 the key.
 
+**Listed configs and the author's share (the marketplace; upgrade of 2026-10-08).**
+`create_listed_config(args, author_share_bps)` makes a config exactly as `create_config` does, plus
+the author's share of the creator fee: 1 to `MAX_AUTHOR_SHARE_BPS` (5,000, half) basis points of
+it, in `LaunchConfig.author_share_bps` (two of its reserved bytes; a plain config keeps 0), fixed
+for ever. It emits `ConfigListed { config, author, author_share_bps, ts }` after
+`LaunchConfigCreated`. A launch made from it by anyone but its author snapshots the share into
+`Launch.author_share_bps` (the author launching from their own config, or any other config, gets
+0); `Launch.author_fees_paid` totals what the author has been paid (ten of the launch's reserved
+bytes). The creator fee still accrues in the launch's quote holding; every claim splits what it
+takes, `floor(amount * share / 10_000)` to the author's holding of the quote and the rest to the
+creator's, whoever claims:
+
+- `claim_creator_fees`, signed by the creator, takes the `LaunchConfig` and the author's holding as
+  its remaining accounts when the launch has a share (`AuthorAccountsMissing`, `WrongHolding`);
+  without a share it is unchanged.
+- `claim_author_fees`, signed by the config's author (`NotAuthor`), takes the config, both holdings
+  and the token program's accounts; refused for a launch without a share (`NoAuthorShare`).
+
+Both emit `CreatorFeesClaimed` (the creator's part) and `AuthorFeesPaid { launch, mint, config,
+author, amount, paid_total, slot, ts }`. The share is of the creator fee only: Bordrless's share and
+the holders' are untouched. Tested in `programs/tests/tests/marketplace.rs`.
+
 ### 5.8 A creator's own token hook
 
 A `LaunchConfig` may name a hook program (`custom_hook`) with its token flags. The owner's

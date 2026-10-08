@@ -68,6 +68,17 @@ pub mod bordrless_launch {
         launch_config::process_create_config(ctx, args)
     }
 
+    /// Anyone: makes a `LaunchConfig` for the marketplace: as `create_config`, plus the author's
+    /// share of the creator fee (1 to 5,000 basis points of it) on every launch someone else makes
+    /// from it, fixed for ever.
+    pub fn create_listed_config(
+        ctx: Context<CreateConfig>,
+        args: CreateConfigArgs,
+        author_share_bps: u16,
+    ) -> Result<()> {
+        launch_config::process_create_listed_config(ctx, args, author_share_bps)
+    }
+
     /// Creates a token and its curve pool, from the inline rules or from a `LaunchConfig`. With
     /// a custom hook, the remaining accounts are the hook, the token program's signer for it,
     /// its registry for the mint and the registry's extras.
@@ -86,8 +97,14 @@ pub mod bordrless_launch {
     }
 
     /// The creator takes the creator fees collected so far.
-    pub fn claim_creator_fees(ctx: Context<ClaimCreatorFees>) -> Result<()> {
+    pub fn claim_creator_fees<'info>(ctx: Context<'info, ClaimCreatorFees<'info>>) -> Result<()> {
         claim::process_claim_creator_fees(ctx)
+    }
+
+    /// A listed config's author takes their share of a launch's creator fees; the creator's part
+    /// is paid at the same time, as on the creator's own claim.
+    pub fn claim_author_fees(ctx: Context<ClaimAuthorFees>) -> Result<()> {
+        claim::process_claim_author_fees(ctx)
     }
 
     /// Pool hook: refuses pools with this hook that this program did not create.

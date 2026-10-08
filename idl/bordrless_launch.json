@@ -212,6 +212,91 @@
       }
     },
     {
+      "name": "claim_author_fees",
+      "docs": [
+        "A listed config's author takes their share of a launch's creator fees; the creator's part",
+        "is paid at the same time, as on the creator's own claim."
+      ],
+      "discriminator": [
+        191,
+        96,
+        17,
+        221,
+        62,
+        150,
+        204,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "author",
+          "docs": [
+            "The config's author."
+          ],
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The listed config the launch was made from."
+          ]
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "launch_quote",
+          "writable": true
+        },
+        {
+          "name": "creator_quote",
+          "writable": true
+        },
+        {
+          "name": "author_quote",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_creator_fees",
       "docs": [
         "The creator takes the creator fees collected so far."
@@ -571,6 +656,80 @@
       ]
     },
     {
+      "name": "create_listed_config",
+      "docs": [
+        "Anyone: makes a `LaunchConfig` for the marketplace: as `create_config`, plus the author's",
+        "share of the creator fee (1 to 5,000 basis points of it) on every launch someone else makes",
+        "from it, fixed for ever."
+      ],
+      "discriminator": [
+        46,
+        147,
+        136,
+        9,
+        177,
+        142,
+        75,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "Whoever makes the config: pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The launch config, for the bounds."
+          ],
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The new config: a keypair that signs."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hook_program",
+          "docs": [
+            "program's id for none); checked executable in the handler."
+          ],
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateConfigArgs"
+            }
+          }
+        },
+        {
+          "name": "author_share_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "graduate",
       "docs": [
         "Graduates a launch whose pool has raised the threshold. Permissionless. With a custom",
@@ -873,6 +1032,32 @@
   ],
   "events": [
     {
+      "name": "AuthorFeesPaid",
+      "discriminator": [
+        95,
+        160,
+        247,
+        135,
+        243,
+        176,
+        0,
+        116
+      ]
+    },
+    {
+      "name": "ConfigListed",
+      "discriminator": [
+        138,
+        221,
+        31,
+        199,
+        18,
+        38,
+        5,
+        187
+      ]
+    },
+    {
       "name": "ConfigSet",
       "discriminator": [
         15,
@@ -1128,9 +1313,72 @@
       "code": 6037,
       "name": "InvalidLabel",
       "msg": "the label is longer than 32 bytes"
+    },
+    {
+      "code": 6038,
+      "name": "InvalidAuthorShare",
+      "msg": "a listed config's author share is between 1 and 5,000 basis points of the creator fee"
+    },
+    {
+      "code": 6039,
+      "name": "NoAuthorShare",
+      "msg": "this launch pays no config author"
+    },
+    {
+      "code": 6040,
+      "name": "AuthorAccountsMissing",
+      "msg": "a launch that pays its config's author needs the config and the author's holding"
+    },
+    {
+      "code": 6041,
+      "name": "NotAuthor",
+      "msg": "the signer is not the config's author"
     }
   ],
   "types": [
+    {
+      "name": "AuthorFeesPaid",
+      "docs": [
+        "A config author's part of a claim of creator fees (whoever claimed)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "paid_total",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "Config",
       "docs": [
@@ -1400,6 +1648,33 @@
                 "name": "RuleBounds"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigListed",
+      "docs": [
+        "A listed config (`create_listed_config`), after its `LaunchConfigCreated`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "author_share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }
@@ -2078,6 +2353,22 @@
             "type": "u16"
           },
           {
+            "name": "author_share_bps",
+            "docs": [
+              "The config author's share of the creator fee (basis points of it), from a listed config",
+              "whose author is not the launch's creator; 0 otherwise. Fixed at launch: every claim pays",
+              "the author this part of what it takes."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "author_fees_paid",
+            "docs": [
+              "Creator fees paid to the config's author so far (quote)."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Reserved."
@@ -2085,7 +2376,7 @@
             "type": {
               "array": [
                 "u8",
-                32
+                22
               ]
             }
           }
@@ -2169,6 +2460,16 @@
             "type": "i64"
           },
           {
+            "name": "author_share_bps",
+            "docs": [
+              "A listed config's author share (`create_listed_config`): the part of the creator fee, in",
+              "basis points of it (at most `MAX_AUTHOR_SHARE_BPS`), paid to `creator` (the config's",
+              "author) on every launch made from it by someone else. Fixed at creation; 0 for a config",
+              "made with `create_config`."
+            ],
+            "type": "u16"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Reserved."
@@ -2176,7 +2477,7 @@
             "type": {
               "array": [
                 "u8",
-                32
+                30
               ]
             }
           }

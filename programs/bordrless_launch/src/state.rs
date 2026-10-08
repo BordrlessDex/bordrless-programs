@@ -186,8 +186,13 @@ pub struct LaunchConfig {
     pub label: String,
     /// Creation time.
     pub created_at: i64,
+    /// A listed config's author share (`create_listed_config`): the part of the creator fee, in
+    /// basis points of it (at most `MAX_AUTHOR_SHARE_BPS`), paid to `creator` (the config's
+    /// author) on every launch made from it by someone else. Fixed at creation; 0 for a config
+    /// made with `create_config`.
+    pub author_share_bps: u16,
     /// Reserved.
-    pub reserved: [u8; 32],
+    pub reserved: [u8; 30],
 }
 
 impl LaunchConfig {
@@ -285,8 +290,14 @@ pub struct Launch {
     pub custom_hook: Option<Pubkey>,
     /// The custom hook's flags; 0 without one.
     pub custom_hook_flags: u16,
+    /// The config author's share of the creator fee (basis points of it), from a listed config
+    /// whose author is not the launch's creator; 0 otherwise. Fixed at launch: every claim pays
+    /// the author this part of what it takes.
+    pub author_share_bps: u16,
+    /// Creator fees paid to the config's author so far (quote).
+    pub author_fees_paid: u64,
     /// Reserved.
-    pub reserved: [u8; 32],
+    pub reserved: [u8; 22],
 }
 
 impl Launch {

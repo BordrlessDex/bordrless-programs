@@ -9,7 +9,7 @@ use bordrless_hook::token_flags;
 
 use crate::constants::*;
 use crate::error::LaunchError;
-use crate::events::LaunchConfigCreated;
+use crate::events::{ConfigListed, LaunchConfigCreated};
 use crate::instructions::launch::check_rules;
 use crate::state::*;
 
@@ -85,6 +85,28 @@ pub fn check_custom_hook(
 
 /// `create_config`.
 pub fn process_create_config(ctx: Context<CreateConfig>, args: CreateConfigArgs) -> Result<()> {
+    make_config(ctx, args, 0)
+}
+
+/// `create_listed_config`: `create_config`, plus the author's share of the creator fee on every
+/// launch made from it by someone else (1 to `MAX_AUTHOR_SHARE_BPS` of it), fixed for ever.
+pub fn process_create_listed_config(
+    ctx: Context<CreateConfig>,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+) -> Result<()> {
+    require!(
+        author_share_bps > 0 && author_share_bps <= MAX_AUTHOR_SHARE_BPS,
+        LaunchError::InvalidAuthorShare
+    );
+    make_config(ctx, args, author_share_bps)
+}
+
+fn make_config(
+    ctx: Context<CreateConfig>,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let config = &ctx.accounts.config;
     require!(args.label.len() <= LABEL_MAX, LaunchError::InvalidLabel);
@@ -115,7 +137,8 @@ pub fn process_create_config(ctx: Context<CreateConfig>, args: CreateConfigArgs)
     lc.custom_hook_flags = args.custom_hook_flags;
     lc.label = args.label.clone();
     lc.created_at = now;
-    lc.reserved = [0; 32];
+    lc.author_share_bps = author_share_bps;
+    lc.reserved = [0; 30];
     emit_cpi!(LaunchConfigCreated {
         config: key,
         creator,
@@ -126,5 +149,13 @@ pub fn process_create_config(ctx: Context<CreateConfig>, args: CreateConfigArgs)
         label: args.label,
         ts: now,
     });
+    if author_share_bps > 0 {
+        emit_cpi!(ConfigListed {
+            config: key,
+            author: creator,
+            author_share_bps,
+            ts: now,
+        });
+    }
     Ok(())
 }

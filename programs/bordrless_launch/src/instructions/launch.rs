@@ -303,6 +303,8 @@ struct Plan<'info> {
     early_window_end: i64,
     early_unlock_at: i64,
     config: Option<Pubkey>,
+    /// The config author's share of the creator fee (a listed config made by someone else).
+    author_share_bps: u16,
     custom: Option<CustomHook<'info>>,
 }
 
@@ -474,16 +476,29 @@ fn plan<'info>(
     // The rules: the launch config's when there is one (the arguments must match it), else the
     // arguments'. Bounds and the creator fee are checked either way: the config they were made
     // under may have changed.
-    let (rules, creator_fee_bps, hook, config_key) = match &ctx.accounts.launch_config {
-        Some(lc) => {
-            require!(
-                args.rules == lc.rules && args.creator_fee_bps == lc.creator_fee_bps,
-                LaunchError::ConfigMismatch
-            );
-            (lc.rules, lc.creator_fee_bps, lc.hook(), Some(lc.key()))
-        }
-        None => (args.rules, args.creator_fee_bps, None, None),
-    };
+    // A listed config's author shares the creator fee of every launch someone else makes from it.
+    let (rules, creator_fee_bps, hook, config_key, author_share_bps) =
+        match &ctx.accounts.launch_config {
+            Some(lc) => {
+                require!(
+                    args.rules == lc.rules && args.creator_fee_bps == lc.creator_fee_bps,
+                    LaunchError::ConfigMismatch
+                );
+                let share = if lc.creator == ctx.accounts.creator.key() {
+                    0
+                } else {
+                    lc.author_share_bps.min(MAX_AUTHOR_SHARE_BPS)
+                };
+                (
+                    lc.rules,
+                    lc.creator_fee_bps,
+                    lc.hook(),
+                    Some(lc.key()),
+                    share,
+                )
+            }
+            None => (args.rules, args.creator_fee_bps, None, None, 0),
+        };
     require!(
         creator_fee_bps <= config.max_creator_fee_bps,
         LaunchError::CreatorFeeTooHigh
@@ -554,6 +569,7 @@ fn plan<'info>(
         early_window_end,
         early_unlock_at,
         config: config_key,
+        author_share_bps,
         custom,
     }))
 }
@@ -982,7 +998,9 @@ fn record_launch<'info>(
     launch.config = plan.config.unwrap_or_default();
     launch.custom_hook = plan.custom_hook();
     launch.custom_hook_flags = plan.custom_hook_flags();
-    launch.reserved = [0; 32];
+    launch.author_share_bps = plan.author_share_bps;
+    launch.author_fees_paid = 0;
+    launch.reserved = [0; 22];
     Ok(())
 }
 
