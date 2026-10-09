@@ -1,6 +1,6 @@
 [package]
 name = "bordrless-game"
-description = "Game ticket standard v1: the header a game coin's token hook keeps in its state, the ticket ranges it keeps in each holding's hook data, the rules that write them (ranges only shrink) and the pure helpers the Bordrless companion reads them with (round arithmetic, a round's ticket total, the verifiable draw index, the winning check)."
+description = "The game ticket standard (v1 layouts; phase 2 adds the jackpot and the streak): the header a game coin's token hook keeps in its state, the ticket ranges it keeps in each holding's hook data, the rules that write them (ranges only shrink) and the pure helpers the Bordrless companion reads them with (round arithmetic, a round's ticket total, the verifiable draw index, the winning check)."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

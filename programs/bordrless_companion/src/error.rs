@@ -105,4 +105,11 @@ pub enum CompanionError {
     HookNotBlocked,
     #[msg("a draw's seed comes from one of the last 3 slots, which ORAO has not answered: build the draw again from a newer slot")]
     StaleSeed,
+    // ---- v2.1: the jackpot and the streak. Appended, so every code above keeps its number. ----
+    #[msg("this step is for another kind of game")]
+    WrongGameKind,
+    #[msg("this holding has no share of the epoch: no weight registered, below the minimum, above its balance, or forfeited by a send")]
+    NoShare,
+    #[msg("the launch holds creator fees nobody has claimed that could fund this prize: claim the fees first, in the same transaction")]
+    FeesUnclaimed,
 }

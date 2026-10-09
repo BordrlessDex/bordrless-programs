@@ -30,7 +30,7 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `bordrless_companion` | `6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo` | [Companions](docs/companions.md): a launch's creator as a program, so its fees buy back, reward holders, vest, or run a [game](docs/games.md), with no keeper |
 | `lottery_hook` | `HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr` | [Lottery coins](docs/games.md): the token hook that gives holders tickets for a companion's draws |
 
-Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026). Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -43,7 +43,7 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
-| `bordrless_companion` | `4e6dbc6895bcf8c4c114997a35747e6356640b8a9b5f622e8a5db44722aaafcf` |
+| `bordrless_companion` | `fff582d8dbfb8f7e70dd5871b74e12fcb4116dd4697e030a75d85de9bdadf222` |
 | `lottery_hook` | `c5d5000804d10fb1adc7576ee995b2c1f27a9bc8d9d51ba7df270f70a9922a5d` |
 
 The IDLs are in [`idl/`](idl).

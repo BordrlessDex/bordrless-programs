@@ -2052,9 +2052,9 @@ fn kit_companions_are_unchanged() {
             c.pending_pot,
             c.round_secs,
             c.stranded_burned_at,
-            c.reserved
+            (c.game_kind, c.pot_locked, c.reserved)
         ),
-        (0, 0, 0, 0, [0; 10])
+        (0, 0, 0, 0, (GameKind::Lottery, 0, [0; 1]))
     );
     assert!(w.env.account(&companion::game_address(&mint)).is_none());
     let keys = LaunchKeys::of(&w.launch(&mint));

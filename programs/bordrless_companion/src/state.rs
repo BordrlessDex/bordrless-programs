@@ -89,7 +89,15 @@ pub struct Companion {
     /// buyback that had spent what it was given, is never burned before keepers have had that
     /// long to spend it.
     pub stranded_burned_at: i64,
-    pub reserved: [u8; 10],
+    // ---- v2.1 (jackpot and streak), from what was the last 10 bytes of `reserved`, zero in every
+    // companion made before: a lottery's kind, nothing locked. ----
+    /// The game's kind (`create_game`), which the launch checks the hook's flags and header by.
+    pub game_kind: GameKind,
+    /// The part of `pending_pot` a closed streak epoch still owes its holders: a cap lowered since
+    /// never trims it (`steps::enforce_terms`), and only a block moves it to the buyback. Zero for
+    /// every other kind.
+    pub pot_locked: u64,
+    pub reserved: [u8; 1],
 }
 
 impl Companion {
@@ -179,12 +187,30 @@ impl Companion {
     }
 }
 
-/// The kinds of game a companion runs. Borsh writes the variant's index, so a kind added later
-/// (a last-buyer jackpot, a holding streak) is appended and every game made before keeps its own.
+/// The kinds of game a companion runs. Borsh writes the variant's index, so a kind added later is
+/// appended and every game made before keeps its own (a companion made before phase 2 reads 0,
+/// the lottery, in `Companion.game_kind`).
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum GameKind {
     /// A verifiable draw each round, weighted by tokens held (game ticket standard v1).
     Lottery,
+    /// The last qualifying buyer wins once the timer runs out (`bordrless_game::jackpot`).
+    Jackpot,
+    /// Each epoch's share goes to the holders who held through it without sending
+    /// (`bordrless_game::streak`).
+    Streak,
+}
+
+impl GameKind {
+    /// The token hook callbacks a game of this kind needs its hook to run, exactly (checked at the
+    /// launch): transfers and burns, writing hook data. Every kind keeps its state in hook data
+    /// and the header; none takes a delta (which could skim the companion's buybacks) or a
+    /// callback its hook may lack (`after_burn` would fail every burn).
+    pub fn hook_flags(&self) -> u16 {
+        match self {
+            GameKind::Lottery | GameKind::Jackpot | GameKind::Streak => LOTTERY_HOOK_FLAGS,
+        }
+    }
 }
 
 /// Where a game's draw is.
@@ -270,8 +296,25 @@ pub struct Game {
     /// Requests the pot has paid for since ORAO last answered one of this game's (a reveal, or
     /// the last paid request found answered).
     pub paid_streak: u8,
-    /// Room for the kinds to come (their settings and state), zero until then.
-    pub reserved: [u8; 83],
+    // ---- Jackpot (from `reserved`; zero for every other kind) ----
+    /// A round ends this long after its last qualifying buy (as the hook's jackpot header says).
+    pub timer_secs: u32,
+    /// The least a qualifying buy delivers (as the hook says; its holding must still hold the
+    /// round's amount).
+    pub min_tokens: u64,
+    /// The last round settled (paid or forfeited), by number: only later rounds can be.
+    pub paid_buys: u64,
+    // ---- Streak (from `reserved`; zero for every other kind). The epochs are the rounds
+    // (`round_secs`); the claim epoch is `round`, its total `total`, its pot `prize`, and claims
+    // are open while `status` is `Revealed`, until `claims_end`. ----
+    /// A holding shares in an epoch only if, by its end, it has sent nothing for this long.
+    pub min_streak_secs: u32,
+    /// The least weight that shares.
+    pub min_weight: u64,
+    /// What the claim epoch's pot has paid so far (bounties included).
+    pub epoch_paid: u64,
+    /// Room for the kinds to come, zero until then.
+    pub reserved: [u8; 43],
 }
 
 impl Game {
@@ -462,6 +505,40 @@ impl HookTerms {
     }
 }
 
+/// `PDA(["claimed", game, epoch_le, owner])`: a streak share claimed (`claim_share`), so nobody
+/// claims an epoch twice. Its rent is the sender's, who gets it back (`close_receipt`) once the
+/// epoch's claims have ended.
+#[account]
+#[derive(InitSpace)]
+pub struct ShareReceipt {
+    pub version: u8,
+    pub bump: u8,
+    pub game: Pubkey,
+    pub epoch: u32,
+    pub owner: Pubkey,
+    /// Who paid the rent, and gets it back.
+    pub payer: Pubkey,
+    /// Paid to the owner (after the sender's bounty).
+    pub amount: u64,
+    pub claimed_at: i64,
+}
+
+impl ShareReceipt {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(game: &Pubkey, epoch: u32, owner: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(
+            &[
+                CLAIMED_SEED,
+                game.as_ref(),
+                &epoch.to_le_bytes(),
+                owner.as_ref(),
+            ],
+            &crate::ID,
+        )
+    }
+}
+
 /// The pool's price: its quote side over its base side, real and virtual, times `PRICE_SCALE`.
 pub fn spot_price(
     quote_reserve: u64,
@@ -537,7 +614,9 @@ mod tests {
             pending_pot: 0,
             round_secs: 0,
             stranded_burned_at: 0,
-            reserved: [0; 10],
+            game_kind: GameKind::Lottery,
+            pot_locked: 0,
+            reserved: [0; 1],
         }
     }
 
@@ -592,6 +671,23 @@ mod tests {
         assert_eq!(&tail[42..46], &3_600u32.to_le_bytes());
         assert_eq!(&tail[46..54], &(-2i64).to_le_bytes());
         assert_eq!(&tail[54..], &[0u8; 10][..]);
+        // Phase 2's fields take what was left: the kind (0, the lottery, in every companion made
+        // before), the locked part of the pot, one byte still reserved.
+        let k = Companion {
+            game_kind: GameKind::Streak,
+            pot_locked: u64::MAX - 1,
+            ..g.clone()
+        };
+        let mut data3 = Vec::new();
+        k.try_serialize(&mut data3).unwrap();
+        assert_eq!(data3.len(), Companion::LEN);
+        assert_eq!(data2[..Companion::LEN - 10], data3[..Companion::LEN - 10]);
+        let tail = &data3[Companion::LEN - 10..];
+        assert_eq!(tail[0], 2);
+        assert_eq!(&tail[1..9], &(u64::MAX - 1).to_le_bytes());
+        assert_eq!(tail[9], 0);
+        let zeros = Companion::try_deserialize(&mut &data2[..]).unwrap();
+        assert_eq!((zeros.game_kind, zeros.pot_locked), (GameKind::Lottery, 0));
     }
 
     #[test]
@@ -713,7 +809,13 @@ mod tests {
             paid_seed: [0; 32],
             paid_round: 0,
             paid_streak: 0,
-            reserved: [0; 83],
+            timer_secs: 0,
+            min_tokens: 0,
+            paid_buys: 0,
+            min_streak_secs: 0,
+            min_weight: 0,
+            epoch_paid: 0,
+            reserved: [0; 43],
         };
         assert_eq!(g.attempt_opens(0), Some(1_000));
         assert_eq!(g.attempt_opens(8), Some(1_000 + 8 * 600));
@@ -737,6 +839,37 @@ mod tests {
         g.try_serialize(&mut data).unwrap();
         assert_eq!(data.len(), Game::LEN);
         assert_eq!(Game::LEN, 8 + 478, "the account keeps its size");
+        // Phase 2's fields take the first 40 of what were the last 83 reserved bytes, in order;
+        // a game made before reads them as zeros (as `create_game` wrote them).
+        let k = Game {
+            timer_secs: 0x0102_0304,
+            min_tokens: 0x1112_1314_1516_1718,
+            paid_buys: 0x2122_2324_2526_2728,
+            min_streak_secs: 0x3132_3334,
+            min_weight: 0x4142_4344_4546_4748,
+            epoch_paid: 0x5152_5354_5556_5758,
+            ..g.clone()
+        };
+        let mut data2 = Vec::new();
+        k.try_serialize(&mut data2).unwrap();
+        assert_eq!(data[..Game::LEN - 83], data2[..Game::LEN - 83]);
+        let tail = &data2[Game::LEN - 83..];
+        assert_eq!(&tail[..4], &0x0102_0304u32.to_le_bytes());
+        assert_eq!(&tail[4..12], &k.min_tokens.to_le_bytes());
+        assert_eq!(&tail[12..20], &k.paid_buys.to_le_bytes());
+        assert_eq!(&tail[20..24], &0x3132_3334u32.to_le_bytes());
+        assert_eq!(&tail[24..32], &k.min_weight.to_le_bytes());
+        assert_eq!(&tail[32..40], &k.epoch_paid.to_le_bytes());
+        assert_eq!(&tail[40..], &[0u8; 43][..]);
+        assert!(data[Game::LEN - 83..].iter().all(|b| *b == 0));
+        // The kinds' Borsh numbers: a lottery made before stays one.
+        assert_eq!(data[10], 0, "Game.kind of a lottery");
+        let mut kind = Vec::new();
+        GameKind::Streak.serialize(&mut kind).unwrap();
+        GameKind::Jackpot.serialize(&mut kind).unwrap();
+        assert_eq!(kind, [2, 1]);
+        // A receipt is small: its rent is about 0.0015 SOL.
+        assert_eq!(ShareReceipt::LEN, 8 + 1 + 1 + 32 + 4 + 32 + 32 + 8 + 8);
     }
 
     #[test]
@@ -778,7 +911,13 @@ mod tests {
             paid_seed: [0; 32],
             paid_round: 0,
             paid_streak: 0,
-            reserved: [0; 83],
+            timer_secs: 0,
+            min_tokens: 0,
+            paid_buys: 0,
+            min_streak_secs: 0,
+            min_weight: 0,
+            epoch_paid: 0,
+            reserved: [0; 43],
         };
         let launched = 1_000_000;
         // Short rounds: 30 days; the launch counts until a prize is paid.

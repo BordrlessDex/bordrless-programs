@@ -17,9 +17,9 @@ use bordrless_launch::instructions::CreateLaunchArgs;
 use bordrless_token::client::{self as token_client, Hook};
 
 use crate::constants::*;
-use crate::instructions::{CreateArgs, CreateGameArgs, HookStatusArgs};
+use crate::instructions::{CreateArgs, CreateGameArgs, GameKindArgs, HookStatusArgs};
 use crate::oracle;
-use crate::state::{Companion, Game, HookStatus};
+use crate::state::{Companion, Game, HookStatus, ShareReceipt};
 
 /// This program's event authority.
 pub fn event_authority() -> Pubkey {
@@ -638,4 +638,187 @@ pub fn set_hook_status(authority: Pubkey, hook: Pubkey, args: HookStatusArgs) ->
         .to_account_metas(None),
         data: crate::instruction::SetHookStatus { hook, args }.data(),
     }
+}
+
+// ---- Phase 2: the jackpot, the streak, Studio hooks -------------------------------------------------
+
+/// A program's ProgramData under the upgradeable loader: `PDA([program], loader)`.
+pub fn hook_program_data_address(hook: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[hook.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0
+}
+
+/// [`create_game`] with the hook's ProgramData passed (read-only, as a remaining account): what
+/// lets the program take a hook upgradeable only by the protocol's keys (a Studio hook) without a
+/// status. Harmless for any other hook.
+pub fn create_game_with_program_data(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateGameArgs,
+) -> Instruction {
+    let hook = args.hook;
+    let mut ix = create_game(payer, mint, args);
+    ix.accounts.push(AccountMeta::new_readonly(
+        hook_program_data_address(&hook),
+        false,
+    ));
+    ix
+}
+
+/// `create_game_v2(args, kind)`: a game of any kind for `mint` (whose keypair signs), `payer`
+/// paying the rent; the hook's ProgramData is passed (see [`create_game_with_program_data`]).
+pub fn create_game_v2(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateGameArgs,
+    kind: GameKindArgs,
+) -> Instruction {
+    let hook = args.hook;
+    let mut accounts = crate::accounts::CreateGame {
+        payer,
+        mint,
+        companion: companion_address(&mint),
+        game: game_address(&mint),
+        hook_state: bordrless_game::state_address(&args.hook, &mint).0,
+        hook_registry: hook_accounts_address(&args.hook, &mint).0,
+        hook_status: hook_status_address(&args.hook),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.push(AccountMeta::new_readonly(
+        hook_program_data_address(&hook),
+        false,
+    ));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateGameV2 { args, kind }.data(),
+    }
+}
+
+/// `settle`: the oldest jackpot round of `mint`'s game (hook `hook`) that is over, whose last
+/// qualifying buyer is `buyer` (the header's `last_buyer`, or its `ended_buyer` while that round is
+/// open): paid if their holding still holds what they bought (nothing when the pot is below its
+/// minimum), else forfeited. When the launch holds unclaimed fees that could fund the prize, send
+/// [`claim_fees_game`] first, in the same transaction.
+pub fn settle(cranker: Pubkey, mint: Pubkey, hook: Pubkey, buyer: Pubkey) -> Instruction {
+    let creator = creator_address(&mint);
+    let mut accounts = crate::accounts::ClaimPrize {
+        cranker,
+        companion: companion_address(&mint),
+        creator,
+        game: game_address(&mint),
+        hook_status: hook_status_address(&hook),
+        launch: launch_client::launch_address(&mint),
+        holding: token_client::holding_address(&mint, &buyer),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.push(AccountMeta::new_readonly(
+        bordrless_game::state_address(&hook, &mint).0,
+        false,
+    ));
+    accounts.push(AccountMeta::new(buyer, false));
+    // The launch's holding of creator fees: a prize they could fund is never closed unfunded.
+    accounts.push(AccountMeta::new_readonly(
+        token_client::holding_address(&BRIDGED_SOL_MINT, &launch_client::launch_address(&mint)),
+        false,
+    ));
+    accounts.extend(unwrap_accounts(creator));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::Settle {}.data(),
+    }
+}
+
+/// `close_epoch(epoch)`: streak epoch `epoch` of `mint`'s game (hook `hook`) closed.
+pub fn close_epoch(cranker: Pubkey, mint: Pubkey, hook: Pubkey, epoch: u32) -> Instruction {
+    let extra = vec![AccountMeta::new_readonly(
+        bordrless_game::state_address(&hook, &mint).0,
+        false,
+    )];
+    Instruction {
+        program_id: crate::ID,
+        accounts: game_step(cranker, mint, hook, extra),
+        data: crate::instruction::CloseEpoch { epoch }.data(),
+    }
+}
+
+/// The receipt of `owner`'s claim of streak epoch `epoch` of `mint`'s game:
+/// `PDA(["claimed", game, epoch_le, owner])`.
+pub fn receipt_address(mint: &Pubkey, epoch: u32, owner: &Pubkey) -> Pubkey {
+    ShareReceipt::address(&game_address(mint), epoch, owner).0
+}
+
+/// `claim_share(epoch)`: `owner`'s share of streak epoch `epoch` of `mint`'s game (hook `hook`),
+/// paid to `owner`; `cranker` pays the receipt's rent and is paid the bounty.
+pub fn claim_share(
+    cranker: Pubkey,
+    mint: Pubkey,
+    hook: Pubkey,
+    epoch: u32,
+    owner: Pubkey,
+) -> Instruction {
+    let creator = creator_address(&mint);
+    let mut accounts = crate::accounts::ClaimShare {
+        cranker,
+        companion: companion_address(&mint),
+        creator,
+        game: game_address(&mint),
+        hook_status: hook_status_address(&hook),
+        launch: launch_client::launch_address(&mint),
+        holding: token_client::holding_address(&mint, &owner),
+        owner,
+        receipt: receipt_address(&mint, epoch, &owner),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(unwrap_accounts(creator));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::ClaimShare { epoch }.data(),
+    }
+}
+
+/// `close_receipt`: `owner`'s receipt of streak epoch `epoch` of `mint`'s game closed, its rent
+/// to `payer` (who paid it: `ShareReceipt.payer`).
+pub fn close_receipt(mint: Pubkey, epoch: u32, owner: Pubkey, payer: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: crate::accounts::CloseReceipt {
+            receipt: receipt_address(&mint, epoch, &owner),
+            payer,
+            game: game_address(&mint),
+        }
+        .to_account_metas(None),
+        data: crate::instruction::CloseReceipt {}.data(),
+    }
+}
+
+/// `retire` of a jackpot or a streak: the hook's state is passed, so the program can tell whether
+/// a round or an epoch the pot can pay now is still to be settled or closed (it then waits).
+pub fn retire_game(cranker: Pubkey, mint: Pubkey, hook: Pubkey) -> Instruction {
+    let mut ix = retire(cranker, mint, hook);
+    ix.accounts.push(AccountMeta::new_readonly(
+        bordrless_game::state_address(&hook, &mint).0,
+        false,
+    ));
+    // The fees a claim would bring the pot (the launch's, and any surplus in the creator's
+    // holding): a prize they would fund is due too.
+    ix.accounts.push(AccountMeta::new_readonly(
+        token_client::holding_address(&BRIDGED_SOL_MINT, &launch_client::launch_address(&mint)),
+        false,
+    ));
+    ix.accounts.push(AccountMeta::new_readonly(
+        token_client::holding_address(&BRIDGED_SOL_MINT, &creator_address(&mint)),
+        false,
+    ));
+    ix
 }

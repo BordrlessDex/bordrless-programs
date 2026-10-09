@@ -270,3 +270,124 @@ pub struct HookStatusSet {
     pub blocked: bool,
     pub authority: Pubkey,
 }
+
+// ---- v2.1: the jackpot and the streak ----------------------------------------------------------
+
+/// `create_game_v2`: the game's kind settings (with `GameCreated`), and the terms its hook had
+/// when it was made (a hook without a status is not audited: capped).
+#[event]
+pub struct GameKindSet {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub kind: GameKind,
+    pub timer_secs: u32,
+    pub min_tokens: u64,
+    pub min_streak_secs: u32,
+    pub min_weight: u64,
+    pub audited: bool,
+    /// The pot's cap (0: none, audited).
+    pub pot_cap: u64,
+}
+
+/// A jackpot round paid its last qualifying buyer.
+#[event]
+pub struct JackpotPaid {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    /// The round's number (the count of qualifying buys at its last one).
+    pub round: u64,
+    pub holding: Pubkey,
+    pub winner: Pubkey,
+    /// What they bought, and when.
+    pub amount: u64,
+    pub bought_at: i64,
+    /// Paid to the winner as SOL, and to the sender.
+    pub prize: u64,
+    pub bounty: u64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}
+
+/// Why a jackpot round was forfeited.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForfeitReason {
+    /// Its buyer no longer held what they bought (or sent anything since).
+    NotHeld,
+    /// Its buyer's address can't be paid (a program's, a sysvar's, a reserved key).
+    Unpayable,
+    /// It was left unsettled `SETTLE_GRACE_SECS` after its timer ran out.
+    Stale,
+}
+
+/// A jackpot round closed unpaid: its buyer no longer held what they bought (or sent anything
+/// since), can't be paid, or the round was left unsettled too long. The pot stays.
+#[event]
+pub struct JackpotForfeited {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub round: u64,
+    pub reason: ForfeitReason,
+    pub buyer: Pubkey,
+    pub amount: u64,
+    pub bought_at: i64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}
+
+/// A jackpot round closed paying nothing: its buyer held, but the pot was below its minimum when it
+/// was settled (or an empty wallet could not have taken so small a prize). The pot stays.
+#[event]
+pub struct JackpotUnfunded {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub round: u64,
+    pub winner: Pubkey,
+    pub amount: u64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}
+
+/// A streak epoch closed: its pot and total fixed, its claims open until `claims_end`.
+#[event]
+pub struct EpochClosed {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub epoch: u32,
+    /// The epoch's weight total (the hook's header).
+    pub total: u64,
+    /// What its holders share (locked for them until `claims_end`).
+    pub epoch_pot: u64,
+    pub claims_end: i64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}
+
+/// A streak epoch's claims ended: what it did not pay rolls over in the pot.
+#[event]
+pub struct EpochEnded {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub epoch: u32,
+    pub unclaimed: u64,
+    pub pending_pot: u64,
+}
+
+/// A holding's share of a streak epoch paid to its owner.
+#[event]
+pub struct ShareClaimed {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub epoch: u32,
+    pub holding: Pubkey,
+    pub owner: Pubkey,
+    /// Its weight, of the epoch's total.
+    pub weight: u64,
+    pub total: u64,
+    /// Paid to the owner as SOL, and to the sender.
+    pub share: u64,
+    pub bounty: u64,
+    /// What the epoch's pot has paid so far.
+    pub epoch_paid: u64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}

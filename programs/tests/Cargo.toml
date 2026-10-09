@@ -22,6 +22,11 @@ half-life = { path = "../half_life", features = ["no-entrypoint"] }
 lottery-hook = { path = "../lottery_hook", features = ["no-entrypoint"] }
 bordrless-companion = { path = "../bordrless_companion", features = ["no-entrypoint"] }
 hook-tester = { path = "../hook_tester", features = ["no-entrypoint"] }
+# Studio's game starters (test-only; fixtures/starters): their instructions, built from their crates.
+studio-jackpot = { path = "fixtures/starters/jackpot", features = ["no-entrypoint"] }
+studio-streak = { path = "fixtures/starters/streak", features = ["no-entrypoint"] }
+# The runtime's reserved keys, which the companion's jackpot must know (`RESERVED_KEYS`).
+agave-reserved-account-keys = "=4.3.0"
 solana-account = "=4.7.0"
 solana-hash.workspace = true
 solana-keypair.workspace = true

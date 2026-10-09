@@ -144,6 +144,39 @@ pub mod bordrless_companion {
         instructions::game::process_burn_stranded(ctx)
     }
 
+    // ---- Phase 2: the jackpot and the streak ----
+
+    /// Makes the companion's game of any kind (`create_game`'s arguments, and the kind's own
+    /// settings): a lottery, a last-buyer jackpot or a holding streak.
+    pub fn create_game_v2(
+        ctx: Context<CreateGame>,
+        args: CreateGameArgs,
+        kind: GameKindArgs,
+    ) -> Result<()> {
+        instructions::game::process_create_game_v2(ctx, args, kind)
+    }
+
+    /// Anyone: closes the oldest jackpot round that is over, paying its last qualifying buyer if
+    /// they still hold what they bought, else forfeiting it.
+    pub fn settle<'info>(ctx: Context<'info, ClaimPrize<'info>>) -> Result<()> {
+        instructions::kinds::process_settle(ctx)
+    }
+
+    /// Anyone: once streak epoch `epoch` is over, fixes its pot and total and opens its claims.
+    pub fn close_epoch<'info>(ctx: Context<'info, GameStep<'info>>, epoch: u32) -> Result<()> {
+        instructions::kinds::process_close_epoch(ctx, epoch)
+    }
+
+    /// Anyone, for any holding: pays its owner its share of streak epoch `epoch`, once.
+    pub fn claim_share<'info>(ctx: Context<'info, ClaimShare<'info>>, epoch: u32) -> Result<()> {
+        instructions::kinds::process_claim_share(ctx, epoch)
+    }
+
+    /// Anyone: once a receipt's epoch's claims have ended, returns its rent to whoever paid it.
+    pub fn close_receipt(ctx: Context<CloseReceipt>) -> Result<()> {
+        instructions::kinds::process_close_receipt(ctx)
+    }
+
     /// The protocol's upgrade authority: whether a game hook is audited, its pots' cap while not,
     /// and whether it is blocked.
     pub fn set_hook_status(

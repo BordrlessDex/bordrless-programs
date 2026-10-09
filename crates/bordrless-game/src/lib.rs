@@ -63,9 +63,39 @@
 //! hold tickets ([`eligible`]): never the launch pool, the launch, the companion's creator address,
 //! or any address off the ed25519 curve.
 
+//!
+//! # Phase 2: the jackpot and the streak
+//!
+//! Two more kinds of game use the same header and slots, each adding a header of its own right
+//! after the base header (offset 120, where a lottery hook's own fields start: the companion reads
+//! it only for a game of that kind, after its magic): [`jackpot`] (`BRJ1`, the last-buyer jackpot)
+//! and [`streak`] (`BRS1`, the diamond-hands streak). Every phase-1 offset, rule and helper above is
+//! unchanged. [`launch`] reads what a hook needs of its launch (the pool, and whether it is on its
+//! bonding curve), [`holding`] a holding (for `enter`); [`cpi`] is the one call a game hook makes
+//! (`enter`'s `write_hook_data`).
+
 #![forbid(unsafe_code)]
 
 use anchor_lang::prelude::*;
+
+pub mod cpi;
+pub mod holding;
+pub mod jackpot;
+pub mod launch;
+pub mod streak;
+
+pub use cpi::{write_own_hook_data, TOKEN_EVENT_AUTHORITY, TOKEN_PROGRAM_ID};
+pub use holding::{parse_holding, read_holding, HoldingView};
+pub use jackpot::{
+    jackpot_mark, jackpot_on_buy, jackpot_on_receive, jackpot_on_send, jackpot_winner_holds,
+    qualifying_buy, set_jackpot_mark, settle_round, timer_over, valid_timer_secs, EndedRound,
+    JackpotHeader, JackpotRound, JACKPOT_ENDED_ROUNDS, JACKPOT_MAGIC,
+};
+pub use launch::{parse_launch, read_launch, LaunchView};
+pub use streak::{
+    share_of, streak_on_enter, streak_on_receive, streak_on_send, streak_qualifies, streak_weight,
+    StreakHeader, STREAK_MAGIC,
+};
 
 /// The first four bytes of a game hook's header: `"BRG1"`, the standard's layout version 1.
 pub const MAGIC: [u8; 4] = *b"BRG1";
@@ -722,3 +752,5 @@ pub fn wins(hook_data: &[u8; HOOK_DATA_LEN], round: u32, x: u64, balance: u64) -
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_phase2;

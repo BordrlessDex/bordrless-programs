@@ -1,9 +1,11 @@
 pub mod create;
 pub mod game;
+pub mod kinds;
 pub mod steps;
 
 pub use create::*;
 pub use game::*;
+pub use kinds::*;
 pub use steps::*;
 
 use anchor_lang::prelude::Pubkey;

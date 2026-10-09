@@ -123,7 +123,9 @@ pub fn process_create(ctx: Context<Create>, args: CreateArgs) -> Result<()> {
     c.pending_pot = 0;
     c.round_secs = 0;
     c.stranded_burned_at = 0;
-    c.reserved = [0; 10];
+    c.game_kind = GameKind::Lottery;
+    c.pot_locked = 0;
+    c.reserved = [0; 1];
     emit_cpi!(CompanionCreated {
         companion: c.key(),
         mint,
@@ -253,15 +255,17 @@ pub fn process_launch<'info>(
     Ok(())
 }
 
-/// A game companion's launch: the token's hook is the game's, with exactly the callbacks a lottery
-/// runs (transfers and burns, writing hook data: no deltas, which could skim the companion's
-/// buybacks, and no callback the hook may lack, which would fail every burn), and the hook's state
-/// for the mint is a game ticket header for this mint with the game's round length. The state is
-/// the hook's own extra account in `create_launch`'s, so the check needs no account of its own (nor
-/// the `Game`: the companion keeps the hook and the round length).
+/// A game companion's launch: the token's hook is the game's, with exactly the callbacks its kind
+/// needs (`GameKind::hook_flags`: transfers and burns, writing hook data; no deltas, which could
+/// skim the companion's buybacks, and no callback the hook may lack, which would fail every burn),
+/// and the hook's state for the mint is a game ticket header for this mint with the game's round
+/// length (and, for a jackpot or a streak, its kind's header after it). The state is the hook's own
+/// extra account in `create_launch`'s, so the check needs no account of its own (nor the `Game`:
+/// the companion keeps the hook, its kind and the round length).
 fn check_game_launch(c: &Companion, launch: &Launch, remaining: &[AccountInfo]) -> Result<()> {
     require!(
-        launch.custom_hook == Some(c.game_hook) && launch.custom_hook_flags == LOTTERY_HOOK_FLAGS,
+        launch.custom_hook == Some(c.game_hook)
+            && launch.custom_hook_flags == c.game_kind.hook_flags(),
         CompanionError::GameHookMismatch
     );
     let state = bordrless_game::state_address(&c.game_hook, &c.mint).0;
@@ -272,5 +276,29 @@ fn check_game_launch(c: &Companion, launch: &Launch, remaining: &[AccountInfo]) 
     let header = bordrless_game::read_state(info, &c.game_hook, &c.mint)
         .map_err(|_| error!(CompanionError::HookState))?;
     require!(header.round_secs == c.round_secs, CompanionError::HookState);
+    let kind_header = match c.game_kind {
+        GameKind::Lottery => true,
+        GameKind::Jackpot => {
+            bordrless_game::JackpotHeader::parse(&info.try_borrow_data()?).is_some()
+        }
+        GameKind::Streak => bordrless_game::StreakHeader::parse(&info.try_borrow_data()?).is_some(),
+    };
+    require!(kind_header, CompanionError::HookState);
+    // A jackpot's or a streak's registry, as the launch carries it, still lists at most
+    // `MAX_GAME_HOOK_EXTRAS_V2` extras (the hook may have rewritten it since `create_game_v2`).
+    // A lottery's launch is phase 1's, unchanged.
+    if c.game_kind != GameKind::Lottery {
+        let registry = bordrless_hook::hook_accounts_address(&c.game_hook, &c.mint).0;
+        let info = remaining
+            .iter()
+            .find(|a| *a.key == registry)
+            .ok_or(CompanionError::MissingAccount)?;
+        crate::instructions::game::check_hook_registry(
+            info,
+            &c.game_hook,
+            &c.mint,
+            MAX_GAME_HOOK_EXTRAS_V2,
+        )?;
+    }
     Ok(())
 }

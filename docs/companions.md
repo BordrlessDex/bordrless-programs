@@ -1,6 +1,6 @@
 # Companions: reward tokens without a keeper
 
-Status: v1 live on mainnet (2026-10-08); v2 (games, below and `docs/games.md`) built and tested,
+Status: v1 live on mainnet (2026-10-08); v2 (the lottery, below and `docs/games.md`) live since 2026-10-09; phase 2 (jackpot, streak) built and tested,
 not deployed. Program `bordrless_companion`, one audited program deployed by Bordrless; each launch
 that uses it gets its own instance. v2 is an additive upgrade of the same program: every v1
 instruction, account and error code is unchanged.
@@ -132,7 +132,9 @@ an additive upgrade of this program (owner decision a), with `lottery_hook`
   - `min_pot` from 0.1 to 1,000 SOL, `prize_bps` from 10% to 100%.
   - Claim windows of 5 minutes to a day, and 1 to 16 attempts, all within half a round.
   - Phase 1 takes only `lottery_hook`, or a hook the protocol has given a status, never a blocked
-    one. Its registry may list at most 3 extras besides the launch.
+    one. Its registry may list at most 3 extras besides the launch (`create_game_v2`, phase 2,
+    and a jackpot's or a streak's launch: at most 2, which fit a packet at the site's longest name
+    and URI).
 - **`launch`** accepts a custom hook only when it is the game's (`launch.custom_hook ==
   companion.game_hook`, decision b), with exactly the lottery's flags (145). The hook's state is
   read from `create_launch`'s own accounts, so the transaction does not grow. Author shares stay
@@ -197,3 +199,28 @@ an additive upgrade of this program (owner decision a), with `lottery_hook`
 
   The companion's `.so` grows to 590,976 bytes, so its ProgramData must be extended by about
   251 KB (about 1.28 SOL) before the upgrade.
+
+## Games, phase 2: the jackpot and the streak (built, not deployed)
+
+The full reference is `docs/games.md` "Phase 2". An additive upgrade of the same program again:
+every phase-1 instruction is byte-identical, and live companions and lottery games read the new
+fields as zeros.
+
+- **`create_game_v2(args, kind)`** makes a game of any kind: `CreateGameArgs`, then the kind's
+  settings (a jackpot's timer and minimum buy, a streak's minimum streak and weight), which must
+  equal what the hook's kind header says. `Companion.game_kind` and `Companion.pot_locked` come
+  from the last 10 bytes of `reserved`; the kinds' fields from `Game.reserved`.
+- **Jackpot.** `settle` (anyone) closes the oldest round that is over: it pays the last
+  qualifying buyer `prize_bps` of the pot in SOL if their holding still holds what they bought,
+  with nothing sent since (nothing when the pot is below its minimum), else forfeits the round. A
+  round over is always closed: `settle` never waits. A qualifying buy is one out of the launch's
+  pool, on the curve, of at least `min_tokens`, to a wallet. No randomness.
+- **Streak.** `close_epoch(e)` (anyone, during the next epoch) fixes the epoch's pot and total and
+  locks the pot for its holders; `claim_share(e)` (anyone, for any holding) pays the owner its
+  share, `pot * weight / total`, once (a receipt per owner and epoch, its rent the sender's,
+  returned by `close_receipt` after the claims). A weight is what was held since the epoch began,
+  by a holding that sends nothing; unclaimed shares and dust roll over.
+- **Studio game hooks.** `create_game` takes a hook only Studio's key or the protocol's can
+  upgrade (its ProgramData passed) without a status; it is not audited, so capped at 10 SOL.
+- **Limits** (v0, 22-address table): setup 784 bytes, launch 1,177, `settle` 610, `claim_share`
+  614, `close_epoch` 465. The `.so` grows to 656,936 bytes (extend the ProgramData by 99,688).

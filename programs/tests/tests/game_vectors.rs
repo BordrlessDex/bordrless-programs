@@ -15,13 +15,13 @@ use std::path::PathBuf;
 
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
-use anchor_lang::{AccountSerialize, Space};
+use anchor_lang::{AccountSerialize, InstructionData, Space, ToAccountMetas};
 use bordrless_companion::client::{self as companion, SeedSlot};
 use bordrless_companion::constants::*;
-use bordrless_companion::instructions::{CreateArgs, CreateGameArgs, HookStatusArgs};
+use bordrless_companion::instructions::{CreateArgs, CreateGameArgs, GameKindArgs, HookStatusArgs};
 use bordrless_companion::oracle;
 use bordrless_companion::state::{
-    claims_end, Companion, DrawStatus, Game, GameKind, HookStatus, HookTerms, Split,
+    claims_end, Companion, DrawStatus, Game, GameKind, HookStatus, HookTerms, ShareReceipt, Split,
 };
 use bordrless_game::{
     draw_index, eligible, round_end, round_of, round_start, valid_round_secs, wins, GameHeader,
@@ -451,7 +451,13 @@ fn sample_game() -> Game {
         paid_seed: [8; 32],
         paid_round: 82_866,
         paid_streak: 3,
-        reserved: [0; 83],
+        timer_secs: 0,
+        min_tokens: 0,
+        paid_buys: 0,
+        min_streak_secs: 0,
+        min_weight: 0,
+        epoch_paid: 0,
+        reserved: [0; 43],
     }
 }
 
@@ -506,7 +512,9 @@ fn sample_companion() -> Companion {
         pending_pot: 9_876_543_210,
         round_secs: 21_600,
         stranded_burned_at: 1_792_600_000,
-        reserved: [0; 10],
+        game_kind: GameKind::Lottery,
+        pot_locked: 0,
+        reserved: [0; 1],
     }
 }
 
@@ -1007,6 +1015,7 @@ fn vectors() -> Vec<(&'static str, J)> {
         ("clocks", clocks()),
         ("oracle", oracle_section()),
         ("instructions", instructions(&k)),
+        ("phase2", phase2(&k)),
     ]
 }
 
@@ -1052,4 +1061,525 @@ fn the_samples_hold_together() {
         *b = i as u8;
     }
     assert_eq!(draw_index(&ascending, 7, 1_000_003), Some(359_196));
+}
+
+// ------------------------------------------------------------------------------------------ phase 2
+
+/// A jackpot game: the sample lottery's account with a jackpot's settings.
+fn sample_jackpot_game() -> Game {
+    Game {
+        kind: GameKind::Jackpot,
+        hook: studio_jackpot::ID,
+        round_secs: 0,
+        claim_window_secs: 0,
+        max_attempts: 0,
+        status: DrawStatus::Idle,
+        timer_secs: 600,
+        min_tokens: 1_000_000_000_000,
+        paid_buys: 41,
+        ..sample_game()
+    }
+}
+
+/// A streak game, an epoch open for claims.
+fn sample_streak_game() -> Game {
+    Game {
+        kind: GameKind::Streak,
+        hook: studio_streak::ID,
+        round_secs: 604_800,
+        claim_window_secs: 3_600,
+        max_attempts: 0,
+        status: DrawStatus::Revealed,
+        round: 2_960,
+        next_round: 2_961,
+        min_streak_secs: 604_800,
+        min_weight: 100_000_000_000,
+        epoch_paid: 123_456_789,
+        ..sample_game()
+    }
+}
+
+fn sample_streak_companion() -> Companion {
+    Companion {
+        game_hook: studio_streak::ID,
+        round_secs: 604_800,
+        game_kind: GameKind::Streak,
+        pot_locked: 1_111_111_111,
+        ..sample_companion()
+    }
+}
+
+fn sample_receipt() -> ShareReceipt {
+    ShareReceipt {
+        version: 1,
+        bump: 248,
+        game: companion::game_address(&fixed(1)),
+        epoch: 2_960,
+        owner: fixed(5),
+        payer: fixed(3),
+        amount: 987_654_321,
+        claimed_at: 1_790_000_777,
+    }
+}
+
+fn sample_jackpot_state() -> studio_jackpot::JackpotState {
+    studio_jackpot::JackpotState {
+        header: GameHeader {
+            round_secs: 0,
+            round: 0,
+            total: 0,
+            prev_round: 0,
+            prev_total: 0,
+            ..sample_header()
+        },
+        jackpot: bordrless_game::JackpotHeader {
+            buys: 42,
+            ended_buyer: fixed(15),
+            ended_amount: 2_000_000_000_000,
+            ended_at: 1_790_000_000,
+            ended_buys: 41,
+            earlier: {
+                let mut e = [bordrless_game::EndedRound::default(); 7];
+                e[0] = bordrless_game::EndedRound {
+                    buyer: fixed(16),
+                    amount: 3_000_000_000_000,
+                    at: 1_789_990_000,
+                    number: 39,
+                };
+                e
+            },
+            ..bordrless_game::JackpotHeader::new(600, 1_000_000_000_000)
+        },
+        version: 1,
+        bump: 247,
+        launch: bordrless_game::launch_address(&fixed(1)),
+        creator: bordrless_game::companion_creator_address(&fixed(1)),
+        prepared_by: fixed(2),
+        reserved: [0; 32],
+    }
+}
+
+fn sample_streak_state() -> studio_streak::StreakState {
+    studio_streak::StreakState {
+        header: GameHeader {
+            round_secs: 604_800,
+            round: 2_961,
+            total: 5_000_000_000_000,
+            prev_round: 2_960,
+            prev_total: 7_000_000_000_000,
+            ..GameHeader::new(fixed(1), 604_800, 1_790_000_000)
+        },
+        streak: bordrless_game::StreakHeader::new(604_800, 100_000_000_000),
+        version: 1,
+        bump: 246,
+        launch: bordrless_game::launch_address(&fixed(1)),
+        pool: fixed(13),
+        creator: bordrless_game::companion_creator_address(&fixed(1)),
+        prepared_by: fixed(2),
+        reserved: [0; 32],
+    }
+}
+
+fn jackpot_args() -> (CreateGameArgs, GameKindArgs) {
+    (
+        CreateGameArgs {
+            kind: GameKind::Jackpot,
+            hook: studio_jackpot::ID,
+            round_secs: 0,
+            claim_window_secs: 0,
+            max_attempts: 0,
+            prize_bps: 5_000,
+            ..game_args()
+        },
+        GameKindArgs {
+            timer_secs: 600,
+            min_tokens: 1_000_000_000_000,
+            ..GameKindArgs::default()
+        },
+    )
+}
+
+fn streak_args() -> (CreateGameArgs, GameKindArgs) {
+    (
+        CreateGameArgs {
+            kind: GameKind::Streak,
+            hook: studio_streak::ID,
+            round_secs: 604_800,
+            claim_window_secs: 3_600,
+            max_attempts: 0,
+            ..game_args()
+        },
+        GameKindArgs {
+            min_streak_secs: 604_800,
+            min_weight: 100_000_000_000,
+            ..GameKindArgs::default()
+        },
+    )
+}
+
+/// The jackpot's and the streak's rules, as the companion reads them, on fixed inputs.
+fn kind_rules() -> J {
+    use bordrless_game::*;
+    // A jackpot header with the current round 42 (last buy at t) and the ended rounds 41, 40 and
+    // 38 remembered (newest first).
+    let t = 1_790_000_000i64;
+    let header = GameHeader {
+        last_buyer: fixed(12),
+        last_amount: 5_000,
+        last_buy_at: t,
+        ..GameHeader::new(fixed(1), 0, t)
+    };
+    let jackpot = JackpotHeader {
+        buys: 42,
+        ended_buyer: fixed(15),
+        ended_amount: 7_000,
+        ended_at: t - 1_000,
+        ended_buys: 41,
+        earlier: {
+            let mut e = [EndedRound::default(); 7];
+            e[0] = EndedRound {
+                buyer: fixed(16),
+                amount: 6_000,
+                at: t - 2_000,
+                number: 40,
+            };
+            e[1] = EndedRound {
+                buyer: fixed(17),
+                amount: 5_500,
+                at: t - 3_000,
+                number: 38,
+            };
+            e
+        },
+        ..JackpotHeader::new(600, 1_000)
+    };
+    let round_json = |r: Option<JackpotRound>| {
+        opt(r.map(|r| {
+            J::Obj(vec![
+                ("number", big(r.number)),
+                ("buyer", key(&r.buyer)),
+                ("amount", big(r.amount)),
+                ("at", big(r.at)),
+            ])
+        }))
+    };
+    let settles: Vec<J> = [
+        (0u64, t),
+        (38, t),
+        (39, t),
+        (40, t + 599),
+        (41, t + 599),
+        (41, t + 600),
+        (42, t + 10_000),
+        (40, t + 10_000),
+    ]
+    .iter()
+    .map(|&(paid, now)| {
+        J::Arr(vec![
+            big(paid),
+            big(now),
+            round_json(settle_round(&header, &jackpot, paid, 600, now)),
+        ])
+    })
+    .collect();
+    let mark = |m: u64| {
+        let mut sl = Slots::default();
+        set_jackpot_mark(&mut sl, m);
+        sl.since = 5;
+        sl.encode()
+    };
+    let round = JackpotRound {
+        number: 41,
+        buyer: fixed(15),
+        amount: 7_000,
+        at: t - 1_000,
+    };
+    let holds: Vec<J> = [
+        (0u64, 9_000u64),
+        (41, 7_000),
+        (41, 6_999),
+        (40, 7_000),
+        (42, 9_000),
+        (1, 7_000),
+    ]
+    .iter()
+    .map(|&(m, balance)| {
+        J::Arr(vec![
+            hex(&mark(m)),
+            big(balance),
+            J::Bool(jackpot_winner_holds(&mark(m), &round, balance)),
+        ])
+    })
+    .collect();
+    let pool = fixed(13);
+    let curve = LaunchView {
+        pool,
+        on_curve: true,
+    };
+    let graduated = LaunchView {
+        pool,
+        on_curve: false,
+    };
+    let buys: Vec<J> = [
+        (Some(curve), pool, ON_CURVE, 1_000u64, 1_000u64),
+        (Some(curve), pool, ON_CURVE, 999, 1_000),
+        (Some(graduated), pool, ON_CURVE, 1_000, 1_000),
+        (None, pool, ON_CURVE, 1_000, 1_000),
+        (Some(curve), fixed(14), ON_CURVE, 1_000, 1_000),
+        (Some(curve), pool, fixed(16), 1_000, 1_000),
+        (Some(curve), pool, ON_CURVE, 1, 0),
+    ]
+    .iter()
+    .map(|(launch, from, to, amount, min)| {
+        J::Arr(vec![
+            opt(launch.map(|l| {
+                J::Obj(vec![
+                    ("pool", key(&l.pool)),
+                    ("onCurve", J::Bool(l.on_curve)),
+                ])
+            })),
+            key(from),
+            key(to),
+            big(*amount),
+            big(*min),
+            J::Bool(qualifying_buy(
+                launch.as_ref(),
+                from,
+                to,
+                *amount,
+                *min,
+                &[],
+            )),
+        ])
+    })
+    .collect();
+    // Streak weights: a holding with weight 500 in epoch 2_960 (current slot) and 300 in 2_959,
+    // since `since`.
+    let streak_data = |since: i64| {
+        Slots {
+            current: Range {
+                round: 2_960,
+                start: 0,
+                weight: 500,
+            },
+            previous: Range {
+                round: 2_959,
+                start: 0,
+                weight: 300,
+            },
+            since,
+            free: [0; 16],
+        }
+        .encode()
+    };
+    let epoch_secs = 604_800u32;
+    let start = round_start(2_960, epoch_secs);
+    let weights: Vec<J> = [
+        (start - 1, 2_960u32, 0u32, 1u64, 500u64),
+        (start - 1, 2_960, 604_800, 1, 500),
+        (start + 1, 2_960, 604_800, 1, 500),
+        (start - 1, 2_959, 0, 1, 500),
+        (start - 1, 2_960, 0, 501, 500),
+        (start - 1, 2_960, 0, 1, 499),
+        (0, 2_960, 0, 1, 500),
+        (start - 1, 2_958, 0, 1, 500),
+    ]
+    .iter()
+    .map(|&(since, epoch, min_streak, min_weight, balance)| {
+        let d = streak_data(since);
+        J::Arr(vec![
+            hex(&d),
+            num(epoch),
+            num(min_streak),
+            big(min_weight),
+            big(balance),
+            big(streak_weight(
+                &d, epoch, epoch_secs, min_streak, min_weight, balance,
+            )),
+        ])
+    })
+    .collect();
+    let shares: Vec<J> = [
+        (1_000u64, 1u64, 3u64),
+        (1_000, 3, 3),
+        (1_000, 4, 3),
+        (1_000, 1, 0),
+        (u64::MAX, u64::MAX, u64::MAX),
+        (9_876_543_210, 123_456_789, 987_654_321_000),
+    ]
+    .iter()
+    .map(|&(pot, w, total)| {
+        J::Arr(vec![
+            big(pot),
+            big(w),
+            big(total),
+            big(share_of(pot, w, total)),
+        ])
+    })
+    .collect();
+    let qualifies: Vec<J> = [
+        (start - 1, 2_960u32, 604_800u32),
+        (start, 2_960, 604_800),
+        (start + 1, 2_960, 604_800),
+        (0, 2_960, 0),
+        (start + 604_799, 2_960, 1),
+    ]
+    .iter()
+    .map(|&(since, epoch, min)| {
+        J::Arr(vec![
+            big(since),
+            num(epoch),
+            num(min),
+            J::Bool(streak_qualifies(since, epoch, epoch_secs, min)),
+        ])
+    })
+    .collect();
+    J::Obj(vec![
+        ("jackpotHeader", hex(&jackpot.encode())),
+        ("jackpotBase", hex(&header.encode())),
+        ("settleRound", J::Arr(settles)),
+        ("winnerHolds", J::Arr(holds)),
+        ("qualifyingBuy", J::Arr(buys)),
+        (
+            "streakHeader",
+            hex(&StreakHeader::new(604_800, 100_000_000_000).encode()),
+        ),
+        ("streakWeight", J::Arr(weights)),
+        ("streakQualifies", J::Arr(qualifies)),
+        ("shareOf", J::Arr(shares)),
+    ])
+}
+
+fn phase2(k: &Keys) -> J {
+    let mint = k.mint;
+    let (ja, jk) = jackpot_args();
+    let (sa, sk) = streak_args();
+    let jackpot = studio_jackpot::ID;
+    let streak = studio_streak::ID;
+    let instructions: Vec<(&str, Instruction)> = vec![
+        (
+            "createGameV2Jackpot",
+            companion::create_game_v2(k.payer, mint, ja, jk),
+        ),
+        (
+            "createGameV2Streak",
+            companion::create_game_v2(k.payer, mint, sa, sk),
+        ),
+        (
+            "createGameWithProgramData",
+            companion::create_game_with_program_data(k.payer, mint, game_args()),
+        ),
+        (
+            "settle",
+            companion::settle(k.cranker, mint, jackpot, k.winner),
+        ),
+        (
+            "retireGame",
+            companion::retire_game(k.cranker, mint, streak),
+        ),
+        (
+            "closeEpoch",
+            companion::close_epoch(k.cranker, mint, streak, 2_960),
+        ),
+        (
+            "claimShare",
+            companion::claim_share(k.cranker, mint, streak, 2_960, k.winner),
+        ),
+        (
+            "closeReceipt",
+            companion::close_receipt(mint, 2_960, k.winner, k.cranker),
+        ),
+        (
+            "claimFeesStreak",
+            companion::claim_fees_game(k.cranker, mint, streak),
+        ),
+        // Studio's game hooks' standard instructions (the streak starter's).
+        (
+            "studioPrepare",
+            Instruction {
+                program_id: streak,
+                accounts: studio_streak::accounts::Prepare {
+                    payer: k.payer,
+                    mint,
+                    state: bordrless_game::state_address(&streak, &mint).0,
+                    registry: bordrless_hook::hook_accounts_address(&streak, &mint).0,
+                    system_program: anchor_lang::system_program::ID,
+                }
+                .to_account_metas(None),
+                data: studio_streak::instruction::Prepare {}.data(),
+            },
+        ),
+        (
+            "studioEnter",
+            Instruction {
+                program_id: streak,
+                accounts: studio_streak::accounts::Enter {
+                    state: bordrless_game::state_address(&streak, &mint).0,
+                    mint,
+                    holding: bordrless_token::client::holding_address(&mint, &k.winner),
+                    hook_authority: bordrless_game::cpi::hook_authority_address(&streak).0,
+                    token_program: bordrless_token::ID,
+                    token_event_authority: bordrless_token::client::event_authority(),
+                }
+                .to_account_metas(None),
+                data: studio_streak::instruction::Enter {}.data(),
+            },
+        ),
+    ];
+    J::Obj(vec![
+        (
+            "accounts",
+            J::Obj(vec![
+                ("gameJackpot", hex(&serialize(&sample_jackpot_game()))),
+                ("gameStreak", hex(&serialize(&sample_streak_game()))),
+                (
+                    "companionStreak",
+                    hex(&serialize(&sample_streak_companion())),
+                ),
+                ("shareReceipt", hex(&serialize(&sample_receipt()))),
+                ("shareReceiptLen", num(ShareReceipt::LEN as i64)),
+                ("jackpotState", hex(&serialize(&sample_jackpot_state()))),
+                ("streakState", hex(&serialize(&sample_streak_state()))),
+            ]),
+        ),
+        ("rules", kind_rules()),
+        (
+            "constants",
+            J::Obj(vec![
+                ("jackpotStarter", key(&jackpot)),
+                ("streakStarter", key(&streak)),
+                ("minTimerSecs", num(bordrless_game::jackpot::MIN_TIMER_SECS)),
+                ("maxTimerSecs", num(bordrless_game::jackpot::MAX_TIMER_SECS)),
+                (
+                    "jackpotEndedRounds",
+                    num(bordrless_game::JACKPOT_ENDED_ROUNDS as i64),
+                ),
+                ("maxGameHookExtrasV2", num(MAX_GAME_HOOK_EXTRAS_V2 as i64)),
+                (
+                    "maxMinStreakSecs",
+                    num(bordrless_game::streak::MAX_MIN_STREAK_SECS),
+                ),
+                (
+                    "hookUpgradeAuthorities",
+                    J::Arr(HOOK_UPGRADE_AUTHORITIES.iter().map(key).collect()),
+                ),
+                (
+                    "receiptAddress",
+                    key(&companion::receipt_address(&mint, 2_960, &k.winner)),
+                ),
+                (
+                    "jackpotProgramData",
+                    key(&companion::hook_program_data_address(&jackpot)),
+                ),
+                (
+                    "streakHookAuthority",
+                    key(&bordrless_game::cpi::hook_authority_address(&streak).0),
+                ),
+            ]),
+        ),
+        (
+            "instructions",
+            J::Arr(instructions.iter().map(|(name, i)| ix(name, i)).collect()),
+        ),
+    ])
 }

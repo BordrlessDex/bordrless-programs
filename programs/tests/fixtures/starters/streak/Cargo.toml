@@ -1,0 +1,31 @@
+# Studio's streak game starter (test-only: never deployed by Bordrless). Its src/lib.rs is a Studio
+# project's source as is: it builds in tools/studio-builder/template (the monorepo's) with nothing
+# but anchor-lang, bordrless-hook and bordrless-game. Studio deploys a copy per coin, under its key.
+[package]
+name = "studio-streak"
+description = "Studio's streak game starter hook (test-only, on the game ticket standard)."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "studio_streak"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-hook/idl-build", "bordrless-game/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+bordrless-hook = { path = "../../../../../crates/bordrless-hook" }
+bordrless-game = { path = "../../../../../crates/bordrless-game" }
+
+[lints]
+workspace = true

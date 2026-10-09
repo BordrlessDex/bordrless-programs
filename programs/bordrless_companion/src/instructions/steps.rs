@@ -61,8 +61,7 @@ fn custom_extras(
 ) -> Result<Vec<AccountMeta>> {
     let info = find(available, &hook_accounts_address(hook, mint).0)?;
     require_keys_eq!(*info.owner, *hook, CompanionError::HookRegistry);
-    let list = HookAccountList::decode(&info.try_borrow_data()?)
-        .ok_or_else(|| error!(CompanionError::HookRegistry))?;
+    let list = decode_registry(info).ok_or_else(|| error!(CompanionError::HookRegistry))?;
     let prefix = [
         token_client::hook_signer(hook),
         *mint,
@@ -72,6 +71,69 @@ fn custom_extras(
     ];
     list.resolve(&prefix, &op.source_owner, &op.destination_owner)
         .ok_or_else(|| error!(CompanionError::HookRegistry))
+}
+
+/// A hook's registry (`HookAccountList`), decoded only once its bytes are seen to stay within the
+/// companion's bounds (`MAX_REGISTRY_*`): the decode builds vectors on the heap, sized by counts the
+/// hook wrote, which unchecked could exhaust the 32 KiB heap (an abort, not an error). `None` for
+/// a registry out of bounds or malformed.
+pub(crate) fn decode_registry(info: &AccountInfo) -> Option<HookAccountList> {
+    let data = info.try_borrow_data().ok()?;
+    if !registry_within_bounds(&data) {
+        return None;
+    }
+    HookAccountList::decode(&data)
+}
+
+/// Walks a registry's Borsh bytes (the magic, the version, then each account: `writable`, a source
+/// tag, a key or a PDA's program and seeds) without allocating: at most `MAX_REGISTRY_LEN` bytes,
+/// `MAX_REGISTRY_ACCOUNTS` accounts, `MAX_REGISTRY_SEEDS` seeds a PDA, `MAX_REGISTRY_SEED_LEN` bytes a
+/// literal seed, and no byte after the last account.
+pub(crate) fn registry_within_bounds(data: &[u8]) -> bool {
+    fn take<'a>(data: &mut &'a [u8], n: usize) -> Option<&'a [u8]> {
+        let (head, rest) = (data.get(..n)?, data.get(n..)?);
+        *data = rest;
+        Some(head)
+    }
+    fn len(data: &mut &[u8], max: usize) -> Option<usize> {
+        let mut b = [0u8; 4];
+        b.copy_from_slice(take(data, 4)?);
+        let n = usize::try_from(u32::from_le_bytes(b)).ok()?;
+        (n <= max).then_some(n)
+    }
+    fn walk(mut data: &[u8]) -> Option<()> {
+        if data.len() > MAX_REGISTRY_LEN {
+            return None;
+        }
+        take(&mut data, 8 + 1)?;
+        for _ in 0..len(&mut data, MAX_REGISTRY_ACCOUNTS)? {
+            take(&mut data, 1)?;
+            match take(&mut data, 1)?[0] {
+                0 => {
+                    take(&mut data, 32)?;
+                }
+                1 => {
+                    take(&mut data, 32)?;
+                    for _ in 0..len(&mut data, MAX_REGISTRY_SEEDS)? {
+                        match take(&mut data, 1)?[0] {
+                            0 => {
+                                let n = len(&mut data, MAX_REGISTRY_SEED_LEN)?;
+                                take(&mut data, n)?;
+                            }
+                            1 => {
+                                take(&mut data, 1)?;
+                            }
+                            2 | 3 => {}
+                            _ => return None,
+                        }
+                    }
+                }
+                _ => return None,
+            }
+        }
+        data.is_empty().then_some(())
+    }
+    walk(data).is_some()
 }
 
 /// The launch's mint as a token instruction for `op` takes it: the kit's ([`mint_hook`], as it
@@ -467,14 +529,22 @@ pub(crate) fn read_hook_terms(info: &AccountInfo, hook: &Pubkey) -> Result<HookT
 /// a buyback has its whole 30 days to spend it before `burn_stranded` can take it, whichever step
 /// moved it (a step and a burn sent in one transaction included). Under a block a pot is funded no
 /// more, so this happens once.
+///
+/// What a closed streak epoch still owes its holders (`Companion.pot_locked`, zero for every other
+/// kind) stays above a cap lowered since: a holder's share, fixed when the epoch closed, is never
+/// trimmed by a later cap. A block takes it with the rest (no prize is paid under a block), and
+/// nothing is locked after.
 pub(crate) fn enforce_terms(c: &mut Companion, terms: &HookTerms, now: i64) -> Result<u64> {
     let keep = if terms.blocked {
         0
     } else {
-        terms
-            .cap()
-            .map_or(c.pending_pot, |cap| c.pending_pot.min(cap))
+        terms.cap().map_or(c.pending_pot, |cap| {
+            c.pending_pot.min(cap.max(c.pot_locked))
+        })
     };
+    if terms.blocked {
+        c.pot_locked = 0;
+    }
     let moved = c.pending_pot - keep;
     if moved > 0 {
         c.pending_pot = keep;
@@ -853,4 +923,97 @@ pub fn process_release<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
         released: c.dev_released
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bordrless_hook::{AccountSource, ExtraAccount, Seed};
+
+    fn pda(seeds: Vec<Seed>) -> ExtraAccount {
+        ExtraAccount {
+            writable: true,
+            source: AccountSource::Pda {
+                program: Pubkey::new_unique(),
+                seeds,
+            },
+        }
+    }
+
+    fn key() -> ExtraAccount {
+        ExtraAccount {
+            writable: false,
+            source: AccountSource::Key(Pubkey::new_unique()),
+        }
+    }
+
+    #[test]
+    fn a_registry_within_bounds_is_walked_as_borsh_lays_it_out() {
+        let seed = |n: usize| Seed::Literal(vec![7; n]);
+        let all = vec![
+            Seed::Literal(b"state".to_vec()),
+            Seed::Account(1),
+            Seed::SourceOwner,
+            Seed::DestinationOwner,
+        ];
+        let ok = [
+            HookAccountList::new(vec![]),
+            HookAccountList::new(vec![pda(all.clone()), key()]),
+            HookAccountList::new(vec![pda(vec![seed(MAX_REGISTRY_SEED_LEN)]); 2]),
+            HookAccountList::new(vec![pda(vec![Seed::Account(0); MAX_REGISTRY_SEEDS])]),
+            HookAccountList::new(vec![key(); MAX_REGISTRY_ACCOUNTS]),
+        ];
+        for list in &ok {
+            let data = list.encode();
+            assert!(registry_within_bounds(&data), "{list:?}");
+            assert_eq!(HookAccountList::decode(&data).as_ref(), Some(list));
+            // Any byte short, or one more, is not a registry.
+            assert!(!registry_within_bounds(&data[..data.len() - 1]));
+            let mut longer = data.clone();
+            longer.push(0);
+            assert!(!registry_within_bounds(&longer));
+        }
+        let over = [
+            HookAccountList::new(vec![key(); MAX_REGISTRY_ACCOUNTS + 1]),
+            HookAccountList::new(vec![pda(vec![Seed::SourceOwner; MAX_REGISTRY_SEEDS + 1])]),
+            HookAccountList::new(vec![pda(vec![seed(MAX_REGISTRY_SEED_LEN + 1)])]),
+            HookAccountList::new(vec![pda(vec![seed(32); 16]); 2]),
+        ];
+        for list in &over {
+            assert!(!registry_within_bounds(&list.encode()), "{list:?}");
+        }
+        // Bad tags, and nothing at all.
+        let mut data = HookAccountList::new(vec![key()]).encode();
+        data[8 + 1 + 4 + 1] = 2;
+        assert!(!registry_within_bounds(&data));
+        assert!(!registry_within_bounds(&[]));
+    }
+
+    #[test]
+    fn the_walk_never_panics_on_any_bytes() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let base =
+            HookAccountList::new(vec![pda(vec![Seed::Literal(b"s".to_vec())]), key()]).encode();
+        for _ in 0..20_000 {
+            let mut data = base.clone();
+            let flips = 1 + next() % 4;
+            for _ in 0..flips {
+                let at = (next() as usize) % data.len();
+                data[at] = next() as u8;
+            }
+            data.truncate(1 + (next() as usize) % (data.len() + 1));
+            if registry_within_bounds(&data) {
+                // What passes the walk decodes as Borsh (or fails cleanly), within the bounds.
+                if let Some(list) = HookAccountList::decode(&data) {
+                    assert!(list.accounts.len() <= MAX_REGISTRY_ACCOUNTS);
+                }
+            }
+        }
+    }
 }

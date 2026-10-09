@@ -120,6 +120,20 @@ pub const LOTTERY_HOOK_FLAGS: u16 = bordrless_hook::token_flags::BEFORE_TRANSFER
 /// transaction carries anyway): with its state among them, the companion's launch through the
 /// protocol's lookup table still fits a packet at the site's metadata URI.
 pub const MAX_GAME_HOOK_EXTRAS: usize = 3;
+/// The most extra accounts a game hook's registry may list besides the launch for a game made by
+/// `create_game_v2` (any kind), checked again at the launch of a jackpot or a streak: with the
+/// state among them, the companion's launch through the protocol's lookup table fits a packet at
+/// the site's longest name (32 characters) and metadata URI, which 3 extras do not. `create_game`
+/// (phase 1's lottery, as deployed) keeps `MAX_GAME_HOOK_EXTRAS`.
+pub const MAX_GAME_HOOK_EXTRAS_V2: usize = 2;
+/// A hook's registry the companion reads (a hook-owned account, decoded onto the 32 KiB heap) may
+/// list at most this many extra accounts, each PDA at most `MAX_REGISTRY_SEEDS` seeds, each literal
+/// seed at most `MAX_REGISTRY_SEED_LEN` bytes, in at most `MAX_REGISTRY_LEN` bytes; checked before it
+/// is decoded, so no registry can make a step abort out of memory (a game hook lists 2 to 4).
+pub const MAX_REGISTRY_ACCOUNTS: usize = 8;
+pub const MAX_REGISTRY_SEEDS: usize = 16;
+pub const MAX_REGISTRY_SEED_LEN: usize = 32;
+pub const MAX_REGISTRY_LEN: usize = 1_024;
 /// Bordrless's lottery hook (`programs/lottery_hook`, upgradeable only by the protocol, audited with
 /// this program): the one game hook `create_game` takes without a status. Any other needs the
 /// protocol to have written its `HookStatus` first (phase 1: a hook nobody vetted could refuse the
@@ -139,6 +153,63 @@ pub const INCINERATOR: Pubkey =
 /// catch up with the price moves the reference once an interval, which restarts the wait.
 pub const STRANDED_SECS: i64 = 30 * 86_400;
 pub const STRANDED_INTERVALS: i64 = 4;
+
+// ---- Phase 2: the jackpot and the streak (`docs/games.md`) ---------------------------------------
+
+/// A jackpot round left unsettled this long after its timer ran out is forfeited by the next
+/// `settle`, whatever its buyer: no round, however odd its buyer, can hold the rounds after it (or
+/// `retire`) for ever. Keepers settle within minutes; a winner can settle its own round any time
+/// before.
+pub const SETTLE_GRACE_SECS: i64 = 30 * 86_400;
+/// The sysvar program, owner of every sysvar account.
+pub const SYSVAR_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("Sysvar1111111111111111111111111111111111111");
+/// The runtime's reserved keys (agave's `ReservedAccountKeys`): the builtin programs and the
+/// sysvars. Every transaction demotes them to read-only, so none can be paid; several are on the
+/// ed25519 curve, which the game standard takes for a wallet, and some have no account. A jackpot
+/// buyer among them forfeits its round.
+pub const RESERVED_KEYS: [Pubkey; 31] = [
+    Pubkey::from_str_const("AddressLookupTab1e1111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoader2111111111111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoader1111111111111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111"),
+    Pubkey::from_str_const("ComputeBudget111111111111111111111111111111"),
+    Pubkey::from_str_const("Config1111111111111111111111111111111111111"),
+    Pubkey::from_str_const("Ed25519SigVerify111111111111111111111111111"),
+    Pubkey::from_str_const("Feature111111111111111111111111111111111111"),
+    Pubkey::from_str_const("LoaderV411111111111111111111111111111111111"),
+    Pubkey::from_str_const("KeccakSecp256k11111111111111111111111111111"),
+    Pubkey::from_str_const("Secp256r1SigVerify1111111111111111111111111"),
+    Pubkey::from_str_const("StakeConfig11111111111111111111111111111111"),
+    Pubkey::from_str_const("Stake11111111111111111111111111111111111111"),
+    Pubkey::from_str_const("11111111111111111111111111111111"),
+    Pubkey::from_str_const("Vote111111111111111111111111111111111111111"),
+    Pubkey::from_str_const("ZkE1Gama1Proof11111111111111111111111111111"),
+    Pubkey::from_str_const("ZkTokenProof1111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarC1ock11111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarEpochRewards1111111111111111111111111"),
+    Pubkey::from_str_const("SysvarEpochSchedu1e111111111111111111111111"),
+    Pubkey::from_str_const("SysvarFees111111111111111111111111111111111"),
+    Pubkey::from_str_const("Sysvar1nstructions1111111111111111111111111"),
+    Pubkey::from_str_const("SysvarLastRestartS1ot1111111111111111111111"),
+    Pubkey::from_str_const("SysvarRecentB1ockHashes11111111111111111111"),
+    Pubkey::from_str_const("SysvarRent111111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarRewards111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarS1otHashes111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarS1otHistory11111111111111111111111111"),
+    Pubkey::from_str_const("SysvarStakeHistory1111111111111111111111111"),
+    Pubkey::from_str_const("NativeLoader1111111111111111111111111111111"),
+    SYSVAR_PROGRAM_ID,
+];
+
+/// `PDA(["claimed", game, epoch_le, owner])`: a streak share claimed (`ShareReceipt`).
+pub const CLAIMED_SEED: &[u8] = b"claimed";
+pub const RECEIPT_VERSION: u8 = 1;
+/// The protocol's upgrade keys a Studio game hook may be upgradeable by, for `create_game` to take
+/// it without a status (the launchpad's own rule for custom hooks: Studio's key and the
+/// protocol's). Such a hook is not audited: its pots are capped at `DEFAULT_POT_CAP`.
+pub const HOOK_UPGRADE_AUTHORITIES: [Pubkey; 2] =
+    bordrless_launch::constants::HOOK_UPGRADE_AUTHORITIES;
 
 #[cfg(test)]
 mod tests {
@@ -167,6 +238,74 @@ mod tests {
             bordrless_game::launch_address(&mint),
             bordrless_launch::client::launch_address(&mint)
         );
+    }
+
+    #[test]
+    fn the_game_standard_names_the_token_program_and_the_launch_layout() {
+        use anchor_lang::Discriminator;
+        assert_eq!(bordrless_game::TOKEN_PROGRAM_ID, TOKEN_ID);
+        assert_eq!(
+            bordrless_game::TOKEN_EVENT_AUTHORITY,
+            bordrless_token::EVENT_AUTHORITY_AND_BUMP.0
+        );
+        assert_eq!(
+            bordrless_game::launch::LAUNCH_DISCRIMINATOR[..],
+            bordrless_launch::state::Launch::DISCRIMINATOR[..]
+        );
+        assert_eq!(
+            bordrless_game::launch::LAUNCH_STATUS_CURVE,
+            bordrless_launch::constants::STATUS_CURVE
+        );
+        assert_eq!(
+            bordrless_game::cpi::HOOK_AUTHORITY_SEED,
+            bordrless_hook::HOOK_AUTHORITY_SEED
+        );
+        // `write_own_hook_data` builds exactly the token program's own `write_hook_data`.
+        let hook = Pubkey::new_unique();
+        let (authority, _) = bordrless_game::cpi::hook_authority_address(&hook);
+        assert_eq!(authority, bordrless_hook::hook_authority(&hook).0);
+        let (mint, holding) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let data = [7u8; 64];
+        assert_eq!(
+            bordrless_game::cpi::write_hook_data_ix(authority, mint, holding, data),
+            bordrless_token::client::write_hook_data(authority, mint, holding, data)
+        );
+        // A holding reads as the token program writes it, with or without a delegate.
+        for delegate in [None, Some(Pubkey::new_unique())] {
+            let h = bordrless_token::state::Holding {
+                version: 1,
+                bump: 254,
+                mint,
+                owner: Pubkey::new_unique(),
+                amount: 123_456_789,
+                delegate,
+                delegated_amount: 5,
+                frozen: false,
+                hook_data: [9; 64],
+                reserved: [0; 16],
+            };
+            let mut bytes = Vec::new();
+            anchor_lang::AccountSerialize::try_serialize(&h, &mut bytes).unwrap();
+            bytes.resize(bordrless_token::state::Holding::LEN, 0);
+            let v = bordrless_game::parse_holding(&bytes).expect("a holding");
+            assert_eq!(
+                (v.mint, v.owner, v.amount, v.delegate, v.hook_data),
+                (h.mint, h.owner, h.amount, h.delegate, h.hook_data)
+            );
+            bytes[0] ^= 1;
+            assert!(bordrless_game::parse_holding(&bytes).is_none());
+        }
+        // The launch's fields a game hook reads sit where `launch_offsets` says.
+        use bordrless_game::launch::launch_offsets as o;
+        assert_eq!(o::MINT, 8 + 1 + 1);
+        assert_eq!(o::POOL, o::MINT + 32 + 32);
+        assert_eq!(o::STATUS, o::POOL + 32 + 32);
+        // Every kind runs the lottery's callbacks, exactly.
+        use crate::state::GameKind;
+        for kind in [GameKind::Lottery, GameKind::Jackpot, GameKind::Streak] {
+            assert_eq!(kind.hook_flags(), LOTTERY_HOOK_FLAGS);
+        }
+        assert_eq!(HOOK_UPGRADE_AUTHORITIES.len(), 2);
     }
 
     #[test]

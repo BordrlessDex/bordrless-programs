@@ -74,7 +74,9 @@ use bordrless_token::client as token_client;
 use crate::constants::*;
 use crate::error::CompanionError;
 use crate::events::*;
-use crate::instructions::steps::{available, enforce_terms, find, pay_sol, read_hook_terms};
+use crate::instructions::steps::{
+    available, decode_registry, enforce_terms, find, pay_sol, read_hook_terms,
+};
 use crate::instructions::CreatorSeeds;
 use crate::invoke::invoke_built;
 use crate::oracle;
@@ -82,7 +84,10 @@ use crate::state::*;
 
 /// What `emit_cpi!` does (the event as a self-CPI signed by this program's event authority), for
 /// the helpers the steps share.
-fn emit_event<E: anchor_lang::Event>(event_authority: &AccountInfo, event: &E) -> Result<()> {
+pub(crate) fn emit_event<E: anchor_lang::Event>(
+    event_authority: &AccountInfo,
+    event: &E,
+) -> Result<()> {
     let mut data = anchor_lang::event::EVENT_IX_TAG_LE.to_vec();
     data.extend(event.data());
     let ix = anchor_lang::solana_program::instruction::Instruction::new_with_bytes(
@@ -171,35 +176,170 @@ fn is_the_launch(source: &AccountSource, mint: &Pubkey) -> bool {
     }
 }
 
-/// The hook's registry for the mint lists at most `MAX_GAME_HOOK_EXTRAS` accounts besides the
-/// launch, so the companion's launch of a game coin fits a transaction (owner, address and layout
-/// checked).
-fn check_hook_registry(info: &AccountInfo, hook: &Pubkey, mint: &Pubkey) -> Result<()> {
+/// The hook's registry for the mint lists at most `max` accounts besides the launch
+/// (`MAX_GAME_HOOK_EXTRAS` for `create_game`, `MAX_GAME_HOOK_EXTRAS_V2` for `create_game_v2` and a
+/// jackpot's or a streak's launch), so the companion's launch of a game coin fits a transaction
+/// (owner, address, bounds and layout checked).
+pub(crate) fn check_hook_registry(
+    info: &AccountInfo,
+    hook: &Pubkey,
+    mint: &Pubkey,
+    max: usize,
+) -> Result<()> {
     require_keys_eq!(
         *info.key,
         hook_accounts_address(hook, mint).0,
         CompanionError::HookRegistry
     );
     require_keys_eq!(*info.owner, *hook, CompanionError::HookRegistry);
-    let list = HookAccountList::decode(&info.try_borrow_data()?)
-        .ok_or_else(|| error!(CompanionError::HookRegistry))?;
+    let list: HookAccountList =
+        decode_registry(info).ok_or_else(|| error!(CompanionError::HookRegistry))?;
     let extras = list
         .accounts
         .iter()
         .filter(|a| !is_the_launch(&a.source, mint))
         .count();
-    require!(
-        extras <= MAX_GAME_HOOK_EXTRAS,
-        CompanionError::TooManyHookExtras
-    );
+    require!(extras <= max, CompanionError::TooManyHookExtras);
     Ok(())
 }
 
+/// Phase 2's settings of a game, beside `CreateGameArgs` (`create_game_v2`): a jackpot's timer and
+/// minimum buy, a streak's minimum streak and weight. All zero for a lottery. Each must equal what
+/// the hook's kind header says (the hook applies them; the companion checks them again).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GameKindArgs {
+    /// Jackpot: a round ends this long after its last qualifying buy (5 minutes to 30 days).
+    pub timer_secs: u32,
+    /// Jackpot: the least a qualifying buy delivers, in the token's base units (at least 1).
+    pub min_tokens: u64,
+    /// Streak: a holding shares in an epoch only if, by its end, it has sent nothing for this long
+    /// (at most a year).
+    pub min_streak_secs: u32,
+    /// Streak: the least weight that shares (at least 1).
+    pub min_weight: u64,
+}
+
+/// Whether `hook` is upgradeable by one of the protocol's keys (`HOOK_UPGRADE_AUTHORITIES`: Studio's
+/// and the protocol's), from its ProgramData among `available`: at `PDA([hook], loader)`, owned by
+/// the upgradeable loader (which alone writes accounts it owns at that address: they exist only
+/// for a program deployed there), a ProgramData header naming one of the keys. The way a Studio
+/// game hook, deployed under Studio's key, is taken without a status: Bordrless can upgrade it (to
+/// a hook that issues no tickets) as well as block it. Not audited: its pots are capped.
+fn upgradeable_by_the_protocol(available: &[AccountInfo], hook: &Pubkey) -> bool {
+    let expected = Pubkey::find_program_address(&[hook.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0;
+    let Some(info) = available.iter().find(|a| *a.key == expected) else {
+        return false;
+    };
+    if *info.owner != BPF_LOADER_UPGRADEABLE_ID {
+        return false;
+    }
+    let Ok(data) = info.try_borrow_data() else {
+        return false;
+    };
+    data.len() >= 45
+        && data[..4] == 3u32.to_le_bytes()
+        && data[12] == 1
+        && HOOK_UPGRADE_AUTHORITIES
+            .iter()
+            .any(|key| key.as_ref() == &data[13..45])
+}
+
+/// The settings of a game of `args.kind`, within its bounds (`BadGame` otherwise). A lottery's are
+/// phase 1's, and takes no kind settings. A jackpot has no rounds (`round_secs` 0), no claim
+/// windows or attempts; a streak's epochs are its rounds (an hour to 30 days), and its claim window
+/// is the least time a closed epoch leaves for claims (5 minutes to half an epoch), with no
+/// attempts.
+fn check_game_args(args: &CreateGameArgs, k: &GameKindArgs) -> Result<()> {
+    let pot_and_prize = (MIN_MIN_POT..=MAX_MIN_POT).contains(&args.min_pot)
+        && (u64::from(MIN_PRIZE_BPS)..=BPS).contains(&u64::from(args.prize_bps));
+    let ok = pot_and_prize
+        && match args.kind {
+            GameKind::Lottery => {
+                *k == GameKindArgs::default()
+                    && valid_round_secs(args.round_secs)
+                    && (MIN_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
+                    && (1..=MAX_ATTEMPTS).contains(&args.max_attempts)
+                    // A draw's attempts take at most half a round: one made early in the round
+                    // after its own keeps them all before its claims end with that round.
+                    && u64::from(args.claim_window_secs)
+                        * u64::from(args.max_attempts)
+                        * u64::from(CLAIMS_PER_ROUND)
+                        <= u64::from(args.round_secs)
+            }
+            GameKind::Jackpot => {
+                args.round_secs == 0
+                    && args.claim_window_secs == 0
+                    && args.max_attempts == 0
+                    && bordrless_game::valid_timer_secs(k.timer_secs)
+                    && k.min_tokens >= 1
+                    && k.min_streak_secs == 0
+                    && k.min_weight == 0
+            }
+            GameKind::Streak => {
+                valid_round_secs(args.round_secs)
+                    && (MIN_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
+                    && u64::from(args.claim_window_secs) * u64::from(CLAIMS_PER_ROUND)
+                        <= u64::from(args.round_secs)
+                    && args.max_attempts == 0
+                    && k.timer_secs == 0
+                    && k.min_tokens == 0
+                    && k.min_streak_secs <= bordrless_game::streak::MAX_MIN_STREAK_SECS
+                    && k.min_weight >= 1
+            }
+        };
+    require!(ok, CompanionError::BadGame);
+    Ok(())
+}
+
+/// The hook's kind header for a game of `kind` says what `k` says: a jackpot's timer and minimum
+/// buy, with no buy yet; a streak's minimum streak and weight. Nothing for a lottery.
+fn check_kind_header(state: &AccountInfo, kind: GameKind, k: &GameKindArgs) -> Result<()> {
+    let ok = match kind {
+        // A lottery's hook keeps ranges: never a jackpot's or a streak's state (a streak's
+        // weights all start at ticket 0, so every holder would hold the drawn ticket).
+        GameKind::Lottery => {
+            let data = state.try_borrow_data()?;
+            bordrless_game::JackpotHeader::parse(&data).is_none()
+                && bordrless_game::StreakHeader::parse(&data).is_none()
+        }
+        GameKind::Jackpot => bordrless_game::JackpotHeader::parse(&state.try_borrow_data()?)
+            // A fresh jackpot: the settings `k` says, no buy yet and no ended round remembered.
+            .is_some_and(|j| j == bordrless_game::JackpotHeader::new(k.timer_secs, k.min_tokens)),
+        GameKind::Streak => bordrless_game::StreakHeader::parse(&state.try_borrow_data()?)
+            .is_some_and(|s| {
+                s.min_streak_secs == k.min_streak_secs && s.min_weight == k.min_weight
+            }),
+    };
+    require!(ok, CompanionError::HookState);
+    Ok(())
+}
+
+/// `create_game(args)`: a lottery (phase 1's instruction, unchanged for a lottery; it also takes
+/// a Studio hook upgradeable by the protocol's keys, its ProgramData passed as a remaining
+/// account).
 pub fn process_create_game(ctx: Context<CreateGame>, args: CreateGameArgs) -> Result<()> {
+    require!(args.kind == GameKind::Lottery, CompanionError::BadGame);
+    create_any_game(ctx, args, GameKindArgs::default(), false)
+}
+
+/// `create_game_v2(args, kind)`: a game of any kind, with its kind's settings.
+pub fn process_create_game_v2(
+    ctx: Context<CreateGame>,
+    args: CreateGameArgs,
+    kind: GameKindArgs,
+) -> Result<()> {
+    create_any_game(ctx, args, kind, true)
+}
+
+fn create_any_game(
+    ctx: Context<CreateGame>,
+    args: CreateGameArgs,
+    k: GameKindArgs,
+    v2: bool,
+) -> Result<()> {
     let c = &ctx.accounts.companion;
     require!(!c.launched, CompanionError::AlreadyLaunched);
     require!(!c.is_game(), CompanionError::BadGame);
-    require!(args.kind == GameKind::Lottery, CompanionError::BadGame);
     require!(
         args.pot_bps > 0 && args.split.valid_with_pot(args.pot_bps),
         CompanionError::BadSplit
@@ -215,20 +355,7 @@ pub fn process_create_game(ctx: Context<CreateGame>, args: CreateGameArgs) -> Re
             && (MIN_BUYBACK_INTERVAL..=MAX_BUYBACK_INTERVAL).contains(&c.buyback_interval),
         CompanionError::BadBuybackLimits
     );
-    require!(
-        valid_round_secs(args.round_secs)
-            && (MIN_MIN_POT..=MAX_MIN_POT).contains(&args.min_pot)
-            && (u64::from(MIN_PRIZE_BPS)..=BPS).contains(&u64::from(args.prize_bps))
-            && (MIN_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
-            && (1..=MAX_ATTEMPTS).contains(&args.max_attempts)
-            // A draw's attempts take at most half a round: one made early in the round after its
-            // own keeps them all before its claims end with that round.
-            && u64::from(args.claim_window_secs)
-                * u64::from(args.max_attempts)
-                * u64::from(CLAIMS_PER_ROUND)
-                <= u64::from(args.round_secs),
-        CompanionError::BadGame
-    );
+    check_game_args(&args, &k)?;
     require!(
         args.hook != Pubkey::default()
             && args.hook != crate::ID
@@ -249,15 +376,26 @@ pub fn process_create_game(ctx: Context<CreateGame>, args: CreateGameArgs) -> Re
         header.round_secs == args.round_secs,
         CompanionError::HookState
     );
-    check_hook_registry(&ctx.accounts.hook_registry, &args.hook, &mint)?;
-    // Phase 1: Bordrless's lottery hook, or a hook the protocol has vetted (written a status for),
-    // and never a blocked one. A hook nobody vetted could refuse only the companion's own token
-    // moves (its buyback's transfer or burn) while holders trade as usual, and strand the buyback
-    // with every pot a block or `retire` sends there.
+    check_kind_header(&ctx.accounts.hook_state, args.kind, &k)?;
+    let max_extras = if v2 {
+        MAX_GAME_HOOK_EXTRAS_V2
+    } else {
+        MAX_GAME_HOOK_EXTRAS
+    };
+    check_hook_registry(&ctx.accounts.hook_registry, &args.hook, &mint, max_extras)?;
+    // The hook: Bordrless's lottery hook, a hook the protocol has vetted (written a status for),
+    // or one only the protocol's keys can upgrade (a Studio hook: its ProgramData among the
+    // remaining accounts); never a blocked one. A hook nobody vetted could refuse only the
+    // companion's own token moves (its buyback's transfer or burn) while holders trade as usual,
+    // and strand the buyback with every pot a block or `retire` sends there; an immutable hook
+    // needs a status. A hook without a status is not audited: its pots are capped at 10 SOL.
     let status = &ctx.accounts.hook_status;
     let terms = read_hook_terms(status, &args.hook)?;
+    let vetted = args.hook == LOTTERY_HOOK_ID
+        || *status.owner == crate::ID
+        || upgradeable_by_the_protocol(ctx.remaining_accounts, &args.hook);
     require!(
-        (args.hook == LOTTERY_HOOK_ID || *status.owner == crate::ID) && !terms.blocked,
+        vetted && !terms.blocked,
         CompanionError::GameHookNotAccepted
     );
     let now = Clock::get()?.unix_timestamp;
@@ -282,7 +420,13 @@ pub fn process_create_game(ctx: Context<CreateGame>, args: CreateGameArgs) -> Re
     g.next_round = first_round;
     g.settled_at = 0;
     g.oracle_answered();
-    g.reserved = [0; 83];
+    g.timer_secs = k.timer_secs;
+    g.min_tokens = k.min_tokens;
+    g.paid_buys = 0;
+    g.min_streak_secs = k.min_streak_secs;
+    g.min_weight = k.min_weight;
+    g.epoch_paid = 0;
+    g.reserved = [0; 43];
     let game = g.key();
 
     let c = &mut ctx.accounts.companion;
@@ -290,6 +434,8 @@ pub fn process_create_game(ctx: Context<CreateGame>, args: CreateGameArgs) -> Re
     c.pot_bps = args.pot_bps;
     c.game_hook = args.hook;
     c.round_secs = args.round_secs;
+    c.game_kind = args.kind;
+    c.pot_locked = 0;
     emit_cpi!(GameCreated {
         companion: c.key(),
         game,
@@ -305,6 +451,19 @@ pub fn process_create_game(ctx: Context<CreateGame>, args: CreateGameArgs) -> Re
         max_attempts: args.max_attempts,
         first_round,
     });
+    if v2 {
+        emit_cpi!(GameKindSet {
+            game,
+            mint,
+            kind: args.kind,
+            timer_secs: k.timer_secs,
+            min_tokens: k.min_tokens,
+            min_streak_secs: k.min_streak_secs,
+            min_weight: k.min_weight,
+            audited: terms.audited,
+            pot_cap: terms.cap().unwrap_or(0),
+        });
+    }
     Ok(())
 }
 
@@ -365,7 +524,7 @@ pub struct ClaimPrize<'info> {
 /// to the buyback and ends any draw (answers `None`: the step stops there and succeeds); otherwise
 /// a pot above a cap lowered since is trimmed to it, and the step goes on under the terms it
 /// answers.
-fn apply_status(
+pub(crate) fn apply_status(
     event_authority: &AccountInfo,
     companion_key: Pubkey,
     game_key: Pubkey,
@@ -407,7 +566,7 @@ fn lottery(g: &Game) -> Result<()> {
 }
 
 /// The draw's round ends unpaid: the pot stays (or went to the buyback, blocked).
-fn rolled_over(
+pub(crate) fn rolled_over(
     event_authority: &AccountInfo,
     game_key: Pubkey,
     c: &Companion,
@@ -997,10 +1156,29 @@ pub fn process_retire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
     {
         return Ok(());
     }
+    if ctx.accounts.game.kind == GameKind::Streak {
+        // A streak epoch whose claims have ended releases what it still held: it rolls over.
+        crate::instructions::kinds::end_epoch_if_over(
+            &mut ctx.accounts.companion,
+            &mut ctx.accounts.game,
+            now,
+        );
+    }
     let (c, g) = (&ctx.accounts.companion, &ctx.accounts.game);
-    // Never mid-draw: a draw's prize is the pot's, until it is paid or rolls over.
+    // Never mid-draw: a draw's prize is the pot's, until it is paid or rolls over (and a streak
+    // epoch's pot is its holders', until its claims end).
     require!(g.status == DrawStatus::Idle, CompanionError::DrawPending);
     require!(now >= g.retirable_at(c.launched_at), CompanionError::NotDue);
+    // Nor before a jackpot round or a streak epoch the pot can pay now is settled or closed
+    // (the hook's state is passed for those kinds).
+    if g.kind != GameKind::Lottery {
+        let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
+        let terms = read_hook_terms(&ctx.accounts.hook_status, &g.hook)?;
+        require!(
+            !crate::instructions::kinds::prize_due(&all, c, g, &terms, now)?,
+            CompanionError::DrawPending
+        );
+    }
     let idle_since = g.idle_since(c.launched_at);
     let lamports = c.pending_pot;
     require!(lamports > 0, CompanionError::NothingToDo);
