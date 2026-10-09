@@ -1,9 +1,8 @@
 # Games: coins run by their companion (lottery, jackpot, streak)
 
 Status: phase 1 (the lottery) is **live on mainnet** since 2026-10-09 (companion v2
-`4e6dbc68…`, `lottery_hook` `c5d50008…`). Phase 2 (the last-buyer jackpot, the diamond-hands
-streak and Studio game hooks, "Phase 2" below) is built and tested in this repo, **not deployed**
-(2026-10-09). The monorepo's `docs/studio-companions.md` ("audited purse, Studio rules") is the
+then `4e6dbc68…`, `lottery_hook` `c5d50008…`). Phase 2 (the last-buyer jackpot, the diamond-hands
+streak and Studio game hooks, "Phase 2" below) is **live on mainnet since 2026-10-09 (companion `fff582d8…`)**. The monorepo's `docs/studio-companions.md` ("audited purse, Studio rules") is the
 design. The pieces:
 
 | Piece | Where | What it is |
@@ -428,7 +427,7 @@ The token page reads `Game`, `Companion.pending_pot`, the hook's header and the 
 
 ## Phase 2: the jackpot, the streak, Studio game hooks
 
-Built and tested 2026-10-09, not deployed. Owner-approved scope: a last-buyer jackpot and a
+Live on mainnet since 2026-10-09 (companion `fff582d8…`). Owner-approved scope: a last-buyer jackpot and a
 diamond-hands streak in the companion (the monorepo's `docs/studio-companions.md` §1, examples 2
 and 3), Studio game hooks taken without a status when only Bordrless can upgrade them, the
 standard's helpers for both kinds, and reference starter hooks. Neither new kind uses randomness.

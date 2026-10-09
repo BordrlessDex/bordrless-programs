@@ -1,7 +1,6 @@
 # Companions: reward tokens without a keeper
 
-Status: v1 live on mainnet (2026-10-08); v2 (the lottery, below and `docs/games.md`) live since 2026-10-09; phase 2 (jackpot, streak) built and tested,
-not deployed. Program `bordrless_companion`, one audited program deployed by Bordrless; each launch
+Status: v1 live on mainnet (2026-10-08); v2 (the lottery, below and `docs/games.md`) live since 2026-10-09; phase 2 (jackpot, streak) live on mainnet since 2026-10-09 (companion `fff582d8…`). Program `bordrless_companion`, one program deployed by Bordrless; each launch
 that uses it gets its own instance. v2 is an additive upgrade of the same program: every v1
 instruction, account and error code is unchanged.
 
@@ -100,7 +99,7 @@ own vaults, with a cap on what they hold until a human has audited them.
 
 ## Games (v2): a lottery run by the companion
 
-The full reference is `docs/games.md`. Status: built and tested, not deployed (2026-10-08). v2 is
+The full reference is `docs/games.md`. Status: live on mainnet since 2026-10-09. v2 is
 an additive upgrade of this program (owner decision a), with `lottery_hook`
 (`HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr`) and the crate `bordrless-game`.
 
@@ -200,7 +199,7 @@ an additive upgrade of this program (owner decision a), with `lottery_hook`
   The companion's `.so` grows to 590,976 bytes, so its ProgramData must be extended by about
   251 KB (about 1.28 SOL) before the upgrade.
 
-## Games, phase 2: the jackpot and the streak (built, not deployed)
+## Games, phase 2: the jackpot and the streak (live since 2026-10-09)
 
 The full reference is `docs/games.md` "Phase 2". An additive upgrade of the same program again:
 every phase-1 instruction is byte-identical, and live companions and lottery games read the new
