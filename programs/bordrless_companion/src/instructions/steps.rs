@@ -2,11 +2,17 @@
 //! `buyback`, `share` and `release` anyone may send, each paying its sender `bounty_bps` of what it
 //! moves (as SOL). Every step is one call into a Bordrless program (plus the bridge's `unwrap_sol`
 //! and a system transfer for a bounty), built here with that program's own client (`invoke.rs`).
+//!
+//! A game coin's mint has a custom token hook (`Launch.custom_hook`, the game's): every token
+//! instruction a step builds then carries that hook and its extra accounts, resolved from the
+//! hook's registry exactly as the token program's callers resolve them. A mint whose hook is the
+//! kit, or none, takes the very instructions it always did.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::system_program;
 use bordrless_core::swap_out;
+use bordrless_hook::{hook_accounts_address, HookAccountList};
 use bordrless_kit::state::KitConfig;
 use bordrless_launch::client as launch_client;
 use bordrless_launch::state::Launch;
@@ -33,6 +39,92 @@ fn mint_hook(launch: &Launch) -> (Option<Hook>, Vec<AccountMeta>) {
     )
 }
 
+/// The keys a token operation hands the mint's hook (its callback's prefix, and the owners): what a
+/// custom hook's registry resolves its extra accounts from.
+pub(crate) struct OpKeys {
+    pub source: Pubkey,
+    pub destination: Pubkey,
+    pub authority: Pubkey,
+    pub source_owner: Pubkey,
+    pub destination_owner: Pubkey,
+}
+
+/// A custom hook's extra accounts for a token operation on `mint`, resolved from the hook's
+/// registry `PDA(["bordrless-hook-accounts", mint], hook)` (owner and address checked), with the
+/// token program's callback prefix: its signer for the hook, the mint, the source, the destination
+/// and the authority.
+fn custom_extras(
+    available: &[AccountInfo],
+    hook: &Pubkey,
+    mint: &Pubkey,
+    op: &OpKeys,
+) -> Result<Vec<AccountMeta>> {
+    let info = find(available, &hook_accounts_address(hook, mint).0)?;
+    require_keys_eq!(*info.owner, *hook, CompanionError::HookRegistry);
+    let list = HookAccountList::decode(&info.try_borrow_data()?)
+        .ok_or_else(|| error!(CompanionError::HookRegistry))?;
+    let prefix = [
+        token_client::hook_signer(hook),
+        *mint,
+        op.source,
+        op.destination,
+        op.authority,
+    ];
+    list.resolve(&prefix, &op.source_owner, &op.destination_owner)
+        .ok_or_else(|| error!(CompanionError::HookRegistry))
+}
+
+/// The launch's mint as a token instruction for `op` takes it: the kit's ([`mint_hook`], as it
+/// always was), or the custom hook's with its extras resolved from its registry.
+fn token_hook(
+    available: &[AccountInfo],
+    launch: &Launch,
+    op: &OpKeys,
+) -> Result<(Option<Hook>, Vec<AccountMeta>)> {
+    match launch.custom_hook {
+        None => Ok(mint_hook(launch)),
+        Some(hook) => Ok((
+            Some(Hook::of(hook)),
+            custom_extras(available, &hook, &launch.mint, op)?,
+        )),
+    }
+}
+
+/// A buy on the launch's pool by the creator address, delivered to it: the launchpad client's
+/// `swap` for a kit (or hook-less) token, as it always was; for a custom-hook token, with the
+/// hook's slice on the token's side, resolved for the pool vault's transfer to the creator.
+fn creator_buy(
+    available: &[AccountInfo],
+    launch: &Launch,
+    creator: Pubkey,
+    amount_in: u64,
+    min_out: u64,
+) -> Result<Instruction> {
+    let keys = launch_client::LaunchKeys::of(launch);
+    let Some(hook) = launch.custom_hook else {
+        return Ok(launch_client::swap(
+            &keys, creator, creator, 1, amount_in, min_out,
+        ));
+    };
+    let op = OpKeys {
+        source: bordrless_swap::client::vault_address(&launch.pool, &launch.mint),
+        destination: token_client::holding_address(&launch.mint, &creator),
+        authority: launch.pool,
+        source_owner: launch.pool,
+        destination_owner: creator,
+    };
+    let extras = custom_extras(available, &hook, &launch.mint, &op)?;
+    Ok(launch_client::swap_with_base_slice(
+        &keys,
+        creator,
+        creator,
+        1,
+        amount_in,
+        min_out,
+        launch_client::custom_hook_slice(hook, extras),
+    ))
+}
+
 /// An account of `T`'s program, deserialized (owner and discriminator checked).
 fn read<T: AccountDeserialize + Owner>(info: &AccountInfo) -> Result<T> {
     require_keys_eq!(*info.owner, T::owner(), CompanionError::MissingAccount);
@@ -40,14 +132,14 @@ fn read<T: AccountDeserialize + Owner>(info: &AccountInfo) -> Result<T> {
     T::try_deserialize(&mut &data[..])
 }
 
-fn find<'a, 'info>(
+pub(crate) fn find<'a, 'info>(
     available: &'a [AccountInfo<'info>],
     key: &Pubkey,
 ) -> Result<&'a AccountInfo<'info>> {
     available
         .iter()
         .find(|a| a.key == key)
-        .ok_or(error!(CompanionError::MissingAccount))
+        .ok_or_else(|| error!(CompanionError::MissingAccount))
 }
 
 /// The launch's kit config, when it has kit rules.
@@ -69,7 +161,7 @@ fn max_wallet_room(kit: &Option<KitConfig>, held: u64) -> Option<u64> {
 }
 
 /// A holding's balance; 0 for one that does not exist yet.
-fn balance(available: &[AccountInfo], mint: &Pubkey, owner: &Pubkey) -> Result<u64> {
+pub(crate) fn balance(available: &[AccountInfo], mint: &Pubkey, owner: &Pubkey) -> Result<u64> {
     let info = find(available, &token_client::holding_address(mint, owner))?;
     if info.owner != &TOKEN_ID {
         return Ok(0);
@@ -97,7 +189,7 @@ fn ensure_holding(
 
 /// Pays `to` `lamports` of the creator's bridged SOL as SOL: unwrapped to the creator address,
 /// then sent on (the creator address ends with what it had).
-fn pay_sol<'info>(
+pub(crate) fn pay_sol<'info>(
     available: &[AccountInfo<'info>],
     seeds: &CreatorSeeds,
     creator: Pubkey,
@@ -127,7 +219,7 @@ fn pay_sol<'info>(
     )
 }
 
-fn available<'info>(
+pub(crate) fn available<'info>(
     named: Vec<AccountInfo<'info>>,
     remaining: &[AccountInfo<'info>],
 ) -> Vec<AccountInfo<'info>> {
@@ -191,12 +283,8 @@ pub fn process_dev_buy<'info>(
         &[&seeds.seeds()],
     )?;
     let before = balance(&all, &mint, &creator)?;
-    let keys = launch_client::LaunchKeys::of(&ctx.accounts.launch);
-    invoke_built(
-        &launch_client::swap(&keys, creator, creator, 1, lamports, min_out),
-        &all,
-        &[&seeds.seeds()],
-    )?;
+    let buy = creator_buy(&all, &ctx.accounts.launch, creator, lamports, min_out)?;
+    invoke_built(&buy, &all, &[&seeds.seeds()])?;
     let got = balance(&all, &mint, &creator)?
         .checked_sub(before)
         .ok_or(CompanionError::MathOverflow)?;
@@ -242,13 +330,25 @@ pub struct Step<'info> {
 /// `claim_fees`: the launch's creator fees claimed into the creator's holding (when it holds any),
 /// the bounty paid, the rest split. What is split is everything the holding holds above what is
 /// already set aside, so bridged SOL that reached it any other way is split too, never stranded.
-/// Remaining: `claim_creator_fees`'s accounts and the bridge's `unwrap_sol` accounts.
+/// Remaining: `claim_creator_fees`'s accounts and the bridge's `unwrap_sol` accounts; for a game,
+/// also its hook's status account (`PDA(["hook-status", hook])`, which need not exist).
+///
+/// A game's split has a fourth part, the pot, which takes the rounding. While the game's hook is not
+/// audited the pot holds at most the hook's cap, and the pot's share above it goes to the buyback;
+/// once the hook is blocked, all of it does, and the pot with it. Under a block, a claim that
+/// credits the buyback at least what it held restarts the stranded wait
+/// ([`Companion::restart_stranded_wait`]).
 pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
     let seeds = CreatorSeeds::new(mint, c.creator_bump);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
+    let terms = if c.is_game() {
+        Some(hook_terms(&all, &c.game_hook)?)
+    } else {
+        None
+    };
     let launch_key = launch_client::launch_address(&mint);
     if balance(&all, &BRIDGED_SOL_MINT, &launch_key)? > 0 {
         invoke_built(
@@ -257,22 +357,27 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
             &[&seeds.seeds()],
         )?;
     }
-    let set_aside = c
-        .pending_buyback
-        .checked_add(c.pending_holders)
-        .and_then(|v| v.checked_add(c.pending_beneficiary))
-        .ok_or(CompanionError::MathOverflow)?;
+    let set_aside = c.set_aside().ok_or(CompanionError::MathOverflow)?;
     let got = balance(&all, &BRIDGED_SOL_MINT, &creator)?.saturating_sub(set_aside);
     require!(got > 0, CompanionError::NothingToDo);
     let bounty = bps_of(got, u64::from(c.bounty_bps));
     let rest = got - bounty;
     let to_holders = bps_of(rest, u64::from(c.split.holders_bps));
     let to_beneficiary = bps_of(rest, u64::from(c.split.beneficiary_bps));
-    // The rounding goes to buybacks when there are any, else to the beneficiary.
-    let (to_buyback, to_beneficiary) = if c.split.buyback_bps > 0 {
-        (rest - to_holders - to_beneficiary, to_beneficiary)
+    // The rounding goes to the pot when there is one, else to buybacks when there are any, else to
+    // the beneficiary.
+    let (to_buyback, to_beneficiary, to_pot) = if c.pot_bps > 0 {
+        let to_buyback = bps_of(rest, u64::from(c.split.buyback_bps));
+        let to_pot = rest
+            .checked_sub(to_holders)
+            .and_then(|v| v.checked_sub(to_beneficiary))
+            .and_then(|v| v.checked_sub(to_buyback))
+            .ok_or(CompanionError::MathOverflow)?;
+        (to_buyback, to_beneficiary, to_pot)
+    } else if c.split.buyback_bps > 0 {
+        (rest - to_holders - to_beneficiary, to_beneficiary, 0)
     } else {
-        (0, rest - to_holders)
+        (0, rest - to_holders, 0)
     };
     pay_sol(
         &all,
@@ -282,6 +387,8 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         bounty,
     )?;
     let c = &mut ctx.accounts.companion;
+    // What the buyback held before this claim credited it.
+    let held = c.pending_buyback;
     c.pending_buyback = c
         .pending_buyback
         .checked_add(to_buyback)
@@ -305,7 +412,103 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         to_beneficiary,
         cranker: ctx.accounts.cranker.key()
     });
+    if let Some(terms) = terms {
+        let now = Clock::get()?.unix_timestamp;
+        // What the pot held beyond what the hook's status now allows goes first, then the share.
+        let retired = enforce_terms(c, &terms, now)?;
+        if retired > 0 {
+            emit_cpi!(PotToBuyback {
+                companion: c.key(),
+                lamports: retired,
+                blocked: terms.blocked,
+                pending_pot: c.pending_pot,
+            });
+        }
+        let (kept, over) = fund_pot(c, to_pot, &terms)?;
+        emit_cpi!(PotFunded {
+            companion: c.key(),
+            to_pot: kept,
+            to_buyback: over,
+            pending_pot: c.pending_pot,
+        });
+        if terms.blocked {
+            c.restart_stranded_wait(held, now);
+        }
+    }
     Ok(())
+}
+
+/// What a game hook's status says, from its `PDA(["hook-status", hook])` among `available`: the
+/// account must be passed; one that does not exist (no data, owned by the system program) means
+/// the defaults. Leaving it out can therefore never lift a cap or a block.
+pub(crate) fn hook_terms(available: &[AccountInfo], hook: &Pubkey) -> Result<HookTerms> {
+    let info = find(available, &HookStatus::address(hook).0)?;
+    read_hook_terms(info, hook)
+}
+
+/// [`hook_terms`] from the status account itself (its address checked by the caller).
+pub(crate) fn read_hook_terms(info: &AccountInfo, hook: &Pubkey) -> Result<HookTerms> {
+    if *info.owner == crate::ID {
+        let status = HookStatus::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+        require_keys_eq!(status.hook, *hook, CompanionError::HookStatusAccount);
+        return Ok(status.terms());
+    }
+    require!(
+        *info.owner == system_program::ID && info.data_is_empty(),
+        CompanionError::HookStatusAccount
+    );
+    Ok(HookTerms::DEFAULT)
+}
+
+/// Moves to the buyback what the pot holds beyond what `terms` allow: all of it for a blocked hook,
+/// what is above the cap for one that is not audited. Answers what moved.
+///
+/// A blocked hook's pot moved at `now` restarts the stranded wait (`Companion.stranded_burned_at`):
+/// a buyback has its whole 30 days to spend it before `burn_stranded` can take it, whichever step
+/// moved it (a step and a burn sent in one transaction included). Under a block a pot is funded no
+/// more, so this happens once.
+pub(crate) fn enforce_terms(c: &mut Companion, terms: &HookTerms, now: i64) -> Result<u64> {
+    let keep = if terms.blocked {
+        0
+    } else {
+        terms
+            .cap()
+            .map_or(c.pending_pot, |cap| c.pending_pot.min(cap))
+    };
+    let moved = c.pending_pot - keep;
+    if moved > 0 {
+        c.pending_pot = keep;
+        c.pending_buyback = c
+            .pending_buyback
+            .checked_add(moved)
+            .ok_or(CompanionError::MathOverflow)?;
+        if terms.blocked {
+            c.stranded_burned_at = c.stranded_burned_at.max(now);
+        }
+    }
+    Ok(moved)
+}
+
+/// Adds `amount` to the pot within what `terms` allow; the rest to the buyback. Answers both parts.
+fn fund_pot(c: &mut Companion, amount: u64, terms: &HookTerms) -> Result<(u64, u64)> {
+    let room = if terms.blocked {
+        0
+    } else {
+        terms
+            .cap()
+            .map_or(u64::MAX, |cap| cap.saturating_sub(c.pending_pot))
+    };
+    let kept = amount.min(room);
+    let over = amount - kept;
+    c.pending_pot = c
+        .pending_pot
+        .checked_add(kept)
+        .ok_or(CompanionError::MathOverflow)?;
+    c.pending_buyback = c
+        .pending_buyback
+        .checked_add(over)
+        .ok_or(CompanionError::MathOverflow)?;
+    Ok((kept, over))
 }
 
 // ---- buyback ----------------------------------------------------------------------------------------
@@ -428,17 +631,23 @@ pub fn process_buyback<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     require!(min_out > 0, CompanionError::NoQuote);
     ensure_holding(&all, ctx.accounts.cranker.key(), mint, creator)?;
     let before = balance(&all, &mint, &creator)?;
-    let keys = launch_client::LaunchKeys::of(launch);
-    invoke_built(
-        &launch_client::swap(&keys, creator, creator, 1, spend, min_out),
-        &all,
-        &[&seeds.seeds()],
-    )?;
+    let buy = creator_buy(&all, launch, creator, spend, min_out)?;
+    invoke_built(&buy, &all, &[&seeds.seeds()])?;
     let bought = balance(&all, &mint, &creator)?
         .checked_sub(before)
         .ok_or(CompanionError::MathOverflow)?;
-    let (hook, extras) = mint_hook(launch);
     let holding = token_client::holding_address(&mint, &creator);
+    let (hook, extras) = token_hook(
+        &all,
+        launch,
+        &OpKeys {
+            source: holding,
+            destination: mint,
+            authority: creator,
+            source_owner: creator,
+            destination_owner: Pubkey::default(),
+        },
+    )?;
     invoke_built(
         &token_client::burn_with(creator, holding, mint, hook, extras, bought),
         &all,
@@ -615,16 +824,23 @@ pub fn process_release<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
         None => vested,
     };
     require!(amount > 0, CompanionError::NothingToDo);
-    let (hook, extras) = mint_hook(&ctx.accounts.launch);
-    let ix: Instruction = token_client::transfer_with(
-        creator,
+    let (source, destination) = (
         token_client::holding_address(&mint, &creator),
         token_client::holding_address(&mint, &beneficiary),
-        mint,
-        hook,
-        extras,
-        amount,
     );
+    let (hook, extras) = token_hook(
+        &all,
+        &ctx.accounts.launch,
+        &OpKeys {
+            source,
+            destination,
+            authority: creator,
+            source_owner: creator,
+            destination_owner: beneficiary,
+        },
+    )?;
+    let ix: Instruction =
+        token_client::transfer_with(creator, source, destination, mint, hook, extras, amount);
     invoke_built(&ix, &all, &[&seeds.seeds()])?;
     let c = &mut ctx.accounts.companion;
     c.dev_released = c

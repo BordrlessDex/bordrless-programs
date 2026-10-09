@@ -1,0 +1,941 @@
+{
+  "address": "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr",
+  "metadata": {
+    "name": "lottery_hook",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Bordrless lottery hook: a game coin's token hook under the game ticket standard. Every holder's tokens are their tickets for the round, kept as a range in each holding's hook data; the Bordrless companion draws a verifiable winner and pays the pot. The hook never refuses a transfer, takes no cut and never sees SOL."
+  },
+  "docs": [
+    "Instructions of the lottery hook."
+  ],
+  "instructions": [
+    {
+      "name": "before_burn",
+      "docs": [
+        "`before_burn`: the header rolled and the burner's tickets cut to what it has left, as for a",
+        "send."
+      ],
+      "discriminator": [
+        7,
+        177,
+        19,
+        160,
+        28,
+        229,
+        57,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "CFyuaxvKmpgnSMCoNqDKCcwxnTUeW8Mm1go1t3UMsvLH"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "before_transfer",
+      "docs": [
+        "`before_transfer`: the header rolled, the sender's tickets cut to what it has left, the",
+        "receiver's range of the round opened at its first write (for what it held before); each",
+        "answered as the holding's hook data when its owner may hold tickets. Never refuses a",
+        "transfer, never takes a cut."
+      ],
+      "discriminator": [
+        23,
+        118,
+        189,
+        23,
+        179,
+        222,
+        94,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "CFyuaxvKmpgnSMCoNqDKCcwxnTUeW8Mm1go1t3UMsvLH"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "enter",
+      "docs": [
+        "Anyone, for any holding of the mint: registers its whole balance for the current round when",
+        "it has not been written this round (`bordrless_game::on_enter`). Does nothing for a holding",
+        "written this round already, or empty (so nobody can grief a holder by entering it again),",
+        "and refuses a holding whose owner can't hold tickets."
+      ],
+      "discriminator": [
+        139,
+        49,
+        209,
+        114,
+        88,
+        91,
+        77,
+        134
+      ],
+      "accounts": [
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "must be this program."
+          ]
+        },
+        {
+          "name": "holding",
+          "docs": [
+            "`mint`; the token program writes its hook data."
+          ],
+          "writable": true
+        },
+        {
+          "name": "hook_authority",
+          "address": "6oZ9LkAfgmhmPYjXj3okjYK5sderddEo8fp8MR4H6Gx1"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "prepare",
+      "docs": [
+        "Prepares the hook for `mint`, which need not exist yet (a launch's mint: the launchpad",
+        "creates it naming this program as its hook): the state, with the standard's header and",
+        "rounds of `round_secs`, and the extra-accounts registry. The mint's keypair signs, so only",
+        "whoever launches it chooses its rounds; once per mint."
+      ],
+      "discriminator": [
+        121,
+        155,
+        156,
+        90,
+        164,
+        252,
+        220,
+        109
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The mint the hook is prepared for (not created yet); its keypair signs."
+          ],
+          "signer": true
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_secs",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "LotteryState",
+      "discriminator": [
+        196,
+        210,
+        202,
+        219,
+        204,
+        63,
+        133,
+        85
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Entered",
+      "discriminator": [
+        247,
+        164,
+        21,
+        222,
+        219,
+        178,
+        237,
+        160
+      ]
+    },
+    {
+      "name": "Prepared",
+      "discriminator": [
+        203,
+        59,
+        178,
+        86,
+        6,
+        123,
+        13,
+        36
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "WrongAccount",
+      "msg": "an account is not the one this mint's hook expects"
+    },
+    {
+      "code": 6001,
+      "name": "BadHookSigner",
+      "msg": "the hook signer is not the token program's signer for this hook"
+    },
+    {
+      "code": 6002,
+      "name": "BadRoundSecs",
+      "msg": "a round lasts from an hour to 30 days"
+    },
+    {
+      "code": 6003,
+      "name": "NotThisHook",
+      "msg": "this mint's hook is not the lottery hook, writing hook data"
+    },
+    {
+      "code": 6004,
+      "name": "WrongMint",
+      "msg": "the holding is of another mint"
+    },
+    {
+      "code": 6005,
+      "name": "NotEligible",
+      "msg": "this owner can't hold tickets: the launch, its pool, the companion's creator address, or an address off the ed25519 curve"
+    }
+  ],
+  "types": [
+    {
+      "name": "Delta",
+      "docs": [
+        "One cut an answer takes from the amount."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "docs": [
+              "How much (above zero)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "account",
+            "docs": [
+              "Index in the callback's account list (prefix first, then extras) of the holding that",
+              "receives it. Must be an extra."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Entered",
+      "docs": [
+        "A holding was entered for the round: its range now, and the round's total."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "u32"
+          },
+          {
+            "name": "start",
+            "type": "u64"
+          },
+          {
+            "name": "weight",
+            "type": "u64"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameHeader",
+      "docs": [
+        "The header at the start of a game hook's state ([`header_offsets`]). A hook declares it as the",
+        "first field of its state account; the companion reads it from raw bytes ([`GameHeader::parse`])."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "magic",
+            "docs": [
+              "[`MAGIC`]."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The game's mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "round_secs",
+            "docs": [
+              "Seconds per round, within [`MIN_ROUND_SECS`] and [`MAX_ROUND_SECS`]."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "round",
+            "docs": [
+              "The round of the last write."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "total",
+            "docs": [
+              "That round's ticket total: every range of the round lies in `[0, total)`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prev_round",
+            "docs": [
+              "The round the header held before its last roll (the last earlier round with a write, or the",
+              "round the hook was prepared in); 0 until the first roll."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "prev_total",
+            "docs": [
+              "That round's ticket total."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_buyer",
+            "docs": [
+              "The owner of the last qualifying buy (jackpot games; the default key when unused)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "last_amount",
+            "docs": [
+              "The tokens of the last qualifying buy."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_buy_at",
+            "docs": [
+              "When it was made (0 when unused)."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookReturn",
+      "docs": [
+        "What a callback may answer in its return data. Which fields a callback may fill depends on the",
+        "callback and the flags ([`Allowed`]); the calling program refuses an answer that fills any",
+        "other field."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deltas",
+            "docs": [
+              "Cuts from the amount (the transfer; a swap's input before, its output after), at most",
+              "[`MAX_DELTAS`]."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Delta"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn",
+            "docs": [
+              "Pool swap callbacks only: an amount to burn from the same side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "`before_swap` only: the LP fee to apply instead of the pool's."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_burn`): the source holding's new hook data",
+              "([`HOOK_DATA_LEN`] bytes)."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_mint`): the destination holding's new hook",
+              "data."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LotteryState",
+      "docs": [
+        "The hook's state for one mint, at `[\"state\", mint]`: the game ticket standard's header first",
+        "(the companion reads it at the standard's offsets), then the hook's own fields."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "header",
+            "docs": [
+              "The standard's header: rounds, the current and previous rounds' ticket totals. The jackpot",
+              "fields (`last_buyer`, `last_amount`, `last_buy_at`) stay zero: this hook runs no jackpot."
+            ],
+            "type": {
+              "defined": {
+                "name": "GameHeader"
+              }
+            }
+          },
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump of `[\"state\", mint]`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "launch",
+            "docs": [
+              "The launch program's `[\"launch\", mint]`: never holds tickets."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The launch pool, once read from the launch account (default until then): never holds",
+              "tickets."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The companion's `[\"creator\", mint]`: never holds tickets."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prepared_by",
+            "docs": [
+              "Who paid for `prepare`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prepared_at",
+            "docs": [
+              "When."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "Before or after the operation."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Before"
+          },
+          {
+            "name": "After"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Prepared",
+      "docs": [
+        "The hook was prepared for a mint."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "state",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_secs",
+            "type": "u32"
+          },
+          {
+            "name": "round",
+            "docs": [
+              "The round it was prepared in."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The companion's creator address for the mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prepared_by",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenHookArgs",
+      "docs": [
+        "Arguments of a token hook callback. Balances and hook data are those of the holdings before",
+        "(`Before`) or after (`After`) the operation; `delta` is what the deltas took, known only after."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "op",
+            "docs": [
+              "The operation."
+            ],
+            "type": {
+              "defined": {
+                "name": "TokenOp"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "docs": [
+              "Before or after it."
+            ],
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Source holding (the mint for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "Destination holding (the mint for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source_owner",
+            "docs": [
+              "Owner of the source holding (default for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_owner",
+            "docs": [
+              "Owner of the destination holding (default for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Who signed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority_is_delegate",
+            "docs": [
+              "Whether the signer acted as a delegate rather than the owner."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "The amount of the operation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delta",
+            "docs": [
+              "The sum of the deltas a `before_transfer` answer took (zero before)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_balance",
+            "docs": [
+              "Source balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "destination_balance",
+            "docs": [
+              "Destination balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of the mint."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of the mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "The source holding's hook data (zeros for a mint)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "The destination holding's hook data (zeros for a burn)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenOp",
+      "docs": [
+        "What a token hook is being told about."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Transfer"
+          },
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Burn"
+          }
+        ]
+      }
+    }
+  ]
+}

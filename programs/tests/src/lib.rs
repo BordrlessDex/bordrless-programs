@@ -8,6 +8,7 @@ pub mod fixture;
 pub mod hooks;
 pub mod kit;
 pub mod launch;
+pub mod orao;
 pub mod spl;
 
 pub use env::*;
@@ -16,7 +17,7 @@ pub use events::*;
 use std::path::PathBuf;
 
 /// The programs, by crate library name (the stem of each `.so`). `hook_tester` is test-only.
-pub const PROGRAMS: [&str; 8] = [
+pub const PROGRAMS: [&str; 9] = [
     "bordrless_token",
     "bordrless_swap",
     "bordrless_bridge",
@@ -24,6 +25,7 @@ pub const PROGRAMS: [&str; 8] = [
     "bordrless_kit",
     "tax_hook",
     "half_life",
+    "lottery_hook",
     "hook_tester",
 ];
 

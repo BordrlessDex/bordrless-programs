@@ -24,7 +24,7 @@ pub enum CompanionError {
     CreatorLockUnsupported,
     #[msg("a share for holders needs holder rewards on")]
     HolderRewardsOff,
-    #[msg("a companion launch can't use a custom token hook yet")]
+    #[msg("a companion launch can't use a custom token hook unless it runs that hook's game")]
     CustomHookUnsupported,
     #[msg("nothing to do yet")]
     NothingToDo,
@@ -48,4 +48,61 @@ pub enum CompanionError {
     EarlyLocked,
     #[msg("the pool can't quote a buyback right now")]
     NoQuote,
+    // ---- v2: games. Appended, so every code above keeps its number. ----
+    #[msg("an account of the randomness oracle is not the one expected")]
+    OracleAccount,
+    #[msg("the randomness oracle's fee is above the most a draw pays")]
+    OracleFeeTooHigh,
+    #[msg("the randomness oracle has not answered yet")]
+    OracleNotFulfilled,
+    #[msg("the randomness oracle has answered: reveal the draw")]
+    OracleFulfilled,
+    #[msg("a game's settings are out of bounds")]
+    BadGame,
+    #[msg("this companion runs no game")]
+    NotAGame,
+    #[msg("a game coin's launch must use the game's hook, with the callbacks a lottery needs")]
+    GameHookMismatch,
+    #[msg("the game hook's state is not the one expected (owner, address, magic, mint or round length)")]
+    HookState,
+    #[msg("the game hook's registry is not the one expected")]
+    HookRegistry,
+    #[msg("the hook status account is not the one expected")]
+    HookStatusAccount,
+    #[msg("only the protocol's upgrade authority sets a hook's status")]
+    NotProtocolAuthority,
+    #[msg("an audit is final, an audited hook can't be blocked, a blocked hook is unblocked only by an audit, and a hook not audited is capped at 0.1 to 10 SOL")]
+    BadHookStatus,
+    #[msg("a draw is in progress")]
+    DrawPending,
+    #[msg("no draw is at this step")]
+    NoDraw,
+    #[msg("the round is not over, or has been drawn already")]
+    RoundNotOver,
+    #[msg("the pot is below the game's minimum")]
+    PotTooSmall,
+    #[msg("this attempt's claim window is not open")]
+    AttemptClosed,
+    #[msg("this holding does not hold the drawn ticket")]
+    NotTheWinner,
+    #[msg("this owner can't win: the launch, its pool, the creator address, or an address off the curve")]
+    NotEligible,
+    #[msg("the holding is not the one expected")]
+    WrongHolding,
+    #[msg("too early for this step")]
+    NotDue,
+    #[msg("too late: a draw's claims end with the round after the drawn one")]
+    DrawLate,
+    #[msg("a game hook's registry lists more extra accounts than a launch transaction can carry")]
+    TooManyHookExtras,
+    /// No longer returned: while the breaker holds, a draw rolls its round over
+    /// (`RolloverReason::OracleUnpaid`). Kept so every code after it keeps its number.
+    #[msg("the oracle has not answered the last request the pot paid for: the pot pays for a new one only after a backoff")]
+    OracleUnanswered,
+    #[msg("a game's hook must be Bordrless's lottery hook, or one the protocol has given a status, and not blocked")]
+    GameHookNotAccepted,
+    #[msg("only a blocked game hook's stranded buyback can be burned")]
+    HookNotBlocked,
+    #[msg("a draw's seed comes from one of the last 3 slots, which ORAO has not answered: build the draw again from a newer slot")]
+    StaleSeed,
 }

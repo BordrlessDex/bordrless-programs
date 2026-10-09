@@ -734,16 +734,27 @@ dependencies = [
  "anchor-lang",
  "bordrless-bridge",
  "bordrless-core",
+ "bordrless-game",
+ "bordrless-hook",
  "bordrless-kit",
  "bordrless-launch",
  "bordrless-swap",
  "bordrless-token",
  "solana-security-txt",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
 name = "bordrless-core"
 version = "0.1.0"
+
+[[package]]
+name = "bordrless-game"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "solana-sha256-hasher",
+]
 
 [[package]]
 name = "bordrless-hook"
@@ -783,6 +794,7 @@ dependencies = [
  "bordrless-bridge",
  "bordrless-companion",
  "bordrless-core",
+ "bordrless-game",
  "bordrless-hook",
  "bordrless-kit",
  "bordrless-launch",
@@ -791,6 +803,7 @@ dependencies = [
  "half-life",
  "hook-tester",
  "litesvm",
+ "lottery-hook",
  "solana-account",
  "solana-hash",
  "solana-keypair",
@@ -1854,6 +1867,18 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "lottery-hook"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-game",
+ "bordrless-hook",
+ "bordrless-launch",
+ "bordrless-token",
+ "solana-security-txt",
+]
 
 [[package]]
 name = "memchr"

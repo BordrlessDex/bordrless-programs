@@ -1,0 +1,31 @@
+[package]
+name = "lottery-hook"
+description = "Bordrless lottery hook: a game coin's token hook under the game ticket standard. Every holder's tokens are their tickets for the round, kept as a range in each holding's hook data; the Bordrless companion draws a verifiable winner and pays the pot. The hook never refuses a transfer, takes no cut and never sees SOL."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "lottery_hook"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-game/idl-build", "bordrless-hook/idl-build", "bordrless-token/idl-build", "bordrless-launch/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+solana-security-txt = { workspace = true }
+bordrless-game = { path = "../../crates/bordrless-game" }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

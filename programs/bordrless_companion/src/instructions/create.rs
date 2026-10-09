@@ -117,7 +117,13 @@ pub fn process_create(ctx: Context<Create>, args: CreateArgs) -> Result<()> {
     c.max_buyback = args.max_buyback;
     c.buyback_interval = args.buyback_interval;
     c.vest_secs = args.vest_secs;
-    c.reserved = [0; 64];
+    // No game until `create_game` (the v2 fields, zero as the reserved bytes they replace were).
+    c.game_hook = Pubkey::default();
+    c.pot_bps = 0;
+    c.pending_pot = 0;
+    c.round_secs = 0;
+    c.stranded_burned_at = 0;
+    c.reserved = [0; 10];
     emit_cpi!(CompanionCreated {
         companion: c.key(),
         mint,
@@ -203,14 +209,19 @@ pub fn process_launch<'info>(
     available.push(ctx.accounts.creator.to_account_info());
     invoke_built(&ix, &available, &[&seeds.seeds()])?;
 
-    // The launch as created: its creator this companion's, no custom hook (not supported yet), no
-    // config author paid (their claims would pay the companion outside its steps).
+    // The launch as created: its creator this companion's, no custom hook but its game's (whose
+    // state must be the game's), no config author paid (their claims would pay the companion
+    // outside its steps).
     let launch = Account::<Launch>::try_from(&remaining[LAUNCH_AT])?;
     require_keys_eq!(launch.creator, creator, CompanionError::WrongCreator);
-    require!(
-        launch.custom_hook.is_none(),
-        CompanionError::CustomHookUnsupported
-    );
+    if c.is_game() {
+        check_game_launch(c, &launch, remaining)?;
+    } else {
+        require!(
+            launch.custom_hook.is_none(),
+            CompanionError::CustomHookUnsupported
+        );
+    }
     require!(
         launch.author_share_bps == 0,
         CompanionError::AuthorShareUnsupported
@@ -239,5 +250,27 @@ pub fn process_launch<'info>(
         mint: c.mint,
         ts: now
     });
+    Ok(())
+}
+
+/// A game companion's launch: the token's hook is the game's, with exactly the callbacks a lottery
+/// runs (transfers and burns, writing hook data: no deltas, which could skim the companion's
+/// buybacks, and no callback the hook may lack, which would fail every burn), and the hook's state
+/// for the mint is a game ticket header for this mint with the game's round length. The state is
+/// the hook's own extra account in `create_launch`'s, so the check needs no account of its own (nor
+/// the `Game`: the companion keeps the hook and the round length).
+fn check_game_launch(c: &Companion, launch: &Launch, remaining: &[AccountInfo]) -> Result<()> {
+    require!(
+        launch.custom_hook == Some(c.game_hook) && launch.custom_hook_flags == LOTTERY_HOOK_FLAGS,
+        CompanionError::GameHookMismatch
+    );
+    let state = bordrless_game::state_address(&c.game_hook, &c.mint).0;
+    let info = remaining
+        .iter()
+        .find(|a| *a.key == state)
+        .ok_or(CompanionError::MissingAccount)?;
+    let header = bordrless_game::read_state(info, &c.game_hook, &c.mint)
+        .map_err(|_| error!(CompanionError::HookState))?;
+    require!(header.round_secs == c.round_secs, CompanionError::HookState);
     Ok(())
 }

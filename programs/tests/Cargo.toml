@@ -11,6 +11,7 @@ anchor-lang.workspace = true
 litesvm.workspace = true
 bordrless-core = { path = "../../crates/bordrless-core" }
 bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-game = { path = "../../crates/bordrless-game" }
 bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
 bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
 bordrless-bridge = { path = "../bordrless_bridge", features = ["no-entrypoint"] }
@@ -18,6 +19,7 @@ bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] 
 bordrless-kit = { path = "../bordrless_kit", features = ["no-entrypoint"] }
 tax-hook = { path = "../tax_hook", features = ["no-entrypoint"] }
 half-life = { path = "../half_life", features = ["no-entrypoint"] }
+lottery-hook = { path = "../lottery_hook", features = ["no-entrypoint"] }
 bordrless-companion = { path = "../bordrless_companion", features = ["no-entrypoint"] }
 hook-tester = { path = "../hook_tester", features = ["no-entrypoint"] }
 solana-account = "=4.7.0"

@@ -21,6 +21,7 @@ members = [
   "programs/bordrless_kit",
   "programs/tax_hook",
   "programs/half_life",
+  "programs/lottery_hook",
   "programs/bordrless_companion",
   "programs/hook_tester",
 ]
@@ -36,6 +37,7 @@ bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
 bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
 tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
+lottery_hook = "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr"
 hook_tester = "9xrQXAxhbRRCVfE5E7DFnxYHESmy4hrtcKpSvZUNmiWM"
 bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
@@ -47,6 +49,7 @@ bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
 bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
 tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
+lottery_hook = "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr"
 bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [programs.mainnet]
@@ -57,6 +60,7 @@ bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
 bordrless_kit = "14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH"
 tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
+lottery_hook = "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr"
 bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [provider]

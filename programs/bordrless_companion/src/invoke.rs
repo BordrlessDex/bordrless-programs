@@ -16,12 +16,14 @@ pub fn invoke_built<'info>(
     available: &[AccountInfo<'info>],
     seeds: &[&[&[u8]]],
 ) -> Result<()> {
+    // The error is built only for a key that is missing: `error!` allocates its name and message,
+    // and the program's heap (32 KiB, never freed) can't afford that on every lookup of every call.
     let find = |key: &Pubkey| {
         available
             .iter()
             .find(|a| a.key == key)
             .cloned()
-            .ok_or(error!(CompanionError::MissingAccount))
+            .ok_or_else(|| error!(CompanionError::MissingAccount))
     };
     let mut infos = Vec::with_capacity(ix.accounts.len() + 1);
     for meta in &ix.accounts {

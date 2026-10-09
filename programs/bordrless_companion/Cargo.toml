@@ -14,15 +14,21 @@ default = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build", "bordrless-token/idl-build", "bordrless-swap/idl-build", "bordrless-kit/idl-build", "bordrless-launch/idl-build", "bordrless-bridge/idl-build"]
+idl-build = ["anchor-lang/idl-build", "bordrless-token/idl-build", "bordrless-swap/idl-build", "bordrless-kit/idl-build", "bordrless-launch/idl-build", "bordrless-bridge/idl-build", "bordrless-game/idl-build", "bordrless-hook/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
 
 [dependencies]
 solana-security-txt = { workspace = true }
-anchor-lang = { workspace = true, features = ["event-cpi"] }
+anchor-lang = { workspace = true, features = ["event-cpi", "init-if-needed"] }
 bordrless-core = { path = "../../crates/bordrless-core" }
+# Games (v2): the ticket standard the companion reads a game hook's state and holdings with, and the
+# hook registry it resolves a custom hook's extra accounts from.
+bordrless-game = { path = "../../crates/bordrless-game" }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+# sha256 for the oracle seed: the sol_sha256 syscall on chain, the sha2 crate on the host.
+solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }
 bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
 bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
 bordrless-kit = { path = "../bordrless_kit", features = ["no-entrypoint"] }
