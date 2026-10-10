@@ -29,17 +29,10 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `half_life` | `53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8` | [Half-Life](programs/half_life): an exit fee that halves every 6 hours held, burned |
 | `bordrless_companion` | `6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo` | [Companions](docs/companions.md): a launch's creator as a program, so its fees buy back, reward holders, vest, or run a [game](docs/games.md), with no keeper |
 | `lottery_hook` | `HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr` | [Lottery coins](docs/games.md): the token hook that gives holders tickets for a companion's draws |
+| `hook_timelock` | `BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ` | [Phase 3a](docs/phase3a.md): a hook's or a strategy's upgrade authority behind a public delay of at least 3 days; its only exit is "immutable" |
+| `hook_vault` | `5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG` | [Phase 3a](docs/phase3a.md): where a hook's cuts go: slots that burn, sell for SOL to a wallet fixed before launch, or sell and buy-and-burn another token |
 
-Phase 3a ([docs/phase3a.md](docs/phase3a.md)), built and tested, **not deployed yet**:
-
-| Program | Address | What |
-| --- | --- | --- |
-| `hook_timelock` | `BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ` | A hook's or a strategy's upgrade authority behind a public delay of at least 3 days; its only exit is "immutable" |
-| `hook_vault` | `5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG` | Where a hook's cuts go: slots that burn, sell for SOL to a wallet fixed before launch, or sell and buy-and-burn another token, under the companion's buyback guards |
-| `bordrless_companion` (upgrade) | same id | Studio attestations, audits tied to code, game hooks vetted by class and attestation, and [strategy games](docs/strategies.md) |
-| `bordrless_launch` (upgrade) | same id | A custom hook behind its own `hook_timelock` is accepted |
-
-Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day). Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -48,12 +41,18 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
 | `bordrless_swap` | `5d63e257c01aff1bcf86ca554ce3230be7339bced1427954e08300b6b4828d12` |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
-| `bordrless_launch` | `0b8c7165dcab083d052cac20d2bd19b2d43174a8168c18717c9e1d8907c8e288` |
+| `bordrless_launch` | `cefe1ac7c4edda86f6f8473025b2ffecb21b1799c683e9e808183586942dcf74` |
 | `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
-| `bordrless_companion` | `fff582d8dbfb8f7e70dd5871b74e12fcb4116dd4697e030a75d85de9bdadf222` |
+| `bordrless_companion` | `977a6459fef0ac5e2dd831404a00eb36a5b85ea6724c39cdfbfb34d96ed3c427` |
 | `lottery_hook` | `c5d5000804d10fb1adc7576ee995b2c1f27a9bc8d9d51ba7df270f70a9922a5d` |
+| `hook_timelock` | `30d849b2c54c2ba64668066e77923a6d99483d0cf5eb404cecfc78e50348d60d` |
+| `hook_vault` | `e5097780ead4976105a758de84404ee16b7ac04bcc8b210aca8a5f611cbcf7a0` |
+
+`half_life` on mainnet is the verified build of commit `e54cc4a`: later commits changed a struct it
+compiles from the launchpad (`Launch.author_share_bps`, taken from reserved bytes; same layout), so
+building it from the current tree gives a different hash. It has not been redeployed.
 
 The IDLs are in [`idl/`](idl).
 

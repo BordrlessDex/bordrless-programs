@@ -1004,7 +1004,7 @@ verification of the fixes):
 - Custom pool hooks on launches.
 - Any change to the token program or the DEX.
 
-## 17. As built (2026-10-09, not deployed)
+## 17. As built (2026-10-09; live on mainnet since 2026-10-10)
 
 Everything above is built and tested in this repository and the monorepo, with the owner's
 decisions of §0a. Nothing is deployed. Where the build differs from the design, this section wins.

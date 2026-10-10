@@ -1,6 +1,6 @@
 # Strategies: a builder's program decides a coin's payouts
 
-Status: built 2026-10-09 with phase 3a (`docs/phase3a.md` §4); **not deployed**. The companion's
+Status: built 2026-10-09 with phase 3a (`docs/phase3a.md` §4); **live on mainnet since 2026-10-10** (companion `977a6459…`). The companion's
 `Strategy` game kind, the `bordrless-strategy` crate, Studio's pro-rata starter
 (`programs/tests/fixtures/strategies/pro_rata`) and a scripted test strategy
 (`programs/tests/fixtures/strategies/tester`).
