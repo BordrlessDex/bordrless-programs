@@ -3,7 +3,7 @@
 # v1.57, Agave 4.3.0); every dependency is pinned exactly and Cargo.lock is committed.
 
 [workspace]
-members = ["programs/*", "crates/*", "programs/tests/fixtures/starters/*"]
+members = ["programs/*", "crates/*", "programs/tests/fixtures/starters/*", "programs/tests/fixtures/strategies/*"]
 resolver = "2"
 
 [workspace.package]

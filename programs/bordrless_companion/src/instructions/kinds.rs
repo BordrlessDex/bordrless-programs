@@ -185,6 +185,7 @@ pub fn process_settle<'info>(ctx: Context<'info, ClaimPrize<'info>>) -> Result<(
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     else {
         return Ok(());
@@ -369,7 +370,9 @@ pub(crate) fn prize_due(
 /// A streak epoch open for claims whose claims have ended (with the epoch after it) is over: what
 /// its pot did not pay rolls over (the lock is released). Answers whether it ended one.
 pub(crate) fn end_epoch_if_over(c: &mut Companion, g: &mut Game, now: i64) -> bool {
-    if g.kind != GameKind::Streak || g.status != DrawStatus::Revealed || now < g.claims_end() {
+    // A strategy's period ends as a streak's epoch does (phase 3a).
+    let kind = g.kind == GameKind::Streak || g.kind == GameKind::Strategy;
+    if !kind || g.status != DrawStatus::Revealed || now < g.claims_end() {
         return false;
     }
     g.status = DrawStatus::Idle;
@@ -410,6 +413,7 @@ pub fn process_close_epoch<'info>(ctx: Context<'info, GameStep<'info>>, epoch: u
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     else {
         return Ok(());
@@ -569,6 +573,7 @@ pub fn process_claim_share<'info>(
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     .is_none()
     {

@@ -1,0 +1,40 @@
+[package]
+name = "hook-vault"
+description = "Bordrless hook vault: a launchpad coin's token hook sends its cuts to up to three slots, each with a policy fixed before the launch (burn, sell for SOL to a fixed wallet, or sell and buy-and-burn another token), run by anyone under a port of the companion's buyback guards."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "hook_vault"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-token/idl-build", "bordrless-swap/idl-build", "bordrless-launch/idl-build", "bordrless-bridge/idl-build", "bordrless-hook/idl-build", "bordrless-kit/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+# Logs the heap each step used (`heap used: N`), for the tests' measurement only; never deployed.
+heap-probe = []
+
+[dependencies]
+solana-security-txt = { workspace = true }
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+bordrless-core = { path = "../../crates/bordrless-core" }
+# The hook registry a coin's custom hook keeps, which the vault resolves the hook's extra accounts
+# from for every token instruction it builds.
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
+bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
+bordrless-bridge = { path = "../bordrless_bridge", features = ["no-entrypoint"] }
+# The kit's config of a token bought (its max wallet, until it graduates). Already a dependency of
+# the launchpad's.
+bordrless-kit = { path = "../bordrless_kit", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

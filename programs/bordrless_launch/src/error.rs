@@ -95,4 +95,9 @@ pub enum LaunchError {
     HookUpgradeable,
     #[msg("the custom hook's program data account is missing or wrong")]
     HookProgramDataMissing,
+    // ---- Phase 3a. Appended, so every code above keeps its number. ----
+    #[msg("the custom hook's upgrade authority is its timelock: pass its Timelock account (owned by hook_timelock, for this program, a delay of at least 3 days)")]
+    HookTimelockInvalid,
+    #[msg("the custom hook's timelock holds a proposal of new code: a coin is made on a timelocked hook only while nothing is pending (its author cancels it, or it lands first)")]
+    HookTimelockPending,
 }

@@ -1,0 +1,22 @@
+[package]
+name = "bordrless-strategy"
+description = "The Bordrless strategy interface (phase 3a): the two questions the companion asks a strategy program (plan: how much of the pot a period pays; entitle: how much one holding gets), their arguments and answers, the accounts a strategy sees, its registry, and the readers of the game ticket standard and the pool a strategy decides with."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+idl-build = ["anchor-lang/idl-build", "bordrless-game/idl-build", "bordrless-hook/idl-build"]
+
+[dependencies]
+anchor-lang.workspace = true
+bordrless-game = { path = "../bordrless-game" }
+bordrless-hook = { path = "../bordrless-hook" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

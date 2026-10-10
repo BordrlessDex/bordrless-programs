@@ -224,6 +224,8 @@ impl Env {
             ("lottery_hook", lottery_hook::ID),
             ("hook_tester", hook_tester::ID),
             ("bordrless_companion", bordrless_companion::ID),
+            ("hook_timelock", hook_timelock::ID),
+            ("hook_vault", hook_vault::ID),
         ];
         for (name, id) in programs {
             svm.add_program(id, bytes_of(name))

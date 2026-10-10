@@ -75,7 +75,7 @@ use crate::constants::*;
 use crate::error::CompanionError;
 use crate::events::*;
 use crate::instructions::steps::{
-    available, decode_registry, enforce_terms, find, pay_sol, read_hook_terms,
+    available, decode_registry, enforce_terms, find, game_hook_terms, pay_sol,
 };
 use crate::instructions::CreatorSeeds;
 use crate::invoke::invoke_built;
@@ -219,29 +219,54 @@ pub struct GameKindArgs {
     pub min_weight: u64,
 }
 
-/// Whether `hook` is upgradeable by one of the protocol's keys (`HOOK_UPGRADE_AUTHORITIES`: Studio's
-/// and the protocol's), from its ProgramData among `available`: at `PDA([hook], loader)`, owned by
-/// the upgradeable loader (which alone writes accounts it owns at that address: they exist only
-/// for a program deployed there), a ProgramData header naming one of the keys. The way a Studio
-/// game hook, deployed under Studio's key, is taken without a status: Bordrless can upgrade it (to
-/// a hook that issues no tickets) as well as block it. Not audited: its pots are capped.
-fn upgradeable_by_the_protocol(available: &[AccountInfo], hook: &Pubkey) -> bool {
-    let expected = Pubkey::find_program_address(&[hook.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0;
-    let Some(info) = available.iter().find(|a| *a.key == expected) else {
-        return false;
+/// Whether the companion takes `hook` as a game hook, and the terms it then has (`docs/phase3a.md`
+/// §2.2 and owner decision 7):
+///
+/// - Bordrless's lottery hook (`LOTTERY_HOOK_ID`), as deployed;
+/// - any hook the protocol has written a status for (`hook_status` owned by this program);
+/// - a hook only Bordrless's keys (`HOOK_UPGRADE_AUTHORITIES`) or its own `hook_timelock` can
+///   upgrade, its ProgramData (and `Timelock`) among `available`, **with a current Studio
+///   attestation** (`HookNotAttested` without one): a program handed to Studio's key by someone
+///   else (which anyone can do) or put behind a timelock by anyone never skips Studio's review;
+///
+/// never a blocked one (`GameHookNotAccepted`). A hook without a status is not audited: its pots
+/// are capped at 10 SOL, and the protocol can block it. A hook nobody vetted could refuse only the
+/// companion's own token moves (its buyback's transfer or burn) while holders trade as usual, and
+/// strand the buyback with every pot a block or `retire` sends there; an immutable hook therefore
+/// needs a status.
+///
+/// An audit recorded with the hook's code hash counts only while it holds for the code
+/// (`game_hook_terms`); answers the terms and the memo the game keeps.
+pub(crate) fn vet_game_hook(
+    available: &[AccountInfo],
+    hook: &Pubkey,
+    status: &AccountInfo,
+) -> Result<(HookTerms, Option<u64>)> {
+    use bordrless_hook::authority::AuthorityClass;
+    let (terms, memo) = game_hook_terms(available, hook, status, None, true)?;
+    let vetted = if *hook == LOTTERY_HOOK_ID || *status.owner == crate::ID {
+        true
+    } else {
+        match crate::instructions::attest::class_among(available, hook) {
+            Some(AuthorityClass::Protocol(_)) | Some(AuthorityClass::Timelocked { .. }) => {
+                require!(
+                    crate::instructions::attest::attestation_current(
+                        available,
+                        hook,
+                        ATTEST_KIND_GAME_HOOK
+                    )?,
+                    CompanionError::HookNotAttested
+                );
+                true
+            }
+            _ => false,
+        }
     };
-    if *info.owner != BPF_LOADER_UPGRADEABLE_ID {
-        return false;
-    }
-    let Ok(data) = info.try_borrow_data() else {
-        return false;
-    };
-    data.len() >= 45
-        && data[..4] == 3u32.to_le_bytes()
-        && data[12] == 1
-        && HOOK_UPGRADE_AUTHORITIES
-            .iter()
-            .any(|key| key.as_ref() == &data[13..45])
+    require!(
+        vetted && !terms.blocked,
+        CompanionError::GameHookNotAccepted
+    );
+    Ok((terms, memo))
 }
 
 /// The settings of a game of `args.kind`, within its bounds (`BadGame` otherwise). A lottery's are
@@ -286,6 +311,8 @@ fn check_game_args(args: &CreateGameArgs, k: &GameKindArgs) -> Result<()> {
                     && k.min_streak_secs <= bordrless_game::streak::MAX_MIN_STREAK_SECS
                     && k.min_weight >= 1
             }
+            // Made by `create_strategy_game` only.
+            GameKind::Strategy => false,
         };
     require!(ok, CompanionError::BadGame);
     Ok(())
@@ -293,11 +320,16 @@ fn check_game_args(args: &CreateGameArgs, k: &GameKindArgs) -> Result<()> {
 
 /// The hook's kind header for a game of `kind` says what `k` says: a jackpot's timer and minimum
 /// buy, with no buy yet; a streak's minimum streak and weight. Nothing for a lottery.
-fn check_kind_header(state: &AccountInfo, kind: GameKind, k: &GameKindArgs) -> Result<()> {
+pub(crate) fn check_kind_header(
+    state: &AccountInfo,
+    kind: GameKind,
+    k: &GameKindArgs,
+) -> Result<()> {
     let ok = match kind {
         // A lottery's hook keeps ranges: never a jackpot's or a streak's state (a streak's
-        // weights all start at ticket 0, so every holder would hold the drawn ticket).
-        GameKind::Lottery => {
+        // weights all start at ticket 0, so every holder would hold the drawn ticket). A
+        // strategy's tickets are a lottery's.
+        GameKind::Lottery | GameKind::Strategy => {
             let data = state.try_borrow_data()?;
             bordrless_game::JackpotHeader::parse(&data).is_none()
                 && bordrless_game::StreakHeader::parse(&data).is_none()
@@ -328,6 +360,11 @@ pub fn process_create_game_v2(
     args: CreateGameArgs,
     kind: GameKindArgs,
 ) -> Result<()> {
+    // A strategy game has terms of its own: `create_strategy_game`.
+    require!(
+        args.kind != GameKind::Strategy,
+        CompanionError::WrongGameKind
+    );
     create_any_game(ctx, args, kind, true)
 }
 
@@ -384,20 +421,14 @@ fn create_any_game(
     };
     check_hook_registry(&ctx.accounts.hook_registry, &args.hook, &mint, max_extras)?;
     // The hook: Bordrless's lottery hook, a hook the protocol has vetted (written a status for),
-    // or one only the protocol's keys can upgrade (a Studio hook: its ProgramData among the
-    // remaining accounts); never a blocked one. A hook nobody vetted could refuse only the
-    // companion's own token moves (its buyback's transfer or burn) while holders trade as usual,
-    // and strand the buyback with every pot a block or `retire` sends there; an immutable hook
-    // needs a status. A hook without a status is not audited: its pots are capped at 10 SOL.
-    let status = &ctx.accounts.hook_status;
-    let terms = read_hook_terms(status, &args.hook)?;
-    let vetted = args.hook == LOTTERY_HOOK_ID
-        || *status.owner == crate::ID
-        || upgradeable_by_the_protocol(ctx.remaining_accounts, &args.hook);
-    require!(
-        vetted && !terms.blocked,
-        CompanionError::GameHookNotAccepted
-    );
+    // or one only Bordrless's keys or its timelock can upgrade, with a current Studio attestation
+    // (its ProgramData, its timelock and its attestation among the remaining accounts); never a
+    // blocked one (`vet_game_hook`).
+    let (terms, memo) = vet_game_hook(
+        ctx.remaining_accounts,
+        &args.hook,
+        &ctx.accounts.hook_status,
+    )?;
     let now = Clock::get()?.unix_timestamp;
     let first_round = round_of(now, args.round_secs);
 
@@ -426,7 +457,8 @@ fn create_any_game(
     g.min_streak_secs = k.min_streak_secs;
     g.min_weight = k.min_weight;
     g.epoch_paid = 0;
-    g.reserved = [0; 43];
+    g.set_hook_audit_memo(memo);
+    g.reserved = [0; 34];
     let game = g.key();
 
     let c = &mut ctx.accounts.companion;
@@ -524,6 +556,10 @@ pub struct ClaimPrize<'info> {
 /// to the buyback and ends any draw (answers `None`: the step stops there and succeeds); otherwise
 /// a pot above a cap lowered since is trimmed to it, and the step goes on under the terms it
 /// answers.
+///
+/// An audit recorded with the hook's code hash holds only for that code (`game_hook_terms`): the
+/// hook's ProgramData is then among `available` (the step's remaining accounts), and the game keeps
+/// the deploy slot it last held for.
 pub(crate) fn apply_status(
     event_authority: &AccountInfo,
     companion_key: Pubkey,
@@ -531,9 +567,12 @@ pub(crate) fn apply_status(
     c: &mut Companion,
     g: &mut Game,
     hook_status: &AccountInfo,
+    available: &[AccountInfo],
 ) -> Result<Option<HookTerms>> {
     require!(c.launched, CompanionError::NotLaunched);
-    let terms = read_hook_terms(hook_status, &g.hook)?;
+    let (terms, memo) =
+        game_hook_terms(available, &g.hook, hook_status, g.hook_audit_memo(), true)?;
+    g.set_hook_audit_memo(memo);
     let moved = enforce_terms(c, &terms, Clock::get()?.unix_timestamp)?;
     if moved > 0 {
         emit_event(
@@ -805,6 +844,7 @@ pub fn process_draw<'info>(
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     else {
         return Ok(());
@@ -934,6 +974,7 @@ pub fn process_reveal<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     .is_none()
     {
@@ -985,6 +1026,7 @@ pub fn process_claim_prize<'info>(
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     .is_none()
     {
@@ -1090,6 +1132,7 @@ pub fn process_expire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
     .is_none()
     {
@@ -1144,25 +1187,36 @@ pub fn process_retire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
     let now = Clock::get()?.unix_timestamp;
     let (companion_key, game_key) = (ctx.accounts.companion.key(), ctx.accounts.game.key());
     let event_authority = ctx.accounts.event_authority.to_account_info();
-    if apply_status(
+    let Some(terms) = apply_status(
         &event_authority,
         companion_key,
         game_key,
         &mut ctx.accounts.companion,
         &mut ctx.accounts.game,
         &ctx.accounts.hook_status,
+        ctx.remaining_accounts,
     )?
-    .is_none()
-    {
+    else {
         return Ok(());
-    }
-    if ctx.accounts.game.kind == GameKind::Streak {
-        // A streak epoch whose claims have ended releases what it still held: it rolls over.
+    };
+    if matches!(ctx.accounts.game.kind, GameKind::Streak | GameKind::Strategy) {
+        // A streak epoch (or a strategy period) whose claims have ended releases what it still
+        // held: it rolls over.
         crate::instructions::kinds::end_epoch_if_over(
             &mut ctx.accounts.companion,
             &mut ctx.accounts.game,
             now,
         );
+    }
+    // Phase 3a: a strategy dormant past its retirement (it paid less than `STRATEGY_ACTIVE_BPS` of
+    // the pot for `RETIRE_DORMANT_PERIODS` dormant periods) has its open period closed: a strategy
+    // that plans a dust budget every period never holds the pot for ever.
+    if ctx.accounts.game.kind == GameKind::Strategy
+        && ctx.accounts.game.status == DrawStatus::Revealed
+        && now >= ctx.accounts.game.retirable_at(ctx.accounts.companion.launched_at)
+    {
+        ctx.accounts.game.status = DrawStatus::Idle;
+        ctx.accounts.companion.pot_locked = 0;
     }
     let (c, g) = (&ctx.accounts.companion, &ctx.accounts.game);
     // Never mid-draw: a draw's prize is the pot's, until it is paid or rolls over (and a streak
@@ -1171,9 +1225,9 @@ pub fn process_retire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
     require!(now >= g.retirable_at(c.launched_at), CompanionError::NotDue);
     // Nor before a jackpot round or a streak epoch the pot can pay now is settled or closed
     // (the hook's state is passed for those kinds).
-    if g.kind != GameKind::Lottery {
+    // (A strategy's plans are its own to make: only its dormancy counts.)
+    if g.kind != GameKind::Lottery && g.kind != GameKind::Strategy {
         let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
-        let terms = read_hook_terms(&ctx.accounts.hook_status, &g.hook)?;
         require!(
             !crate::instructions::kinds::prize_due(&all, c, g, &terms, now)?,
             CompanionError::DrawPending
@@ -1336,7 +1390,7 @@ pub struct SetHookStatus<'info> {
 
 /// The upgrade authority of this program, read from its ProgramData account (address, owner and
 /// layout checked).
-fn upgrade_authority(program_data: &AccountInfo) -> Result<Option<Pubkey>> {
+pub(crate) fn upgrade_authority(program_data: &AccountInfo) -> Result<Option<Pubkey>> {
     let expected =
         Pubkey::find_program_address(&[crate::ID.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0;
     require_keys_eq!(
@@ -1360,67 +1414,4 @@ fn upgrade_authority(program_data: &AccountInfo) -> Result<Option<Pubkey>> {
     let mut key = [0u8; 32];
     key.copy_from_slice(&data[13..45]);
     Ok(Some(Pubkey::new_from_array(key)))
-}
-
-/// `set_hook_status(hook, args)`: what the protocol says of `hook`, written by this program's
-/// upgrade authority only (owner decision c):
-///
-/// - an audit is final: a status once audited stays audited, so an audited hook can never be
-///   blocked, not even through an un-audit first (in the same transaction or any other);
-/// - an audit clears a block; a block needs a hook that is not audited and stays until an audit
-///   lifts it;
-/// - a hook not audited keeps a pot cap of 0.1 to 10 SOL: the protocol may lower the cap, never
-///   lift it without an audit.
-pub fn process_set_hook_status(
-    ctx: Context<SetHookStatus>,
-    hook: Pubkey,
-    args: HookStatusArgs,
-) -> Result<()> {
-    let authority = ctx.accounts.authority.key();
-    require!(
-        upgrade_authority(&ctx.accounts.program_data)? == Some(authority),
-        CompanionError::NotProtocolAuthority
-    );
-    let s = &mut ctx.accounts.hook_status;
-    // A status made just now reads all zeros: not audited, not blocked.
-    let made_before = s.version != 0;
-    if made_before {
-        require_keys_eq!(s.hook, hook, CompanionError::HookStatusAccount);
-    }
-    let (was_audited, was_blocked) = (s.audited, s.blocked);
-    // An audit is final.
-    if was_audited {
-        require!(args.audited, CompanionError::BadHookStatus);
-    }
-    if args.audited {
-        require!(!args.blocked, CompanionError::BadHookStatus);
-    } else {
-        require!(
-            (MIN_POT_CAP..=DEFAULT_POT_CAP).contains(&args.pot_cap),
-            CompanionError::BadHookStatus
-        );
-    }
-    if args.blocked {
-        require!(!was_audited, CompanionError::BadHookStatus);
-    }
-    if was_blocked && !args.blocked {
-        require!(args.audited, CompanionError::BadHookStatus);
-    }
-    s.version = HOOK_STATUS_VERSION;
-    s.bump = ctx.bumps.hook_status;
-    s.hook = hook;
-    s.audited = args.audited;
-    s.pot_cap = args.pot_cap;
-    s.blocked = args.blocked;
-    s.updated_at = Clock::get()?.unix_timestamp;
-    s.updated_by = authority;
-    s.reserved = [0; 32];
-    emit_cpi!(HookStatusSet {
-        hook,
-        audited: args.audited,
-        pot_cap: args.pot_cap,
-        blocked: args.blocked,
-        authority,
-    });
-    Ok(())
 }

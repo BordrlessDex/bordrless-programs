@@ -211,6 +211,52 @@ pub const RECEIPT_VERSION: u8 = 1;
 pub const HOOK_UPGRADE_AUTHORITIES: [Pubkey; 2] =
     bordrless_launch::constants::HOOK_UPGRADE_AUTHORITIES;
 
+// ---- Phase 3a: attestations, timelocks, strategies (`docs/phase3a.md`) -----------------------------
+
+/// `PDA(["attest", program])`: Bordrless Studio's attestation of a program's code
+/// (`HookAttestation`).
+pub const ATTEST_SEED: &[u8] = b"attest";
+pub const ATTESTATION_VERSION: u8 = 1;
+/// Studio's attester: a hot key used only by Studio's build worker, which writes an attestation
+/// once it has rebuilt a program's source, matched the hash on chain and passed the static checks,
+/// the simulator and the review (owner decision 8). It is not Studio's upgrade key.
+pub const STUDIO_ATTESTER: Pubkey =
+    Pubkey::from_str_const("3uGLsTJNse7vE3pgRkAf6aKKBoKmCyPUcNNu1bw3KvP2");
+/// `hook_timelock`: a program whose upgrade authority is its timelock is "timelocked".
+pub const HOOK_TIMELOCK_ID: Pubkey = bordrless_hook::authority::HOOK_TIMELOCK_ID;
+/// An attestation's review verdicts.
+pub const REVIEW_PASS: u8 = 0;
+pub const REVIEW_WARN: u8 = 1;
+/// An attestation's kinds (`HookAttestation.kind`): a game hook is taken only with a kind-1 one.
+pub const ATTEST_KIND_TOKEN_HOOK: u8 = 0;
+pub const ATTEST_KIND_GAME_HOOK: u8 = 1;
+pub const ATTEST_KIND_STRATEGY: u8 = 2;
+/// `HookAttestation.reserved[0]` once the protocol's upgrade authority revoked it: the program is
+/// never attested again.
+pub const REVOKED_BY_PROTOCOL: u8 = 1;
+
+/// `PDA(["strategy", mint])`: a strategy game's terms (`StrategyTerms`).
+pub const STRATEGY_SEED: &[u8] = b"strategy";
+pub const STRATEGY_VERSION: u8 = 1;
+/// The most of the unlocked pot one period may pay: 50% (owner decision 4).
+pub const MAX_STRATEGY_BUDGET_BPS: u16 = 5_000;
+/// The most one holder gets of a period's budget: 25% (owner decision 4).
+pub const MAX_STRATEGY_SHARE_BPS: u16 = 2_500;
+/// The most candidates one `pay_strategy` takes (transaction size, measured in
+/// `companion_strategy.rs`).
+pub const MAX_STRATEGY_PER_TX: u8 = 4;
+/// The least share of the pot (bps) a strategy period must have paid for a payment to count as
+/// activity: below it, payments don't hold off `retire` (a pot paid out as dust every few weeks
+/// would otherwise never retire).
+pub const STRATEGY_ACTIVE_BPS: u16 = 100;
+/// The most compute a strategy's `plan` and `entitle` may declare: what keepers budget for each call
+/// (the companion can't meter a CPI on mainnet, `strategy::ask`; a call over the transaction's limit
+/// fails it). Studio's simulator holds a strategy to 70% of its declared caps.
+pub const MAX_PLAN_CU: u32 = 150_000;
+pub const MAX_ENTITLE_CU: u32 = 60_000;
+/// The most extra accounts a strategy's registry may list, each owned by the strategy.
+pub const MAX_STRATEGY_EXTRAS: usize = bordrless_strategy::MAX_EXTRAS;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,10 +348,67 @@ mod tests {
         assert_eq!(o::STATUS, o::POOL + 32 + 32);
         // Every kind runs the lottery's callbacks, exactly.
         use crate::state::GameKind;
-        for kind in [GameKind::Lottery, GameKind::Jackpot, GameKind::Streak] {
+        for kind in [
+            GameKind::Lottery,
+            GameKind::Jackpot,
+            GameKind::Streak,
+            GameKind::Strategy,
+        ] {
             assert_eq!(kind.hook_flags(), LOTTERY_HOOK_FLAGS);
         }
         assert_eq!(HOOK_UPGRADE_AUTHORITIES.len(), 2);
+    }
+
+    #[test]
+    fn the_strategy_interface_is_the_crates() {
+        // The pool reader of the strategy crate reads the DEX's layout.
+        let pool = bordrless_swap::state::Pool {
+            version: 1,
+            bump: 2,
+            lp_mint_bump: 3,
+            base_mint: Pubkey::new_unique(),
+            quote_mint: Pubkey::new_unique(),
+            lp_mint: Pubkey::new_unique(),
+            base_vault: Pubkey::new_unique(),
+            quote_vault: Pubkey::new_unique(),
+            hook_program: Some(LAUNCH_ID),
+            hook_flags: 7,
+            lp_fee_bps: 125,
+            protocol_fee_bps: 0,
+            base_reserve: 11,
+            quote_reserve: 12,
+            virtual_base: 13,
+            virtual_quote: 14,
+            lp_supply: 15,
+            protocol_fees_quote: 16,
+            curve: true,
+            creator: Pubkey::new_unique(),
+            created_at: 17,
+            last_swap_at: 18,
+            swap_count: 19,
+            base_volume: 20,
+            quote_volume: 21,
+            hook_signer_bump: 22,
+            fee_model: 1,
+            protocol_share_bps: 2_500,
+            reserved: [0; 60],
+        };
+        for hook in [Some(LAUNCH_ID), None] {
+            let mut p = pool.clone();
+            p.hook_program = hook;
+            let mut data = Vec::new();
+            anchor_lang::AccountSerialize::try_serialize(&p, &mut data).unwrap();
+            let r = bordrless_strategy::pool_reserves(&data).expect("reads");
+            assert_eq!(
+                (r.base_mint, r.quote_mint, r.lp_fee_bps),
+                (p.base_mint, p.quote_mint, 125)
+            );
+            assert_eq!(
+                (r.base_reserve, r.quote_reserve, r.virtual_base, r.virtual_quote),
+                (11, 12, 13, 14)
+            );
+        }
+        const { assert!(MAX_STRATEGY_EXTRAS == 2 && MAX_STRATEGY_PER_TX == 4) };
     }
 
     #[test]

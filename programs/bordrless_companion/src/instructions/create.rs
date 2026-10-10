@@ -278,6 +278,12 @@ fn check_game_launch(c: &Companion, launch: &Launch, remaining: &[AccountInfo]) 
     require!(header.round_secs == c.round_secs, CompanionError::HookState);
     let kind_header = match c.game_kind {
         GameKind::Lottery => true,
+        // A strategy's tickets: a lottery-format header, never a jackpot's or a streak's.
+        GameKind::Strategy => {
+            let data = info.try_borrow_data()?;
+            bordrless_game::JackpotHeader::parse(&data).is_none()
+                && bordrless_game::StreakHeader::parse(&data).is_none()
+        }
         GameKind::Jackpot => {
             bordrless_game::JackpotHeader::parse(&info.try_borrow_data()?).is_some()
         }

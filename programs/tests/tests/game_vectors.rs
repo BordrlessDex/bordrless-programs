@@ -457,7 +457,9 @@ fn sample_game() -> Game {
         min_streak_secs: 0,
         min_weight: 0,
         epoch_paid: 0,
-        reserved: [0; 43],
+        hook_audit_slot: 0,
+        hook_audit_ok: false,
+        reserved: [0; 34],
     }
 }
 

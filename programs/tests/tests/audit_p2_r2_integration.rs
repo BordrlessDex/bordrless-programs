@@ -103,7 +103,7 @@ fn game_args(kind: GameKind) -> (CreateGameArgs, GameKindArgs) {
                 ..GameKindArgs::default()
             },
         ),
-        GameKind::Lottery => unreachable!(),
+        GameKind::Lottery | GameKind::Strategy => unreachable!(),
     }
 }
 
@@ -148,6 +148,8 @@ fn world() -> World {
             .unwrap_or_else(|e| panic!("load {name}: {e:?}"));
         w.env.set_upgrade_authority(id, Some(STUDIO_KEY));
     }
+    // Phase 3a: Studio's attestations, without which the companion takes no hook by its key.
+    bordrless_program_tests::attest::attest_all(&mut w.env, &[JACKPOT, STREAK]);
     w
 }
 
@@ -156,7 +158,7 @@ fn setup_ixs(launcher: &Pubkey, mint: &Pubkey, kind: GameKind) -> Vec<Instructio
     vec![
         companion::create(*launcher, *launcher, *mint, create_args()),
         prepare_ix(args.hook, *launcher, *mint),
-        companion::create_game_v2(*launcher, *mint, args, k),
+        companion::create_game_v2_attested(*launcher, *mint, args, k, false),
     ]
 }
 

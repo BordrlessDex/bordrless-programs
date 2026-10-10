@@ -9,6 +9,11 @@
 #   programs.sh keys <cluster>          install keys/<cluster>/<program>-keypair.json into target/deploy
 #   programs.sh check-keys <cluster>    every program keypair must match its declare_id!
 #
+# KEYS_DIR overrides keys/<cluster> for `keys` and `check-keys` (mainnet's program keypairs live in
+# ~/.config/solana/bordrless-mainnet, never in the checkout). Phase 3a added hook_timelock and
+# hook_vault; the strategy fixtures (programs/tests/fixtures/strategies) are test-only and built with
+# `cargo build-sbf --manifest-path programs/tests/fixtures/strategies/<name>/Cargo.toml`.
+#
 # The checkout usually lives on a Windows drive (/mnt/f/...), where cargo is slow; host builds go to
 # CARGO_TARGET_DIR (default ~/.cache/bordrless/target) and only the .so files are written back into
 # <checkout>/target/deploy, where the tests look for them.
@@ -21,7 +26,7 @@ set -euo pipefail
 TOOLS_VERSION="v1.57"
 SBF_ARCH="v3"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-PROGRAMS=(bordrless_token bordrless_swap bordrless_bridge bordrless_launch bordrless_kit tax_hook half_life lottery_hook bordrless_companion hook_tester)
+PROGRAMS=(bordrless_token bordrless_swap bordrless_bridge bordrless_launch bordrless_kit tax_hook half_life lottery_hook bordrless_companion hook_timelock hook_vault hook_tester)
 TEST_ONLY=(hook_tester)
 DEPLOY_DIR="$ROOT/target/deploy"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/bordrless/target}"
@@ -85,8 +90,10 @@ cmd_keys() {
   local cluster="${1:-}"
   [[ -n "$cluster" ]] || die "usage: programs.sh keys <cluster>"
   mkdir -p "$DEPLOY_DIR"
+  local dir="${KEYS_DIR:-$ROOT/keys/$cluster}"
   for program in "${PROGRAMS[@]}"; do
-    local key="$ROOT/keys/$cluster/$program-keypair.json"
+    if is_test_only "$program"; then continue; fi
+    local key="$dir/$program-keypair.json"
     [[ -f "$key" ]] || die "missing $key"
     cp "$key" "$DEPLOY_DIR/$program-keypair.json"
   done
@@ -97,8 +104,10 @@ cmd_check_keys() {
   local cluster="${1:-}"
   [[ -n "$cluster" ]] || die "usage: programs.sh check-keys <cluster>"
   local ok=1
+  local dir="${KEYS_DIR:-$ROOT/keys/$cluster}"
   for program in "${PROGRAMS[@]}"; do
-    local key="$ROOT/keys/$cluster/$program-keypair.json"
+    if is_test_only "$program"; then continue; fi
+    local key="$dir/$program-keypair.json"
     local declared
     declared="$(grep -ho 'declare_id!("[^"]*")' "$ROOT/programs/$program/src/lib.rs" | sed 's/declare_id!("\(.*\)")/\1/')"
     local actual

@@ -17,9 +17,11 @@ use bordrless_launch::instructions::CreateLaunchArgs;
 use bordrless_token::client::{self as token_client, Hook};
 
 use crate::constants::*;
-use crate::instructions::{CreateArgs, CreateGameArgs, GameKindArgs, HookStatusArgs};
+use crate::instructions::{
+    AttestArgs, CreateArgs, CreateGameArgs, GameKindArgs, HookStatusArgs, StrategyArgs,
+};
 use crate::oracle;
-use crate::state::{Companion, Game, HookStatus, ShareReceipt};
+use crate::state::{Companion, Game, HookAttestation, HookStatus, ShareReceipt, StrategyTerms};
 
 /// This program's event authority.
 pub fn event_authority() -> Pubkey {
@@ -821,4 +823,296 @@ pub fn retire_game(cranker: Pubkey, mint: Pubkey, hook: Pubkey) -> Instruction {
         false,
     ));
     ix
+}
+
+// ---- Phase 3a: attestations, audits tied to code ---------------------------------------------------
+
+/// Studio's attestation of `program`: `PDA(["attest", program])`.
+pub fn attestation_address(program: &Pubkey) -> Pubkey {
+    HookAttestation::address(program).0
+}
+
+/// `program`'s `hook_timelock` account (its upgrade authority, when timelocked).
+pub fn timelock_address(program: &Pubkey) -> Pubkey {
+    bordrless_hook::authority::timelock_address(program).0
+}
+
+/// Any game step (or `create_game*`, `create_strategy_game`, `claim_fees`, `plan_period`) of a game
+/// whose hook's status records an audit with its code's hash (`set_hook_status_v2`): the hook's
+/// ProgramData appended, read-only. The audit then lifts the cap only while the hook runs that code
+/// (immutable or Bordrless-managed); without the ProgramData such a step is refused
+/// (`ProgramAccounts`). Harmless for any other game. For `claim_fees`, also append the game
+/// (read-only: its memo spares a rehash).
+pub fn with_hook_code(mut ix: Instruction, hook: &Pubkey) -> Instruction {
+    ix.accounts.push(AccountMeta::new_readonly(
+        hook_program_data_address(hook),
+        false,
+    ));
+    ix
+}
+
+/// What the program needs to vet a game hook (or a strategy) without a status: its ProgramData, its
+/// attestation and, when `timelocked`, its `Timelock` (read-only, appended as remaining accounts).
+pub fn vetting_accounts(program: &Pubkey, timelocked: bool) -> Vec<AccountMeta> {
+    let mut metas = vec![
+        AccountMeta::new_readonly(hook_program_data_address(program), false),
+        AccountMeta::new_readonly(attestation_address(program), false),
+    ];
+    if timelocked {
+        metas.push(AccountMeta::new_readonly(timelock_address(program), false));
+    }
+    metas
+}
+
+/// [`create_game`] for a hook taken without a status (Studio's, the protocol's or a timelock's to
+/// upgrade, with a current Studio attestation): its [`vetting_accounts`] appended.
+pub fn create_game_attested(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateGameArgs,
+    timelocked: bool,
+) -> Instruction {
+    let hook = args.hook;
+    let mut ix = create_game(payer, mint, args);
+    ix.accounts.extend(vetting_accounts(&hook, timelocked));
+    ix
+}
+
+/// [`create_game_v2`] with the hook's attestation (and, when `timelocked`, its `Timelock`) after
+/// its ProgramData.
+pub fn create_game_v2_attested(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateGameArgs,
+    kind: GameKindArgs,
+    timelocked: bool,
+) -> Instruction {
+    let hook = args.hook;
+    let mut ix = create_game_v2(payer, mint, args, kind);
+    ix.accounts
+        .push(AccountMeta::new_readonly(attestation_address(&hook), false));
+    if timelocked {
+        ix.accounts
+            .push(AccountMeta::new_readonly(timelock_address(&hook), false));
+    }
+    ix
+}
+
+/// `attest(args)`: Studio's attester attests `program`'s code (its ProgramData read and hashed).
+pub fn attest(attester: Pubkey, program: Pubkey, args: AttestArgs) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: crate::accounts::Attest {
+            attester,
+            target: program,
+            programdata: hook_program_data_address(&program),
+            attestation: attestation_address(&program),
+            system_program: system_program::ID,
+            event_authority: event_authority(),
+            program: crate::ID,
+        }
+        .to_account_metas(None),
+        data: crate::instruction::Attest { args }.data(),
+    }
+}
+
+/// `revoke`: the attester or the companion's upgrade authority revokes `program`'s attestation.
+pub fn revoke(authority: Pubkey, program: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: crate::accounts::Revoke {
+            authority,
+            program_data: program_data_address(),
+            attestation: attestation_address(&program),
+            event_authority: event_authority(),
+            program: crate::ID,
+        }
+        .to_account_metas(None),
+        data: crate::instruction::Revoke {}.data(),
+    }
+}
+
+/// The accounts an audit of `hook` is checked against: the program, its ProgramData and its
+/// `Timelock` (read-only; unused addresses for a program that has none).
+pub fn audit_accounts(hook: &Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new_readonly(*hook, false),
+        AccountMeta::new_readonly(hook_program_data_address(hook), false),
+        AccountMeta::new_readonly(timelock_address(hook), false),
+    ]
+}
+
+/// `set_hook_status_v2(hook, args, audited_hash)`, signed by the program's upgrade authority, with
+/// the hook's [`audit_accounts`].
+pub fn set_hook_status_v2(
+    authority: Pubkey,
+    hook: Pubkey,
+    args: HookStatusArgs,
+    audited_hash: [u8; 32],
+) -> Instruction {
+    let mut ix = set_hook_status(authority, hook, args);
+    ix.data = crate::instruction::SetHookStatusV2 {
+        hook,
+        args,
+        audited_hash,
+    }
+    .data();
+    ix.accounts.extend(audit_accounts(&hook));
+    ix
+}
+
+/// [`set_hook_status`] (v1) with the hook's [`audit_accounts`], so the program can refuse an audit
+/// of a timelocked or author-upgradeable hook (what the SDK sends; the bare builder is the deployed
+/// instruction).
+pub fn set_hook_status_checked(authority: Pubkey, hook: Pubkey, args: HookStatusArgs) -> Instruction {
+    let mut ix = set_hook_status(authority, hook, args);
+    ix.accounts.extend(audit_accounts(&hook));
+    ix
+}
+
+// ---- Phase 3a: strategy games --------------------------------------------------------------------
+
+/// A strategy game's terms: `PDA(["strategy", mint])`.
+pub fn strategy_terms_address(mint: &Pubkey) -> Pubkey {
+    StrategyTerms::address(mint).0
+}
+
+/// What `create_strategy_game` needs to vet the ticket hook and the strategy, and the strategy's
+/// registry accounts: `hook_vetting` (the hook's [`vetting_accounts`], none for a hook with a
+/// status or Bordrless's lottery hook), the strategy's ProgramData and, when `strategy_timelocked`,
+/// its `Timelock`, then `extras` (what its registry names, resolved by the client).
+pub fn create_strategy_game(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateGameArgs,
+    s: StrategyArgs,
+    hook_vetting: Vec<AccountMeta>,
+    strategy_timelocked: bool,
+    extras: &[Pubkey],
+) -> Instruction {
+    let mut accounts = crate::accounts::CreateStrategyGame {
+        payer,
+        mint,
+        companion: companion_address(&mint),
+        game: game_address(&mint),
+        terms: strategy_terms_address(&mint),
+        hook_state: bordrless_game::state_address(&args.hook, &mint).0,
+        hook_registry: hook_accounts_address(&args.hook, &mint).0,
+        hook_status: hook_status_address(&args.hook),
+        strategy: s.strategy,
+        strategy_status: hook_status_address(&s.strategy),
+        strategy_registry: bordrless_strategy::registry_address(&s.strategy, &mint).0,
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(hook_vetting);
+    accounts.push(AccountMeta::new_readonly(
+        hook_program_data_address(&s.strategy),
+        false,
+    ));
+    if strategy_timelocked {
+        accounts.push(AccountMeta::new_readonly(timelock_address(&s.strategy), false));
+    }
+    accounts.extend(extras.iter().map(|k| AccountMeta::new_readonly(*k, false)));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateStrategyGame { args, s }.data(),
+    }
+}
+
+/// What `plan_period` and `pay_strategy` read the strategy's class by (it is checked before every
+/// question): its ProgramData and its timelock's address (an account that need not exist).
+pub fn strategy_class_accounts(strategy: &Pubkey) -> [AccountMeta; 2] {
+    [
+        AccountMeta::new_readonly(hook_program_data_address(strategy), false),
+        AccountMeta::new_readonly(timelock_address(strategy), false),
+    ]
+}
+
+/// `plan_period(period)` of `mint`'s strategy game: `hook` its ticket hook, `strategy` its
+/// strategy, `pool` the launch's pool, `extras` the terms' extras.
+pub fn plan_period(
+    cranker: Pubkey,
+    mint: Pubkey,
+    hook: Pubkey,
+    strategy: Pubkey,
+    pool: Pubkey,
+    extras: &[Pubkey],
+    period: u32,
+) -> Instruction {
+    let mut accounts = crate::accounts::PlanPeriod {
+        cranker,
+        companion: companion_address(&mint),
+        game: game_address(&mint),
+        terms: strategy_terms_address(&mint),
+        hook_status: hook_status_address(&hook),
+        strategy_status: hook_status_address(&strategy),
+        launch: launch_client::launch_address(&mint),
+        pool,
+        hook_state: bordrless_game::state_address(&hook, &mint).0,
+        strategy,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(strategy_class_accounts(&strategy));
+    accounts.extend(extras.iter().map(|k| AccountMeta::new_readonly(*k, false)));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::PlanPeriod { period }.data(),
+    }
+}
+
+/// `pay_strategy(period, n)` of `mint`'s strategy game for `owners` (each paid its entitlement;
+/// `cranker` pays the receipts' rent and is paid the bounties).
+pub fn pay_strategy(
+    cranker: Pubkey,
+    mint: Pubkey,
+    hook: Pubkey,
+    strategy: Pubkey,
+    extras: &[Pubkey],
+    period: u32,
+    owners: &[Pubkey],
+) -> Instruction {
+    let creator = creator_address(&mint);
+    let mut accounts = crate::accounts::PayStrategy {
+        cranker,
+        companion: companion_address(&mint),
+        creator,
+        game: game_address(&mint),
+        terms: strategy_terms_address(&mint),
+        hook_status: hook_status_address(&hook),
+        strategy_status: hook_status_address(&strategy),
+        launch: launch_client::launch_address(&mint),
+        hook_state: bordrless_game::state_address(&hook, &mint).0,
+        strategy,
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(strategy_class_accounts(&strategy));
+    accounts.extend(extras.iter().map(|k| AccountMeta::new_readonly(*k, false)));
+    accounts.extend(unwrap_accounts(creator));
+    for owner in owners {
+        accounts.push(AccountMeta::new_readonly(
+            token_client::holding_address(&mint, owner),
+            false,
+        ));
+        accounts.push(AccountMeta::new(*owner, false));
+        accounts.push(AccountMeta::new(receipt_address(&mint, period, owner), false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::PayStrategy {
+            period,
+            n: owners.len() as u8,
+        }
+        .data(),
+    }
 }

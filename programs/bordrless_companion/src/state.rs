@@ -199,6 +199,9 @@ pub enum GameKind {
     /// Each epoch's share goes to the holders who held through it without sending
     /// (`bordrless_game::streak`).
     Streak,
+    /// Phase 3a: each period, a builder's strategy program decides the budget and each holder's
+    /// amount (`bordrless_strategy`), within the companion's bounds; tickets from a lottery hook.
+    Strategy,
 }
 
 impl GameKind {
@@ -208,7 +211,9 @@ impl GameKind {
     /// callback its hook may lack (`after_burn` would fail every burn).
     pub fn hook_flags(&self) -> u16 {
         match self {
-            GameKind::Lottery | GameKind::Jackpot | GameKind::Streak => LOTTERY_HOOK_FLAGS,
+            GameKind::Lottery | GameKind::Jackpot | GameKind::Streak | GameKind::Strategy => {
+                LOTTERY_HOOK_FLAGS
+            }
         }
     }
 }
@@ -313,12 +318,31 @@ pub struct Game {
     pub min_weight: u64,
     /// What the claim epoch's pot has paid so far (bounties included).
     pub epoch_paid: u64,
+    // ---- Phase 3a (from `reserved`; zero until a step checks a hashed audit). ----
+    /// The deploy slot of the game hook's code when its audit last held for it (`hook_audit_ok`):
+    /// an audit the protocol recorded with the code's hash (`set_hook_status_v2`) lifts the cap
+    /// only while the hook is immutable or Bordrless-managed and runs that code. A step rehashes the
+    /// code only when its deploy slot moved since (an upgrade, or anyone's `ExtendProgram`).
+    pub hook_audit_slot: u64,
+    /// The hook's hashed audit held at `hook_audit_slot`.
+    pub hook_audit_ok: bool,
     /// Room for the kinds to come, zero until then.
-    pub reserved: [u8; 43],
+    pub reserved: [u8; 34],
 }
 
 impl Game {
     pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    /// The deploy slot the hook's hashed audit last held for, if it did.
+    pub fn hook_audit_memo(&self) -> Option<u64> {
+        self.hook_audit_ok.then_some(self.hook_audit_slot)
+    }
+
+    /// Keeps what a step found of the hook's hashed audit.
+    pub fn set_hook_audit_memo(&mut self, memo: Option<u64>) {
+        self.hook_audit_ok = memo.is_some();
+        self.hook_audit_slot = memo.unwrap_or(0);
+    }
 
     pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[GAME_SEED, mint.as_ref()], &crate::ID)
@@ -431,6 +455,78 @@ impl Game {
     }
 }
 
+/// `PDA(["strategy", mint])`: a strategy game's terms (phase 3a, `docs/phase3a.md` §4.2), fixed at
+/// `create_strategy_game`, beside the `Game` (whose period fields are a streak's: `round` the period
+/// open for payments, `total` its tickets, `prize` its budget, `epoch_paid` what it has paid,
+/// `status` `Revealed` while it is open).
+#[account]
+#[derive(InitSpace)]
+pub struct StrategyTerms {
+    pub version: u8,
+    pub bump: u8,
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    /// The strategy program, asked `plan` and `entitle`.
+    pub strategy: Pubkey,
+    /// Bump of the strategy's `["hook-status", strategy]` (it need not exist).
+    pub status_bump: u8,
+    /// The extra accounts the strategy sees after the prefix (its registry, resolved when the game
+    /// was made), each owned by the strategy: the first `n_extras`.
+    pub extras: [Pubkey; 2],
+    pub n_extras: u8,
+    /// The most of the unlocked pot a period may pay (1 to `MAX_STRATEGY_BUDGET_BPS`).
+    pub budget_bps: u16,
+    /// The most one holder gets of a period's budget (1 to `MAX_STRATEGY_SHARE_BPS`).
+    pub max_share_bps: u16,
+    /// The most candidates a payment takes (1 to `MAX_STRATEGY_PER_TX`).
+    pub max_per_tx: u8,
+    /// The most compute `plan` and `entitle` may use (to `MAX_PLAN_CU`, `MAX_ENTITLE_CU`).
+    pub plan_cu_max: u32,
+    pub entitle_cu_max: u32,
+    /// Running totals.
+    pub periods_planned: u32,
+    pub paid_total: u64,
+    pub last_plan_at: i64,
+    /// `paid_total` when the game last counted as active (`settled_at` moved): it counts again
+    /// once `STRATEGY_ACTIVE_BPS` of the pot has been paid since, over however many periods.
+    pub paid_at_active: u64,
+    /// The strategy's audit, as last checked against its code: whether it held, and the deploy
+    /// slot of the code it held for (a plan recomputes the code's hash only once the slot moved).
+    pub audit_ok: bool,
+    pub audit_slot: u64,
+    pub reserved: [u8; 15],
+}
+
+impl StrategyTerms {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[STRATEGY_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// The extras the strategy sees.
+    pub fn extras(&self) -> &[Pubkey] {
+        &self.extras[..usize::from(self.n_extras).min(2)]
+    }
+}
+
+impl HookTerms {
+    /// The stricter of two statuses (the ticket hook's and the strategy's): blocked if either is,
+    /// audited only if both are, the lower cap.
+    pub fn stricter(&self, other: &HookTerms) -> HookTerms {
+        HookTerms {
+            audited: self.audited && other.audited,
+            pot_cap: match (self.audited, other.audited) {
+                (false, false) => self.pot_cap.min(other.pot_cap),
+                (true, false) => other.pot_cap,
+                (false, true) => self.pot_cap,
+                (true, true) => self.pot_cap.min(other.pot_cap),
+            },
+            blocked: self.blocked || other.blocked,
+        }
+    }
+}
+
 /// When the claims of round `round`'s draw end: when the round after it ends. A holding keeps its
 /// ranges of two rounds (the game ticket standard), so in round `round + 2` one written in both
 /// `round + 1` and `round + 2` no longer holds its range of `round`; every claim of `round` is made
@@ -467,12 +563,63 @@ impl HookStatus {
         Pubkey::find_program_address(&[HOOK_STATUS_SEED, hook.as_ref()], &crate::ID)
     }
 
+    /// The executable hash of the code the audit was of (`set_hook_status_v2`, phase 3a: it lives
+    /// in what was `reserved`); zeros for an audit recorded by `set_hook_status` (v1), or none.
+    pub fn audited_hash(&self) -> [u8; 32] {
+        self.reserved
+    }
+
     pub fn terms(&self) -> HookTerms {
         HookTerms {
             audited: self.audited,
             pot_cap: self.pot_cap,
             blocked: self.blocked,
         }
+    }
+}
+
+/// Bordrless Studio's attestation of a program's code, `PDA(["attest", program])`, written only by
+/// Studio's attester (`STUDIO_ATTESTER`) once Studio's worker has rebuilt the program's source,
+/// matched the build's hash with the code on chain (checked again here, when written), and passed
+/// the static checks, the simulator and the review. Revoked by the attester or the protocol's
+/// upgrade authority. "Current" while not revoked and its `build_hash` is the program's code as it
+/// is (`programdata_slot` unchanged is the fast check; an extension changes the slot, not the code,
+/// so a reader then recomputes the hash).
+#[account]
+#[derive(InitSpace)]
+pub struct HookAttestation {
+    pub version: u8,
+    pub bump: u8,
+    pub program: Pubkey,
+    /// `solana-verify`'s executable hash of the attested code.
+    pub build_hash: [u8; 32],
+    /// sha256 of the frozen source Studio built.
+    pub source_hash: [u8; 32],
+    /// The Studio template's commit the source was built against (20 bytes of a git sha1).
+    pub template_commit: [u8; 20],
+    pub sim_version: u16,
+    pub sim_pass: bool,
+    /// The largest cut the simulator saw, and the cap Studio applies, in basis points.
+    pub cut_max_bps: u16,
+    pub cap_bps: u16,
+    /// `REVIEW_PASS` or `REVIEW_WARN`.
+    pub review: u8,
+    /// What it is: 0 a token hook, 1 a game hook, 2 a strategy (informative).
+    pub kind: u8,
+    /// The ProgramData's slot when attested.
+    pub programdata_slot: u64,
+    pub attested_at: i64,
+    pub attester: Pubkey,
+    pub revoked: bool,
+    pub revoked_at: i64,
+    pub reserved: [u8; 32],
+}
+
+impl HookAttestation {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(program: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[ATTEST_SEED, program.as_ref()], &crate::ID)
     }
 }
 
@@ -815,7 +962,9 @@ mod tests {
             min_streak_secs: 0,
             min_weight: 0,
             epoch_paid: 0,
-            reserved: [0; 43],
+            hook_audit_slot: 0,
+            hook_audit_ok: false,
+            reserved: [0; 34],
         };
         assert_eq!(g.attempt_opens(0), Some(1_000));
         assert_eq!(g.attempt_opens(8), Some(1_000 + 8 * 600));
@@ -917,7 +1066,9 @@ mod tests {
             min_streak_secs: 0,
             min_weight: 0,
             epoch_paid: 0,
-            reserved: [0; 43],
+            hook_audit_slot: 0,
+            hook_audit_ok: false,
+            reserved: [0; 34],
         };
         let launched = 1_000_000;
         // Short rounds: 30 days; the launch counts until a prize is paid.

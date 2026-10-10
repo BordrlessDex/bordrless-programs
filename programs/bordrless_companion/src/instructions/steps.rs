@@ -407,7 +407,7 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     let seeds = CreatorSeeds::new(mint, c.creator_bump);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let terms = if c.is_game() {
-        Some(hook_terms(&all, &c.game_hook)?)
+        Some(hook_terms(&all, &c.game_hook, &mint)?)
     } else {
         None
     };
@@ -502,10 +502,29 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
 
 /// What a game hook's status says, from its `PDA(["hook-status", hook])` among `available`: the
 /// account must be passed; one that does not exist (no data, owned by the system program) means
-/// the defaults. Leaving it out can therefore never lift a cap or a block.
-pub(crate) fn hook_terms(available: &[AccountInfo], hook: &Pubkey) -> Result<HookTerms> {
+/// the defaults. Leaving it out can therefore never lift a cap or a block. An audit recorded with
+/// the code's hash counts only while it holds for the code ([`game_hook_terms`]: the hook's
+/// ProgramData passed too); the game of `mint`, when passed (read-only), lends its memo, so the
+/// code is rehashed only when its deploy slot moved since a game step last checked it.
+pub(crate) fn hook_terms(
+    available: &[AccountInfo],
+    hook: &Pubkey,
+    mint: &Pubkey,
+) -> Result<HookTerms> {
     let info = find(available, &HookStatus::address(hook).0)?;
-    read_hook_terms(info, hook)
+    let memo = available
+        .iter()
+        .filter(|a| *a.owner == crate::ID)
+        .find_map(|a| {
+            let data = a.try_borrow_data().ok()?;
+            if !data.starts_with(Game::DISCRIMINATOR) {
+                return None;
+            }
+            let g = Game::try_deserialize(&mut &data[..]).ok()?;
+            (g.mint == *mint).then(|| g.hook_audit_memo())
+        })
+        .flatten();
+    Ok(game_hook_terms(available, hook, info, memo, true)?.0)
 }
 
 /// [`hook_terms`] from the status account itself (its address checked by the caller).
@@ -520,6 +539,51 @@ pub(crate) fn read_hook_terms(info: &AccountInfo, hook: &Pubkey) -> Result<HookT
         CompanionError::HookStatusAccount
     );
     Ok(HookTerms::DEFAULT)
+}
+
+/// A game hook's terms in a step (independent audit X4): its status's ([`read_hook_terms`]), except
+/// that an audit the protocol recorded with the code's hash (`set_hook_status_v2`) lifts the cap
+/// only while it holds for the code the hook runs now
+/// ([`hook_audit_holds`](crate::instructions::attest::hook_audit_holds): the hook immutable or
+/// Bordrless-managed and its code the recorded hash, the hook's ProgramData among `available`).
+/// Otherwise the hook is taken as not audited, under the unaudited ceiling (`DEFAULT_POT_CAP`), as a
+/// strategy's stale audit is. An audit with no hash (v1, as deployed) is taken as before.
+///
+/// `memo` is the game's (`Game::hook_audit_memo`). With `recompute`, the audit is checked (the hash
+/// only when the code's deploy slot moved since the memo); without, the memo is taken as it is (a
+/// strategy payment takes its plan's check, as for the strategy's own audit). Answers the terms
+/// and the memo to keep.
+pub(crate) fn game_hook_terms(
+    available: &[AccountInfo],
+    hook: &Pubkey,
+    status: &AccountInfo,
+    memo: Option<u64>,
+    recompute: bool,
+) -> Result<(HookTerms, Option<u64>)> {
+    let terms = read_hook_terms(status, hook)?;
+    if !terms.audited {
+        return Ok((terms, None));
+    }
+    let recorded = HookStatus::try_deserialize(&mut &status.try_borrow_data()?[..])?.audited_hash();
+    if recorded == [0; 32] {
+        return Ok((terms, memo));
+    }
+    let held = if recompute {
+        crate::instructions::attest::hook_audit_holds(available, hook, recorded, memo)?
+    } else {
+        memo
+    };
+    if held.is_some() {
+        return Ok((terms, held));
+    }
+    Ok((
+        HookTerms {
+            audited: false,
+            pot_cap: DEFAULT_POT_CAP,
+            blocked: terms.blocked,
+        },
+        None,
+    ))
 }
 
 /// Moves to the buyback what the pot holds beyond what `terms` allow: all of it for a blocked hook,

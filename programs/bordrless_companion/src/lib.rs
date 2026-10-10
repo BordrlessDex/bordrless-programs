@@ -184,6 +184,56 @@ pub mod bordrless_companion {
         hook: Pubkey,
         args: HookStatusArgs,
     ) -> Result<()> {
-        instructions::game::process_set_hook_status(ctx, hook, args)
+        instructions::attest::process_set_hook_status(ctx, hook, args)
+    }
+
+    // ---- Phase 3a: attestations, audits tied to code, strategies ----
+
+    /// Studio's attester: attests a program's code (rebuilt from its source, the hash matched with
+    /// the chain, the checks, the simulator and the review passed).
+    pub fn attest(ctx: Context<Attest>, args: AttestArgs) -> Result<()> {
+        instructions::attest::process_attest(ctx, args)
+    }
+
+    /// The attester or the protocol's upgrade authority: revokes an attestation.
+    pub fn revoke(ctx: Context<Revoke>) -> Result<()> {
+        instructions::attest::process_revoke(ctx)
+    }
+
+    /// The protocol's upgrade authority: `set_hook_status`, with an audit tied to the code's hash
+    /// (only of an immutable or Bordrless-managed program; the hash recomputed and kept).
+    pub fn set_hook_status_v2(
+        ctx: Context<SetHookStatus>,
+        hook: Pubkey,
+        args: HookStatusArgs,
+        audited_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::attest::process_set_hook_status_v2(ctx, hook, args, audited_hash)
+    }
+
+    /// Makes the companion's strategy game for `mint` (not launched yet; the mint signs): the game's
+    /// arguments (kind `Strategy`, a lottery hook's tickets) and the strategy's terms.
+    pub fn create_strategy_game<'info>(
+        ctx: Context<'info, CreateStrategyGame<'info>>,
+        args: CreateGameArgs,
+        s: StrategyArgs,
+    ) -> Result<()> {
+        instructions::strategy::process_create_strategy_game(ctx, args, s)
+    }
+
+    /// Anyone: once strategy period `period` is over, asks the strategy for its budget and opens
+    /// its payments (or closes it with nothing).
+    pub fn plan_period<'info>(ctx: Context<'info, PlanPeriod<'info>>, period: u32) -> Result<()> {
+        instructions::strategy::process_plan_period(ctx, period)
+    }
+
+    /// Anyone, for up to `max_per_tx` holdings: asks the strategy what each gets of the open
+    /// period's budget and pays it, once a holding.
+    pub fn pay_strategy<'info>(
+        ctx: Context<'info, PayStrategy<'info>>,
+        period: u32,
+        n: u8,
+    ) -> Result<()> {
+        instructions::strategy::process_pay_strategy(ctx, period, n)
     }
 }

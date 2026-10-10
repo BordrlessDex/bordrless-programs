@@ -391,3 +391,176 @@ pub struct ShareClaimed {
     pub pending_pot: u64,
     pub cranker: Pubkey,
 }
+
+// ---- Phase 3a: attestations, audits tied to code, strategies --------------------------------------
+
+/// Studio's attester attested a program's code (`attest`).
+#[event]
+pub struct HookAttested {
+    pub program: Pubkey,
+    pub build_hash: [u8; 32],
+    pub source_hash: [u8; 32],
+    pub template_commit: [u8; 20],
+    pub sim_version: u16,
+    pub cut_max_bps: u16,
+    pub cap_bps: u16,
+    pub review: u8,
+    pub kind: u8,
+    pub programdata_slot: u64,
+    pub attester: Pubkey,
+}
+
+/// An attestation revoked (by the attester or the protocol's upgrade authority).
+#[event]
+pub struct AttestationRevoked {
+    pub program: Pubkey,
+    pub build_hash: [u8; 32],
+    pub by: Pubkey,
+}
+
+/// `set_hook_status_v2`: the status, with the audited code's hash (zeros when not audited).
+#[event]
+pub struct HookAuditRecorded {
+    pub hook: Pubkey,
+    pub audited: bool,
+    pub audited_hash: [u8; 32],
+    pub authority: Pubkey,
+}
+
+/// What kind of program a strategy is, when its game was made.
+pub mod strategy_class {
+    /// Nobody can change its code.
+    pub const IMMUTABLE: u8 = 0;
+    /// Its `hook_timelock` can, after a public delay.
+    pub const TIMELOCKED: u8 = 1;
+    /// Bordrless's keys can (Studio's or the protocol's).
+    pub const MANAGED: u8 = 2;
+    /// The protocol wrote a status for it.
+    pub const STATUS: u8 = 3;
+}
+
+/// `create_strategy_game`: a strategy game's terms (with `GameCreated`).
+#[event]
+pub struct StrategySet {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub strategy: Pubkey,
+    /// `strategy_class`.
+    pub class: u8,
+    pub budget_bps: u16,
+    pub max_share_bps: u16,
+    pub max_per_tx: u8,
+    pub plan_cu_max: u32,
+    pub entitle_cu_max: u32,
+    pub min_weight: u64,
+    pub extras: Vec<Pubkey>,
+    /// The terms then: audited only if both the ticket hook and the strategy are, the lower cap
+    /// (0: none).
+    pub audited: bool,
+    pub pot_cap: u64,
+}
+
+/// A strategy period planned: its budget is locked for its holders until `claims_end`.
+#[event]
+pub struct PeriodPlanned {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub period: u32,
+    pub total: u64,
+    pub budget: u64,
+    pub budget_max: u64,
+    pub claims_end: i64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}
+
+/// A strategy period whose plan answered 0: nothing is paid, the pot stays.
+#[event]
+pub struct PeriodSkipped {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub period: u32,
+    pub total: u64,
+    pub cranker: Pubkey,
+}
+
+/// Why a strategy's answer was refused (never clamped).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnswerFault {
+    /// No return data.
+    NoAnswer,
+    /// Return data set by another program than the strategy.
+    WrongProgram,
+    /// Return data not exactly 8 bytes.
+    BadLength,
+    /// More than the bound (`budget_max`, `max_amount`).
+    OverBound,
+    /// An extra account is no longer the strategy's own.
+    Accounts,
+}
+
+/// A strategy period closed with nothing: the strategy's plan was refused. The pot stays.
+#[event]
+pub struct PeriodRejected {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub period: u32,
+    pub reason: AnswerFault,
+    pub cranker: Pubkey,
+}
+
+/// Why a candidate of `pay_strategy` was not paid (the others go on).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CandidateReason {
+    /// Not the token program's holding of the mint at its owner's address.
+    WrongHolding,
+    /// Its owner can't be paid: off the curve, a program, a sysvar, a reserved key, or one of the
+    /// game's own accounts.
+    NotEligible,
+    /// Its weight for the period is below the minimum or above its balance.
+    NoWeight,
+    /// It has a receipt for the period already.
+    AlreadyPaid,
+    /// The strategy's answer was refused.
+    Answer(AnswerFault),
+    /// The strategy answered 0.
+    Zero,
+    /// The owner's account would stay below its rent-exempt minimum (an empty wallet paid too
+    /// little, or a legacy rent-paying account).
+    BelowRent,
+}
+
+/// A candidate of `pay_strategy` not paid: no receipt, nothing moved.
+#[event]
+pub struct CandidateRejected {
+    pub game: Pubkey,
+    pub period: u32,
+    pub owner: Pubkey,
+    pub reason: CandidateReason,
+    /// What the strategy answered, when it was over its bound or too little for an empty wallet.
+    pub answered: u64,
+}
+
+/// One payment of a strategy period.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StrategyPayment {
+    pub owner: Pubkey,
+    /// Paid to the owner as SOL (the entitlement less the sender's bounty).
+    pub amount: u64,
+    pub bounty: u64,
+}
+
+/// `pay_strategy`: the candidates paid, in one unwrap of the pot.
+#[event]
+pub struct StrategyPaid {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub period: u32,
+    pub payments: Vec<StrategyPayment>,
+    /// The sender's bounties, in all.
+    pub bounty: u64,
+    /// What the period has paid so far (bounties included).
+    pub epoch_paid: u64,
+    pub pending_pot: u64,
+    pub cranker: Pubkey,
+}

@@ -191,13 +191,27 @@ pub struct LaunchConfig {
     /// author) on every launch made from it by someone else. Fixed at creation; 0 for a config
     /// made with `create_config`.
     pub author_share_bps: u16,
-    /// Reserved.
+    /// Reserved. `reserved[0]` is [`LaunchConfig::TIMELOCKED_HOOK`] when the custom hook's upgrade
+    /// authority was its own `hook_timelock` when the config was made (phase 3a); 0 for every other
+    /// config, and for every config made before.
     pub reserved: [u8; 30],
 }
 
 impl LaunchConfig {
     /// Account size.
     pub const LEN: usize = DISCRIMINATOR_LEN + Self::INIT_SPACE;
+
+    /// `reserved[0]` of a config whose custom hook was timelocked when it was made: every launch
+    /// from it passes the hook's `Timelock` after the hook's extras, and is refused while that
+    /// timelock holds a proposal (`docs/phase3a.md` §3.6).
+    pub const TIMELOCKED_HOOK: u8 = 1;
+
+    /// Whether the custom hook was timelocked when the config was made (see
+    /// [`Self::TIMELOCKED_HOOK`]). A timelock's program can only stay timelocked or become
+    /// immutable, so this holds for as long as the config exists.
+    pub fn hook_timelocked(&self) -> bool {
+        self.custom_hook.is_some() && self.reserved[0] == Self::TIMELOCKED_HOOK
+    }
 
     /// The custom hook and its flags, when the config names one.
     pub fn hook(&self) -> Option<(Pubkey, u16)> {

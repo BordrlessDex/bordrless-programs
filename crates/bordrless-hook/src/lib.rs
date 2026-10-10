@@ -1145,3 +1145,6 @@ mod tests {
         assert_eq!(TokenHookArgs::try_from_slice(&bytes).unwrap(), args);
     }
 }
+
+// Phase 3a, declared last so no line above moves (panic locations are part of every hook's code).
+pub mod authority;

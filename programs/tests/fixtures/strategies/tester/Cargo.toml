@@ -1,0 +1,28 @@
+# A test-only strategy (never deployed): a native program whose answers to `plan` and `entitle`
+# are scripted by its config account (an extra it owns, written by the suites), so
+# `companion_strategy.rs` can drive every row of docs/phase3a.md §4.4: a good pro-rata answer,
+# an error, a loop, short, long or no return data, an answer over its bounds, too much compute, a
+# write to a read-only account, a call into another program, recursion.
+[package]
+name = "strategy-tester"
+description = "Test-only strategy program with scripted answers (phase 3a suites)."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "strategy_tester"
+
+[features]
+default = []
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+bordrless-strategy = { path = "../../../../../crates/bordrless-strategy" }
+
+[lints]
+workspace = true

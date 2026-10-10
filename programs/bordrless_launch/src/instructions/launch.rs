@@ -411,10 +411,16 @@ fn check_kit_accounts(
 /// program's signer for it, the hook's registry for this mint (owned by the hook, a registry that
 /// decodes: the hook must have been prepared for the mint) and exactly the registry's number of
 /// extras. Who may upgrade the hook was checked when the config was made (`check_hook_authority`):
-/// no one, or Bordrless only, so it still holds.
+/// no one, Bordrless only, or its own `hook_timelock`, and each of those still holds (a timelock
+/// only ever upgrades its program after the delay or makes it immutable). A config made on a
+/// timelocked hook (`timelocked`, [`LaunchConfig::hook_timelocked`]) takes one more account after
+/// the extras, the hook's `Timelock`, which must hold no proposal (`check_timelock_idle`): a coin
+/// never launches with other code already staged for its hook. Every other config's accounts are
+/// exactly as before.
 fn check_custom_hook_accounts<'info>(
     remaining: &[AccountInfo<'info>],
     hook: Option<(Pubkey, u16)>,
+    timelocked: bool,
     mint: &Pubkey,
 ) -> Result<Option<CustomHook<'info>>> {
     let Some((hook, flags)) = hook else {
@@ -443,7 +449,14 @@ fn check_custom_hook_accounts<'info>(
     require_keys_eq!(*registry.owner, hook, LaunchError::HookRegistryMissing);
     let list = HookAccountList::decode(&registry.try_borrow_data()?)
         .ok_or(LaunchError::HookRegistryMissing)?;
-    let extras = &remaining[3..];
+    let mut extras = &remaining[3..];
+    if timelocked {
+        let (timelock, rest) = extras
+            .split_last()
+            .ok_or(LaunchError::HookTimelockInvalid)?;
+        crate::instructions::launch_config::check_timelock_idle(&hook, Some(timelock))?;
+        extras = rest;
+    }
     require!(
         list.accounts.len() == extras.len(),
         LaunchError::HookExtrasMismatch
@@ -478,7 +491,7 @@ fn plan<'info>(
     // arguments'. Bounds and the creator fee are checked either way: the config they were made
     // under may have changed.
     // A listed config's author shares the creator fee of every launch someone else makes from it.
-    let (rules, creator_fee_bps, hook, config_key, author_share_bps) =
+    let (rules, creator_fee_bps, hook, config_key, author_share_bps, timelocked) =
         match &ctx.accounts.launch_config {
             Some(lc) => {
                 require!(
@@ -496,9 +509,10 @@ fn plan<'info>(
                     lc.hook(),
                     Some(lc.key()),
                     share,
+                    lc.hook_timelocked(),
                 )
             }
-            None => (args.rules, args.creator_fee_bps, None, None, 0),
+            None => (args.rules, args.creator_fee_bps, None, None, 0, false),
         };
     require!(
         creator_fee_bps <= config.max_creator_fee_bps,
@@ -537,7 +551,7 @@ fn plan<'info>(
     let holder_vault = token_client::holding_address(&quote_mint, &kit_config);
     let kit_caller_bump =
         check_kit_accounts(ctx.accounts, &mint, modules, &kit_config, &holder_vault)?;
-    let custom = check_custom_hook_accounts(ctx.remaining_accounts, hook, &mint)?;
+    let custom = check_custom_hook_accounts(ctx.remaining_accounts, hook, timelocked, &mint)?;
     let now = clock.unix_timestamp;
     let at = |secs: u32| -> i64 {
         if secs > 0 {

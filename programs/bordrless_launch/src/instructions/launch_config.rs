@@ -88,63 +88,72 @@ pub fn programdata_address(program: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[program.as_ref()], &BPF_LOADER_UPGRADEABLE_ID).0
 }
 
-/// Who may upgrade the custom hook (§5.8): no one, Studio's upgrade key or the protocol's (see
-/// `HOOK_UPGRADE_AUTHORITIES`), else `HookUpgradeable`. `programdata` is the account at
-/// [`programdata_address`], which every client passes with a custom hook (for a program that is not
-/// upgradeable it is an unused address, read for nothing).
+/// Who may upgrade the custom hook (§5.8; `docs/phase3a.md` §2): no one, Studio's upgrade key or
+/// the protocol's (see `HOOK_UPGRADE_AUTHORITIES`), or the hook's own `hook_timelock` (a delay of at
+/// least 3 days, `timelock` its `Timelock` account), else `HookUpgradeable`. `programdata` is the
+/// account at [`programdata_address`], which every client passes with a custom hook (for a program
+/// that is not upgradeable it is an unused address, read for nothing).
 ///
-/// The upgradeable loader: the program account names its program data (`[2u32, programdata]`),
-/// whose header is `[3u32, slot u64, Option<Pubkey>]`. The BPF loader 2 is immutable. Loader v4:
-/// `[slot u64, authority, status u64]`, status 2 being finalized.
-pub fn check_hook_authority(program: &AccountInfo, programdata: &AccountInfo) -> Result<()> {
+/// The classification is `bordrless_hook::authority::classify`, which reads exactly the bytes this
+/// check always read: the upgradeable loader's program (`[2u32, programdata]`) and ProgramData
+/// (`[3u32, slot u64, Option<Pubkey>]`), the BPF loader 2 (immutable) and loader v4 (`[slot u64,
+/// authority, status u64]`, status 2 being finalized). Only a hook whose authority is its timelock
+/// address reads `timelock` (and fails `HookTimelockInvalid` without a valid one); every other hook
+/// is checked exactly as before, whatever else is passed.
+///
+/// A timelocked hook is taken only while its `Timelock` holds no proposal (`HookTimelockPending`):
+/// its "N days of public notice" must be whole for the coin's first buyers, so a creator can't
+/// stage other code, wait out the delay, then make the config and launch with the switch
+/// executable. Answers whether the hook is timelocked (the config records it: every launch from it
+/// checks the timelock again, [`check_timelock_idle`]).
+pub fn check_hook_authority(
+    program: &AccountInfo,
+    programdata: &AccountInfo,
+    timelock: Option<&AccountInfo>,
+) -> Result<bool> {
+    use bordrless_hook::authority::{classify, AuthorityClass, ClassError};
     require_keys_eq!(
         *programdata.key,
         programdata_address(program.key),
         LaunchError::HookProgramDataMissing
     );
-    let allowed = |key: &[u8]| HOOK_UPGRADE_AUTHORITIES.iter().any(|a| a.as_ref() == key);
-    if *program.owner == BPF_LOADER_2_ID {
-        return Ok(());
+    match classify(program, programdata, timelock) {
+        Ok(AuthorityClass::Immutable) | Ok(AuthorityClass::Protocol(_)) => Ok(false),
+        Ok(AuthorityClass::Timelocked { .. }) => {
+            check_timelock_idle(program.key, timelock)?;
+            Ok(true)
+        }
+        Ok(AuthorityClass::Author(_)) => err!(LaunchError::HookUpgradeable),
+        Err(ClassError::WrongProgramData) => err!(LaunchError::HookProgramDataMissing),
+        Err(ClassError::TimelockMissing) | Err(ClassError::TimelockInvalid) => {
+            err!(LaunchError::HookTimelockInvalid)
+        }
     }
-    if *program.owner == LOADER_V4_ID {
-        let data = program.try_borrow_data()?;
-        require!(data.len() >= 48, LaunchError::HookUpgradeable);
-        let status = u64::from_le_bytes(data[40..48].try_into().unwrap());
-        require!(
-            status == 2 || allowed(&data[8..40]),
-            LaunchError::HookUpgradeable
-        );
-        return Ok(());
-    }
+}
+
+/// The custom hook `hook`'s `Timelock` (`timelock`: owned by `hook_timelock`, at the address its
+/// bump gives for `hook`, a `Timelock` of `hook`; else `HookTimelockInvalid`) holds no proposal
+/// (else `HookTimelockPending`). A finalized timelock (its program made immutable) holds none.
+pub fn check_timelock_idle(hook: &Pubkey, timelock: Option<&AccountInfo>) -> Result<()> {
+    use bordrless_hook::authority::{parse_timelock, HOOK_TIMELOCK_ID, TIMELOCK_SEED};
+    let info = timelock.ok_or(LaunchError::HookTimelockInvalid)?;
     require_keys_eq!(
-        *program.owner,
-        BPF_LOADER_UPGRADEABLE_ID,
-        LaunchError::HookUpgradeable
+        *info.owner,
+        HOOK_TIMELOCK_ID,
+        LaunchError::HookTimelockInvalid
     );
-    {
-        let data = program.try_borrow_data()?;
-        require!(
-            data.len() >= 36
-                && data[..4] == 2u32.to_le_bytes()
-                && data[4..36] == programdata.key.to_bytes(),
-            LaunchError::HookProgramDataMissing
-        );
-    }
-    require_keys_eq!(
-        *programdata.owner,
-        BPF_LOADER_UPGRADEABLE_ID,
-        LaunchError::HookProgramDataMissing
-    );
-    let data = programdata.try_borrow_data()?;
+    let view = parse_timelock(&info.try_borrow_data()?).ok_or(LaunchError::HookTimelockInvalid)?;
+    let at = Pubkey::create_program_address(
+        &[TIMELOCK_SEED, hook.as_ref(), &[view.bump]],
+        &HOOK_TIMELOCK_ID,
+    )
+    .map_err(|_| error!(LaunchError::HookTimelockInvalid))?;
     require!(
-        data.len() >= 13 && data[..4] == 3u32.to_le_bytes(),
-        LaunchError::HookProgramDataMissing
+        at == *info.key && view.program == *hook,
+        LaunchError::HookTimelockInvalid
     );
-    match data[12] {
-        0 => Ok(()),
-        1 if data.len() >= 45 && allowed(&data[13..45]) => Ok(()),
-        _ => err!(LaunchError::HookUpgradeable),
-    }
+    require!(view.pending.is_none(), LaunchError::HookTimelockPending);
+    Ok(())
 }
 
 /// `create_config`.
@@ -190,13 +199,15 @@ fn make_config(
         &args.rules,
         program.as_ref(),
     )?;
-    // A custom hook's program data follows as the one remaining account: who may upgrade it.
+    // A custom hook's program data follows as the first remaining account: who may upgrade it.
+    // A timelocked hook's `Timelock` follows it (`docs/phase3a.md` §3.6).
+    let mut timelocked = false;
     if let Some(program) = &program {
         let programdata = ctx
             .remaining_accounts
             .first()
             .ok_or(LaunchError::HookProgramDataMissing)?;
-        check_hook_authority(program, programdata)?;
+        timelocked = check_hook_authority(program, programdata, ctx.remaining_accounts.get(1))?;
     }
     let creator = ctx.accounts.creator.key();
     let key = ctx.accounts.launch_config.key();
@@ -211,6 +222,9 @@ fn make_config(
     lc.created_at = now;
     lc.author_share_bps = author_share_bps;
     lc.reserved = [0; 30];
+    if timelocked {
+        lc.reserved[0] = LaunchConfig::TIMELOCKED_HOOK;
+    }
     emit_cpi!(LaunchConfigCreated {
         config: key,
         creator,

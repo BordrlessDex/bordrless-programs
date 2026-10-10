@@ -207,6 +207,24 @@ pub fn create_config(
     }
 }
 
+/// [`create_config`] for a custom hook whose upgrade authority is its `hook_timelock`: the hook's
+/// `Timelock` follows its program data (`docs/phase3a.md` §3.6). Harmless for any other hook.
+pub fn create_config_timelocked(
+    creator: Pubkey,
+    launch_config: Pubkey,
+    args: CreateConfigArgs,
+) -> Instruction {
+    let hook = args.custom_hook;
+    let mut ix = create_config(creator, launch_config, args);
+    if let Some(hook) = hook {
+        ix.accounts.push(AccountMeta::new_readonly(
+            bordrless_hook::authority::timelock_address(&hook).0,
+            false,
+        ));
+    }
+    ix
+}
+
 /// `create_listed_config`: as [`create_config`], with the author's share of the creator fee
 /// (basis points of it) on every launch someone else makes from it.
 pub fn create_listed_config(
@@ -263,6 +281,17 @@ pub fn create_launch(
     create_launch_with(
         creator, mint, treasury, quote_mint, lp_fee_bps, args, None, None,
     )
+}
+
+/// A `create_launch` (or the companion's `launch` around one) from a config made on a timelocked
+/// custom hook (`LaunchConfig::hook_timelocked`): the hook's `Timelock` follows the hook's extras,
+/// as the last account. The launch is refused while that timelock holds a proposal.
+pub fn with_hook_timelock(mut ix: Instruction, hook: &Pubkey) -> Instruction {
+    ix.accounts.push(AccountMeta::new_readonly(
+        bordrless_hook::authority::timelock_address(hook).0,
+        false,
+    ));
+    ix
 }
 
 /// `create_launch`, from a `LaunchConfig` when `launch_config` is given (`args.rules` and
@@ -678,6 +707,26 @@ mod tests {
         assert_eq!(
             bordrless_kit::constants::BRIDGE_ID.to_string(),
             "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        );
+    }
+
+    #[test]
+    fn the_hook_authorities_are_the_shared_classifications() {
+        assert_eq!(
+            crate::constants::HOOK_UPGRADE_AUTHORITIES,
+            bordrless_hook::authority::HOOK_UPGRADE_AUTHORITIES
+        );
+        assert_eq!(
+            crate::constants::BPF_LOADER_UPGRADEABLE_ID,
+            bordrless_hook::authority::BPF_LOADER_UPGRADEABLE_ID
+        );
+        assert_eq!(
+            crate::constants::BPF_LOADER_2_ID,
+            bordrless_hook::authority::BPF_LOADER_2_ID
+        );
+        assert_eq!(
+            crate::constants::LOADER_V4_ID,
+            bordrless_hook::authority::LOADER_V4_ID
         );
     }
 

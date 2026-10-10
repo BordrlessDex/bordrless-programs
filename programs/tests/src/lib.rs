@@ -2,14 +2,19 @@
 //! `scripts/solana/programs.sh build` wrote into `<checkout>/target/deploy` (or `SBF_OUT_DIR`), so
 //! they exercise the bytes that would be deployed.
 
+pub mod attest;
 pub mod env;
 pub mod events;
 pub mod fixture;
 pub mod hooks;
+pub mod json;
+pub mod risk;
 pub mod kit;
 pub mod launch;
 pub mod orao;
 pub mod spl;
+pub mod timelock;
+pub mod vault;
 
 pub use env::*;
 pub use events::*;

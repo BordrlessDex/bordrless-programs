@@ -30,6 +30,15 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `bordrless_companion` | `6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo` | [Companions](docs/companions.md): a launch's creator as a program, so its fees buy back, reward holders, vest, or run a [game](docs/games.md), with no keeper |
 | `lottery_hook` | `HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr` | [Lottery coins](docs/games.md): the token hook that gives holders tickets for a companion's draws |
 
+Phase 3a ([docs/phase3a.md](docs/phase3a.md)), built and tested, **not deployed yet**:
+
+| Program | Address | What |
+| --- | --- | --- |
+| `hook_timelock` | `BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ` | A hook's or a strategy's upgrade authority behind a public delay of at least 3 days; its only exit is "immutable" |
+| `hook_vault` | `5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG` | Where a hook's cuts go: slots that burn, sell for SOL to a wallet fixed before launch, or sell and buy-and-burn another token, under the companion's buyback guards |
+| `bordrless_companion` (upgrade) | same id | Studio attestations, audits tied to code, game hooks vetted by class and attestation, and [strategy games](docs/strategies.md) |
+| `bordrless_launch` (upgrade) | same id | A custom hook behind its own `hook_timelock` is accepted |
+
 Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
@@ -67,10 +76,14 @@ taken from the amount itself into a furnace anyone can burn. Launch with it from
 | `programs/tests` | LiteSVM suites that load the built `.so` files |
 | `crates/bordrless-hook` | The hook protocol: callback args, return deltas, the extra-accounts registry. Start here to write a hook |
 | `crates/bordrless-core` | The pure math and policy |
+| `crates/bordrless-strategy` | Phase 3a: the strategy interface (`plan`, `entitle`) a strategy program implements |
+| `programs/hook_timelock`, `programs/hook_vault` | Phase 3a: timelocked upgrades; deferred actions for a hook's cuts |
 | `docs/hooks-v2.md` | The protocol (v2) and the launch rules. Where it and `architecture.md` differ, it wins |
 | `docs/architecture.md` | The original design: programs, hook protocol, curve and graduation |
 | `docs/companions.md` | Companions: a launch's creator as a program, and what the audit made it refuse |
 | `docs/games.md` | Lottery coins: the game ticket standard, the lottery hook, the companion's draws (ORAO VRF) |
+| `docs/phase3a.md` | Phase 3a: labels and timelocks, Studio attestations, strategies, the hook vault (design, owner decisions, as built) |
+| `docs/strategies.md` | Strategy games: writing a strategy, the bounds, the limits |
 | `idl/` | Anchor IDLs of the deployed programs |
 | `scripts/solana` | Toolchain install, build, test and deploy |
 

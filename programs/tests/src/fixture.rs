@@ -276,7 +276,7 @@ impl World {
     ) -> Instruction {
         let c = self.launch_config(config);
         let custom = c.custom_hook.map(|h| self.custom_hook_accounts(&h, mint));
-        launch::create_launch_with(
+        let ix = launch::create_launch_with(
             *creator,
             *mint,
             self.env.treasury.pubkey(),
@@ -285,7 +285,12 @@ impl World {
             Self::launch_args(symbol, c.creator_fee_bps, virtual_quote, c.rules),
             Some(*config),
             custom.as_ref(),
-        )
+        );
+        // A config made on a timelocked hook: its `Timelock` follows the extras.
+        match c.custom_hook {
+            Some(hook) if c.hook_timelocked() => launch::with_hook_timelock(ix, &hook),
+            _ => ix,
+        }
     }
 
     /// A launch by `creator` from the `LaunchConfig` at `config`.

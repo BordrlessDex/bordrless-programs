@@ -112,4 +112,36 @@ pub enum CompanionError {
     NoShare,
     #[msg("the launch holds creator fees nobody has claimed that could fund this prize: claim the fees first, in the same transaction")]
     FeesUnclaimed,
+    // ---- Phase 3a: attestations, audits tied to code, strategies. Appended, so every code above
+    // keeps its number. ----
+    #[msg("only Studio's attester writes an attestation; only it or the protocol's upgrade authority revokes one")]
+    NotAttester,
+    #[msg("the attested build hash is not the hash of the program's code on chain")]
+    AttestationHashMismatch,
+    #[msg("an attestation records a passing simulation and a review that passed or warned")]
+    BadAttestation,
+    #[msg("a game hook taken without a status (Studio's, the protocol's or a timelock's to upgrade) needs a current Studio attestation")]
+    HookNotAttested,
+    #[msg("only an immutable or Bordrless-managed program can be audited: finalize a timelocked one first")]
+    AuditNeedsFixedCode,
+    #[msg("the audited hash is not the hash of the program's code on chain")]
+    AuditHashMismatch,
+    #[msg("the program's accounts (the program, its program data, its timelock) are missing or wrong")]
+    ProgramAccounts,
+    #[msg("a strategy must be immutable, timelocked or Bordrless-managed, not blocked, and none of the protocol's programs")]
+    StrategyNotAccepted,
+    #[msg("a strategy's accounts are not the ones its terms name, or not the strategy's own")]
+    StrategyAccounts,
+    #[msg("a strategy's registry lists at most 2 accounts, each owned by the strategy")]
+    StrategyRegistry,
+    #[msg("a strategy payment takes 1 to max_per_tx candidates")]
+    TooManyCandidates,
+    #[msg("no strategy period is open for payments")]
+    PeriodNotOpen,
+    #[msg("a strategy's terms are out of bounds")]
+    BadStrategy,
+    #[msg("the protocol revoked this program's attestation: it can't be attested again")]
+    RevokedByProtocol,
+    #[msg("the program's timelock holds a proposal of new code: a game is made on a timelocked program only while nothing is pending (its author cancels it, or it lands first)")]
+    TimelockPending,
 }

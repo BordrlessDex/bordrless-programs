@@ -131,7 +131,7 @@ fn game_args(kind: GameKind) -> (CreateGameArgs, GameKindArgs) {
                 ..GameKindArgs::default()
             },
         ),
-        GameKind::Lottery => unreachable!("phase 1's suites"),
+        GameKind::Lottery | GameKind::Strategy => unreachable!("phase 1's suites"),
     }
 }
 
@@ -179,6 +179,8 @@ fn world() -> World {
             .unwrap_or_else(|e| panic!("load {name}: {e:?}"));
         w.env.set_upgrade_authority(id, Some(STUDIO_KEY));
     }
+    // Phase 3a: Studio's attestations, without which the companion takes no hook by its key.
+    bordrless_program_tests::attest::attest_all(&mut w.env, &[JACKPOT, STREAK]);
     w
 }
 
@@ -200,7 +202,7 @@ fn setup_ixs(launcher: &Pubkey, mint: &Pubkey, kind: GameKind) -> Vec<Instructio
     vec![
         companion::create(*launcher, *launcher, *mint, create_args()),
         prepare_ix(args.hook, *launcher, *mint),
-        companion::create_game_v2(*launcher, *mint, args, k),
+        companion::create_game_v2_attested(*launcher, *mint, args, k, false),
     ]
 }
 
@@ -1055,7 +1057,13 @@ fn setup_with(w: &mut World, hook: Pubkey, program_data: bool) -> Tx {
     let (mut args, k) = game_args(GameKind::Jackpot);
     args.hook = hook;
     let mut create = companion::create_game_v2(launcher.pubkey(), mint, args, k);
-    if !program_data {
+    if program_data {
+        // Phase 3a: with Studio's attestation (see `companion_attest.rs` for a hook without one).
+        create.accounts.push(AccountMeta::new_readonly(
+            companion::attestation_address(&hook),
+            false,
+        ));
+    } else {
         create.accounts.pop();
     }
     let ixs = [
@@ -1177,7 +1185,7 @@ fn create_game_v2_checks_each_kinds_settings_against_its_hook() {
         let ixs = [
             companion::create(launcher.pubkey(), launcher.pubkey(), mint, create_args()),
             prepare_ix(args.hook, launcher.pubkey(), mint),
-            companion::create_game_v2(launcher.pubkey(), mint, args, k),
+            companion::create_game_v2_attested(launcher.pubkey(), mint, args, k, false),
         ];
         w.env.send_paid_by(&ixs, &launcher, &[&mint_kp])
     };
@@ -1325,6 +1333,28 @@ fn the_new_games_fit_mainnet_limits() {
             tx.cu()
         );
         assert!(tx.size <= PACKET && tx.max_height() <= 5 && tx.trace_len() <= 64);
+        // Independent audit X1: a config made on a timelocked game hook adds the hook's `Timelock`
+        // (one account, not in the table) to every launch from it.
+        {
+            use solana_message::{v0, VersionedMessage};
+            use solana_transaction::versioned::VersionedTransaction;
+            let mut with_lock = ixs.clone();
+            with_lock[2] = launch::with_hook_timelock(with_lock[2].clone(), &hook);
+            let msg = v0::Message::try_compile(
+                &launcher.pubkey(),
+                &with_lock,
+                std::slice::from_ref(&table),
+                w.env.svm.latest_blockhash(),
+            )
+            .expect("compile");
+            let n = msg.header.num_required_signatures as usize;
+            let size = bordrless_program_tests::env::wire_size(&VersionedTransaction {
+                signatures: vec![Default::default(); n],
+                message: VersionedMessage::V0(msg),
+            });
+            println!("{kind:?} launch v0 with a timelocked hook's Timelock: {size} bytes");
+            assert!(size <= PACKET && size == tx.size + 33);
+        }
         let custom = CustomHookAccounts {
             program: hook,
             extras: w.custom_hook_accounts(&hook, &mint).extras,

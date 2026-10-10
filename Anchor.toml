@@ -24,6 +24,8 @@ members = [
   "programs/lottery_hook",
   "programs/bordrless_companion",
   "programs/hook_tester",
+  "programs/hook_timelock",
+  "programs/hook_vault",
 ]
 
 # One set of program IDs on every cluster (generated 2026-10-07; the keypairs are kept off the repo,
@@ -31,6 +33,8 @@ members = [
 # deployed, so it has no devnet or mainnet entry and the local validator does not load it.
 [programs.localnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+hook_timelock = "BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ"
+hook_vault = "5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG"
 bordrless_swap = "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
 bordrless_bridge = "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
 bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
@@ -43,6 +47,8 @@ bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [programs.devnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+hook_timelock = "BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ"
+hook_vault = "5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG"
 bordrless_swap = "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
 bordrless_bridge = "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
 bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
@@ -54,6 +60,8 @@ bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
 
 [programs.mainnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+hook_timelock = "BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ"
+hook_vault = "5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG"
 bordrless_swap = "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
 bordrless_bridge = "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
 bordrless_launch = "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
