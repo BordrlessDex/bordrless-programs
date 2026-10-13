@@ -9,7 +9,7 @@ use bordrless_hook::token_flags;
 
 use crate::constants::*;
 use crate::error::LaunchError;
-use crate::events::{ConfigListed, LaunchConfigCreated, QuoteCutConfigured};
+use crate::events::{ConfigListed, LaunchConfigCreated, PartnerConfigured, QuoteCutConfigured};
 use crate::instructions::launch::check_rules;
 use crate::state::*;
 
@@ -45,6 +45,28 @@ pub struct CreateConfig<'info> {
     /// The new config: a keypair that signs.
     #[account(init, payer = creator, space = LaunchConfig::LEN)]
     pub launch_config: Box<Account<'info, LaunchConfig>>,
+    /// CHECK: the custom hook program, present exactly when `args.custom_hook` names one (this
+    /// program's id for none); checked executable in the handler.
+    pub hook_program: Option<UncheckedAccount<'info>>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Accounts of `create_partner_config`: those of `create_config`, and the partner's account.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct CreatePartnerConfig<'info> {
+    /// Whoever makes the config (its author): pays the rent of both accounts.
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    /// The launch config, for the bounds.
+    #[account(address = CONFIG_ADDRESS)]
+    pub config: Box<Account<'info, Config>>,
+    /// The new config: a keypair that signs.
+    #[account(init, payer = creator, space = LaunchConfig::LEN)]
+    pub launch_config: Box<Account<'info, LaunchConfig>>,
+    /// The config's partner, made with it.
+    #[account(init, payer = creator, space = PartnerFee::LEN, seeds = [PARTNER_SEED, launch_config.key().as_ref()], bump)]
+    pub partner_fee: Box<Account<'info, PartnerFee>>,
     /// CHECK: the custom hook program, present exactly when `args.custom_hook` names one (this
     /// program's id for none); checked executable in the handler.
     pub hook_program: Option<UncheckedAccount<'info>>,
@@ -197,44 +219,43 @@ pub fn process_create_listed_config(
     make_config(ctx, args, author_share_bps, None)
 }
 
-fn make_config(
-    ctx: Context<CreateConfig>,
-    args: CreateConfigArgs,
+/// What every config instruction checks and writes: the label, the creator fee within the
+/// launch config's maximum, the rules, the custom hook and who may upgrade it (its program data,
+/// and a timelocked hook's `Timelock`, as the first remaining accounts), then the config itself.
+/// Returns the time it was made.
+#[allow(clippy::too_many_arguments)]
+fn fill_config(
+    config: &Config,
+    lc: &mut LaunchConfig,
+    creator: Pubkey,
+    program: Option<&AccountInfo>,
+    remaining: &[AccountInfo],
+    args: &CreateConfigArgs,
     author_share_bps: u16,
     quote_cut: Option<QuoteCut>,
-) -> Result<()> {
+) -> Result<i64> {
     let now = Clock::get()?.unix_timestamp;
-    let config = &ctx.accounts.config;
     require!(args.label.len() <= LABEL_MAX, LaunchError::InvalidLabel);
     require!(
         args.creator_fee_bps <= config.max_creator_fee_bps,
         LaunchError::CreatorFeeTooHigh
     );
     check_rules(&args.rules, args.creator_fee_bps, config)?;
-    let program = ctx
-        .accounts
-        .hook_program
-        .as_ref()
-        .map(|a| a.to_account_info());
     check_custom_hook(
         args.custom_hook,
         args.custom_hook_flags,
         &args.rules,
-        program.as_ref(),
+        program,
     )?;
     // A custom hook's program data follows as the first remaining account: who may upgrade it.
     // A timelocked hook's `Timelock` follows it (`docs/phase3a.md` §3.6).
     let mut timelocked = false;
-    if let Some(program) = &program {
-        let programdata = ctx
-            .remaining_accounts
+    if let Some(program) = program {
+        let programdata = remaining
             .first()
             .ok_or(LaunchError::HookProgramDataMissing)?;
-        timelocked = check_hook_authority(program, programdata, ctx.remaining_accounts.get(1))?;
+        timelocked = check_hook_authority(program, programdata, remaining.get(1))?;
     }
-    let creator = ctx.accounts.creator.key();
-    let key = ctx.accounts.launch_config.key();
-    let lc = &mut ctx.accounts.launch_config;
     lc.version = VERSION;
     lc.creator = creator;
     lc.rules = args.rules;
@@ -251,6 +272,32 @@ fn make_config(
     if let Some(cut) = &quote_cut {
         lc.set_quote_cut(cut);
     }
+    Ok(now)
+}
+
+fn make_config(
+    ctx: Context<CreateConfig>,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+    quote_cut: Option<QuoteCut>,
+) -> Result<()> {
+    let program = ctx
+        .accounts
+        .hook_program
+        .as_ref()
+        .map(|a| a.to_account_info());
+    let creator = ctx.accounts.creator.key();
+    let key = ctx.accounts.launch_config.key();
+    let now = fill_config(
+        &ctx.accounts.config,
+        &mut ctx.accounts.launch_config,
+        creator,
+        program.as_ref(),
+        ctx.remaining_accounts,
+        &args,
+        author_share_bps,
+        quote_cut,
+    )?;
     emit_cpi!(LaunchConfigCreated {
         config: key,
         creator,
@@ -278,5 +325,105 @@ fn make_config(
             ts: now,
         });
     }
+    Ok(())
+}
+
+/// `create_partner_config` (`docs/partner-fee.md`): a config as `create_config` makes it, whose
+/// every launch pays `partner` `partner_share_bps` of its creator fee (1 to 10,000 basis points of
+/// it, whoever launches), fixed for ever. It may also carry an author's share (0 to 5,000, listed
+/// when above 0, paid as a listed config's is: only on launches its author does not make) and a SOL
+/// cut (`cut`, zeros for none: as `create_quote_cut_config`). The author's and the partner's
+/// shares are at most 10,000 in all; the launch's creator gets the rest.
+pub fn process_create_partner_config(
+    ctx: Context<CreatePartnerConfig>,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+    cut: QuoteCut,
+    partner: Pubkey,
+    partner_share_bps: u16,
+) -> Result<()> {
+    require!(partner != Pubkey::default(), LaunchError::InvalidPartner);
+    require!(
+        author_share_bps <= MAX_AUTHOR_SHARE_BPS,
+        LaunchError::InvalidAuthorShare
+    );
+    require!(
+        partner_share_bps > 0
+            && partner_share_bps <= MAX_PARTNER_SHARE_BPS
+            && u32::from(author_share_bps) + u32::from(partner_share_bps)
+                <= u32::from(MAX_PARTNER_SHARE_BPS),
+        LaunchError::InvalidPartnerShare
+    );
+    let quote_cut = if cut.on() {
+        require!(
+            args.custom_hook.is_some() && cut.valid(),
+            LaunchError::InvalidQuoteCut
+        );
+        Some(cut)
+    } else {
+        None
+    };
+    let program = ctx
+        .accounts
+        .hook_program
+        .as_ref()
+        .map(|a| a.to_account_info());
+    let creator = ctx.accounts.creator.key();
+    let key = ctx.accounts.launch_config.key();
+    let bump = ctx.bumps.partner_fee;
+    let now = fill_config(
+        &ctx.accounts.config,
+        &mut ctx.accounts.launch_config,
+        creator,
+        program.as_ref(),
+        ctx.remaining_accounts,
+        &args,
+        author_share_bps,
+        quote_cut,
+    )?;
+    ctx.accounts
+        .launch_config
+        .set_partner(partner_share_bps, bump);
+    let pf = &mut ctx.accounts.partner_fee;
+    pf.version = VERSION;
+    pf.bump = bump;
+    pf.config = key;
+    pf.partner = partner;
+    pf.share_bps = partner_share_bps;
+    pf.paid_total = 0;
+    pf.reserved = [0; 32];
+    emit_cpi!(LaunchConfigCreated {
+        config: key,
+        creator,
+        rules: args.rules,
+        creator_fee_bps: args.creator_fee_bps,
+        custom_hook: args.custom_hook,
+        custom_hook_flags: args.custom_hook_flags,
+        label: args.label,
+        ts: now,
+    });
+    if let (Some(cut), Some(hook)) = (quote_cut, args.custom_hook) {
+        emit_cpi!(QuoteCutConfigured {
+            config: key,
+            hook,
+            max_buy_bps: cut.max_buy_bps,
+            max_sell_bps: cut.max_sell_bps,
+            ts: now,
+        });
+    }
+    if author_share_bps > 0 {
+        emit_cpi!(ConfigListed {
+            config: key,
+            author: creator,
+            author_share_bps,
+            ts: now,
+        });
+    }
+    emit_cpi!(PartnerConfigured {
+        config: key,
+        partner,
+        partner_share_bps,
+        ts: now,
+    });
     Ok(())
 }

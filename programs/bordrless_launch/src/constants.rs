@@ -116,6 +116,11 @@ pub const LOADER_V4_ID: Pubkey =
 
 /// The most a listed config's author may take of a launch's creator fee: half of it.
 pub const MAX_AUTHOR_SHARE_BPS: u16 = 5_000;
+/// A partner config's partner (`docs/partner-fee.md`): `PDA(["partner", launch_config], LAUNCH_ID)`.
+pub const PARTNER_SEED: &[u8] = b"partner";
+/// The most a partner config's partner may take of a launch's creator fee: all of it (with the
+/// author's share, at most all of it in all).
+pub const MAX_PARTNER_SHARE_BPS: u16 = 10_000;
 /// The programs a `LaunchConfig` may not name as a custom token hook: the protocol's own (the
 /// kit is the launchpad's hook, installed by the inline rules), the system program and the
 /// default key.

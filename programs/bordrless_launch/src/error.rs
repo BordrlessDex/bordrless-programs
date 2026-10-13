@@ -109,4 +109,15 @@ pub enum LaunchError {
     QuoteCutWrongAccount,
     #[msg("the hook's quote_cut answered something other than its cut in basis points (a u16)")]
     QuoteCutBadAnswer,
+    // ---- The partner fee (docs/partner-fee.md). Appended, so every code above keeps its number. ----
+    #[msg("a partner's share is 1 to 10,000 basis points of the creator fee, and with the author's share at most 10,000 in all")]
+    InvalidPartnerShare,
+    #[msg("the partner is the default key")]
+    InvalidPartner,
+    #[msg("a launch that pays a partner needs the partner's account (writable [\"partner\", config]) and the partner's holding of the quote, after any author accounts")]
+    PartnerAccountsMissing,
+    #[msg("this launch pays no partner")]
+    NoPartnerShare,
+    #[msg("a companion coin can't launch from a partner config: its creator fees are the companion's to split (share them with payees instead)")]
+    PartnerOnCompanion,
 }

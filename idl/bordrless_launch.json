@@ -731,6 +731,125 @@
       ]
     },
     {
+      "name": "create_partner_config",
+      "docs": [
+        "Anyone: makes a `LaunchConfig` with a partner (`docs/partner-fee.md`), Meteora-style: every",
+        "launch made from it, whoever makes it, pays `partner` `partner_share_bps` of its creator fee",
+        "(1 to 10,000 basis points of it), as SOL to the partner's holding, on every claim. It may",
+        "also carry an author's share (`author_share_bps`, 0 to 5,000; at most 10,000 with the",
+        "partner's) and a custom hook's SOL cut (`cut`, zeros for none). Fixed for ever."
+      ],
+      "discriminator": [
+        208,
+        0,
+        245,
+        161,
+        220,
+        128,
+        138,
+        153
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "Whoever makes the config (its author): pays the rent of both accounts."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The launch config, for the bounds."
+          ],
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The new config: a keypair that signs."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "partner_fee",
+          "docs": [
+            "The config's partner, made with it."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch_config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hook_program",
+          "docs": [
+            "program's id for none); checked executable in the handler."
+          ],
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateConfigArgs"
+            }
+          }
+        },
+        {
+          "name": "author_share_bps",
+          "type": "u16"
+        },
+        {
+          "name": "cut",
+          "type": {
+            "defined": {
+              "name": "QuoteCut"
+            }
+          }
+        },
+        {
+          "name": "partner",
+          "type": "pubkey"
+        },
+        {
+          "name": "partner_share_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "create_quote_cut_config",
       "docs": [
         "Anyone: makes a `LaunchConfig` whose custom hook also takes a SOL cut on every trade",
@@ -812,6 +931,107 @@
           }
         }
       ]
+    },
+    {
+      "name": "distribute_fees",
+      "docs": [
+        "Anyone: pays out the creator fees of a launch made from a partner config",
+        "(`docs/partner-fee.md`), every party at once (the partner, the config's author when the",
+        "launch pays one, the creator), each to its own fixed holding of the quote."
+      ],
+      "discriminator": [
+        120,
+        56,
+        27,
+        7,
+        53,
+        176,
+        113,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "partner_fee",
+          "docs": [
+            "The partner of the config the launch was made from."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.config",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "launch_quote",
+          "writable": true
+        },
+        {
+          "name": "creator_quote",
+          "writable": true
+        },
+        {
+          "name": "partner_quote",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "graduate",
@@ -1112,6 +1332,19 @@
         29,
         94
       ]
+    },
+    {
+      "name": "PartnerFee",
+      "discriminator": [
+        191,
+        69,
+        217,
+        255,
+        173,
+        2,
+        58,
+        54
+      ]
     }
   ],
   "events": [
@@ -1207,6 +1440,19 @@
       ]
     },
     {
+      "name": "LaunchPartner",
+      "discriminator": [
+        91,
+        137,
+        20,
+        185,
+        56,
+        170,
+        238,
+        248
+      ]
+    },
+    {
       "name": "LaunchQuoteCut",
       "discriminator": [
         141,
@@ -1217,6 +1463,32 @@
         251,
         54,
         142
+      ]
+    },
+    {
+      "name": "PartnerConfigured",
+      "discriminator": [
+        234,
+        168,
+        242,
+        29,
+        2,
+        23,
+        19,
+        103
+      ]
+    },
+    {
+      "name": "PartnerFeesPaid",
+      "discriminator": [
+        97,
+        0,
+        28,
+        50,
+        185,
+        220,
+        63,
+        146
       ]
     },
     {
@@ -1496,6 +1768,31 @@
       "code": 6049,
       "name": "QuoteCutBadAnswer",
       "msg": "the hook's quote_cut answered something other than its cut in basis points (a u16)"
+    },
+    {
+      "code": 6050,
+      "name": "InvalidPartnerShare",
+      "msg": "a partner's share is 1 to 10,000 basis points of the creator fee, and with the author's share at most 10,000 in all"
+    },
+    {
+      "code": 6051,
+      "name": "InvalidPartner",
+      "msg": "the partner is the default key"
+    },
+    {
+      "code": 6052,
+      "name": "PartnerAccountsMissing",
+      "msg": "a launch that pays a partner needs the partner's account (writable [\\partner\\, config]) and the partner's holding of the quote, after any author accounts"
+    },
+    {
+      "code": 6053,
+      "name": "NoPartnerShare",
+      "msg": "this launch pays no partner"
+    },
+    {
+      "code": 6054,
+      "name": "PartnerOnCompanion",
+      "msg": "a companion coin can't launch from a partner config: its creator fees are the companion's to split (share them with payees instead)"
     }
   ],
   "types": [
@@ -2538,7 +2835,9 @@
               "([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of",
               "`creator_fees_accrued`), `reserved[12]` the bump of the hook's `[\"state\", mint]` and",
               "`reserved[13]` of the launchpad's `[\"quote-cut\", hook]` signer; zeros for every launch made",
-              "before (`docs/quote-cut.md`)."
+              "before (`docs/quote-cut.md`). `reserved[14..16]` are the partner's share of the creator fee",
+              "and `reserved[16]` the bump of the config's [`PartnerFee`], from the config",
+              "([`Launch::partner_share_bps`], `docs/partner-fee.md`); zeros for every launch made before."
             ],
             "type": {
               "array": [
@@ -2642,7 +2941,9 @@
               "Reserved. `reserved[0]` is [`LaunchConfig::TIMELOCKED_HOOK`] when the custom hook's upgrade",
               "authority was its own `hook_timelock` when the config was made (phase 3a); 0 for every other",
               "config, and for every config made before. `reserved[1..5]` are the SOL cut's caps",
-              "([`LaunchConfig::quote_cut`], `docs/quote-cut.md`), 0 for every config made before."
+              "([`LaunchConfig::quote_cut`], `docs/quote-cut.md`), 0 for every config made before.",
+              "`reserved[5..7]` are the partner's share and `reserved[7]` the bump of its [`PartnerFee`]",
+              "([`LaunchConfig::partner_share_bps`], `docs/partner-fee.md`), 0 for every config made before."
             ],
             "type": {
               "array": [
@@ -2886,6 +3187,38 @@
       }
     },
     {
+      "name": "LaunchPartner",
+      "docs": [
+        "A launch made from a partner config, after its `LaunchCreated`: every claim of its creator fees",
+        "pays the config's partner `partner_share_bps` of what it takes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "partner_share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "LaunchQuoteCut",
       "docs": [
         "A launch made from such a config: its pool asks the hook on every trade."
@@ -2986,6 +3319,147 @@
               "off)."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartnerConfigured",
+      "docs": [
+        "A partner config (`create_partner_config`, `docs/partner-fee.md`), after its",
+        "`LaunchConfigCreated` (and `ConfigListed` / `QuoteCutConfigured` when it has those too): every",
+        "launch from it pays `partner` `partner_share_bps` of the creator fee."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "partner",
+            "type": "pubkey"
+          },
+          {
+            "name": "partner_share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartnerFee",
+      "docs": [
+        "A partner config's partner (`create_partner_config`, `docs/partner-fee.md`), at",
+        "`[\"partner\", launch_config]`: the wallet paid `share_bps` of the creator fee of every launch",
+        "made from the config, whoever launches, as the author's share is paid. Made with the config,",
+        "in the same instruction, and never changed: only its running total moves."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "config",
+            "docs": [
+              "The `LaunchConfig` it belongs to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "partner",
+            "docs": [
+              "Who is paid: its holding of the quote receives the partner's part of each claim."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "share_bps",
+            "docs": [
+              "The partner's share of the creator fee, in basis points of it (1 to 10,000)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "paid_total",
+            "docs": [
+              "What the partner has been paid so far, from every launch made from the config (quote)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartnerFeesPaid",
+      "docs": [
+        "A partner's part of a claim of creator fees (whoever claimed). `paid_total` counts every launch",
+        "made from the config."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "partner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "paid_total",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }

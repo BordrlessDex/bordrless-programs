@@ -171,3 +171,39 @@ pub struct QuoteCutTaken {
     /// Lamports of bridged SOL.
     pub amount: u64,
 }
+
+/// A partner config (`create_partner_config`, `docs/partner-fee.md`), after its
+/// `LaunchConfigCreated` (and `ConfigListed` / `QuoteCutConfigured` when it has those too): every
+/// launch from it pays `partner` `partner_share_bps` of the creator fee.
+#[event]
+pub struct PartnerConfigured {
+    pub config: Pubkey,
+    pub partner: Pubkey,
+    pub partner_share_bps: u16,
+    pub ts: i64,
+}
+
+/// A launch made from a partner config, after its `LaunchCreated`: every claim of its creator fees
+/// pays the config's partner `partner_share_bps` of what it takes.
+#[event]
+pub struct LaunchPartner {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    pub partner_share_bps: u16,
+    pub ts: i64,
+}
+
+/// A partner's part of a claim of creator fees (whoever claimed). `paid_total` counts every launch
+/// made from the config.
+#[event]
+pub struct PartnerFeesPaid {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    pub partner: Pubkey,
+    pub amount: u64,
+    pub paid_total: u64,
+    pub slot: u64,
+    pub ts: i64,
+}

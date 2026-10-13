@@ -13,7 +13,7 @@ use bordrless_token::client as token_client;
 use crate::constants::*;
 use crate::instructions::launch_config::programdata_address;
 use crate::instructions::{ConfigArgs, CreateConfigArgs, CreateLaunchArgs};
-use crate::state::{Launch, LaunchConfig, LaunchRules, QuoteCut};
+use crate::state::{Launch, LaunchConfig, LaunchRules, PartnerFee, QuoteCut};
 
 /// This program's `["hook-authority"]` PDA.
 pub fn hook_signer() -> Pubkey {
@@ -275,6 +275,40 @@ pub fn create_quote_cut_config(
         args,
         author_share_bps,
         cut,
+    }
+    .data();
+    ix
+}
+
+/// The partner account of a partner config: `["partner", launch_config]`.
+pub fn partner_fee_address(launch_config: &Pubkey) -> Pubkey {
+    PartnerFee::address(launch_config).0
+}
+
+/// `create_partner_config` (`docs/partner-fee.md`): as [`create_config`] (the same accounts with
+/// the partner's account after the config's; a client appends a timelocked hook's `Timelock` after
+/// its program data), for a config whose every launch pays `partner` `partner_share_bps` of its
+/// creator fee; `author_share_bps` above 0 lists it too, a `cut` above zero adds a SOL cut.
+pub fn create_partner_config(
+    creator: Pubkey,
+    launch_config: Pubkey,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+    cut: QuoteCut,
+    partner: Pubkey,
+    partner_share_bps: u16,
+) -> Instruction {
+    let mut ix = create_config(creator, launch_config, args.clone());
+    ix.accounts.insert(
+        3,
+        AccountMeta::new(partner_fee_address(&launch_config), false),
+    );
+    ix.data = crate::instruction::CreatePartnerConfig {
+        args,
+        author_share_bps,
+        cut,
+        partner,
+        partner_share_bps,
     }
     .data();
     ix
@@ -546,6 +580,91 @@ pub fn claim_author_fees(
         program_id: crate::ID,
         accounts: with_events(accounts),
         data: crate::instruction::ClaimAuthorFees {}.data(),
+    }
+}
+
+/// The accounts a launch made from a partner config adds to every claim, after any author's:
+/// the config's `PartnerFee` and the partner's holding of the quote, both writable.
+pub fn partner_accounts(
+    quote_mint: Pubkey,
+    launch_config: Pubkey,
+    partner: Pubkey,
+) -> [AccountMeta; 2] {
+    [
+        AccountMeta::new(partner_fee_address(&launch_config), false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &partner), false),
+    ]
+}
+
+/// `claim_creator_fees` for any launch: `author` (the listed config and its author) when the
+/// launch pays one, `partner` (the partner config and its partner) when it pays one.
+pub fn claim_creator_fees_with(
+    creator: Pubkey,
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    author: Option<(Pubkey, Pubkey)>,
+    partner: Option<(Pubkey, Pubkey)>,
+) -> Instruction {
+    let mut ix = match author {
+        Some((config, author)) => {
+            claim_creator_fees_shared(creator, mint, quote_mint, config, author)
+        }
+        None => claim_creator_fees(creator, mint, quote_mint),
+    };
+    if let Some((config, partner)) = partner {
+        ix.accounts
+            .extend(partner_accounts(quote_mint, config, partner));
+    }
+    ix
+}
+
+/// `claim_author_fees` for a launch that also pays a partner: its accounts follow.
+pub fn claim_author_fees_with_partner(
+    author: Pubkey,
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    launch_config: Pubkey,
+    creator: Pubkey,
+    partner: Pubkey,
+) -> Instruction {
+    let mut ix = claim_author_fees(author, mint, quote_mint, launch_config, creator);
+    ix.accounts
+        .extend(partner_accounts(quote_mint, launch_config, partner));
+    ix
+}
+
+/// `distribute_fees`: anyone pays out a partner launch's creator fees to every party. `author` is
+/// the config's author when the launch pays one (the config's creator, unless it launched it).
+pub fn distribute_fees(
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    launch_config: Pubkey,
+    creator: Pubkey,
+    partner: Pubkey,
+    author: Option<Pubkey>,
+) -> Instruction {
+    let launch = launch_address(&mint);
+    let mut accounts = with_events(vec![
+        AccountMeta::new(launch, false),
+        AccountMeta::new(partner_fee_address(&launch_config), false),
+        AccountMeta::new_readonly(quote_mint, false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &launch), false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &creator), false),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &partner), false),
+        AccountMeta::new_readonly(bordrless_token::ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+    ]);
+    if let Some(author) = author {
+        accounts.push(AccountMeta::new_readonly(launch_config, false));
+        accounts.push(AccountMeta::new(
+            token_client::holding_address(&quote_mint, &author),
+            false,
+        ));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::DistributeFees {}.data(),
     }
 }
 

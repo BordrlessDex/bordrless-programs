@@ -93,6 +93,29 @@ pub mod bordrless_launch {
         launch_config::process_create_quote_cut_config(ctx, args, author_share_bps, cut)
     }
 
+    /// Anyone: makes a `LaunchConfig` with a partner (`docs/partner-fee.md`), Meteora-style: every
+    /// launch made from it, whoever makes it, pays `partner` `partner_share_bps` of its creator fee
+    /// (1 to 10,000 basis points of it), as SOL to the partner's holding, on every claim. It may
+    /// also carry an author's share (`author_share_bps`, 0 to 5,000; at most 10,000 with the
+    /// partner's) and a custom hook's SOL cut (`cut`, zeros for none). Fixed for ever.
+    pub fn create_partner_config(
+        ctx: Context<CreatePartnerConfig>,
+        args: CreateConfigArgs,
+        author_share_bps: u16,
+        cut: QuoteCut,
+        partner: Pubkey,
+        partner_share_bps: u16,
+    ) -> Result<()> {
+        launch_config::process_create_partner_config(
+            ctx,
+            args,
+            author_share_bps,
+            cut,
+            partner,
+            partner_share_bps,
+        )
+    }
+
     /// Creates a token and its curve pool, from the inline rules or from a `LaunchConfig`. With
     /// a custom hook, the remaining accounts are the hook, the token program's signer for it,
     /// its registry for the mint and the registry's extras.
@@ -117,8 +140,15 @@ pub mod bordrless_launch {
 
     /// A listed config's author takes their share of a launch's creator fees; the creator's part
     /// is paid at the same time, as on the creator's own claim.
-    pub fn claim_author_fees(ctx: Context<ClaimAuthorFees>) -> Result<()> {
+    pub fn claim_author_fees<'info>(ctx: Context<'info, ClaimAuthorFees<'info>>) -> Result<()> {
         claim::process_claim_author_fees(ctx)
+    }
+
+    /// Anyone: pays out the creator fees of a launch made from a partner config
+    /// (`docs/partner-fee.md`), every party at once (the partner, the config's author when the
+    /// launch pays one, the creator), each to its own fixed holding of the quote.
+    pub fn distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>) -> Result<()> {
+        claim::process_distribute_fees(ctx)
     }
 
     /// Pool hook: refuses pools with this hook that this program did not create.

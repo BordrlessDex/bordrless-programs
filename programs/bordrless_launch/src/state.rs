@@ -195,6 +195,8 @@ pub struct LaunchConfig {
     /// authority was its own `hook_timelock` when the config was made (phase 3a); 0 for every other
     /// config, and for every config made before. `reserved[1..5]` are the SOL cut's caps
     /// ([`LaunchConfig::quote_cut`], `docs/quote-cut.md`), 0 for every config made before.
+    /// `reserved[5..7]` are the partner's share and `reserved[7]` the bump of its [`PartnerFee`]
+    /// ([`LaunchConfig::partner_share_bps`], `docs/partner-fee.md`), 0 for every config made before.
     pub reserved: [u8; 30],
 }
 
@@ -229,6 +231,57 @@ impl LaunchConfig {
     /// Records the SOL cut's caps.
     pub fn set_quote_cut(&mut self, cut: &QuoteCut) {
         cut.write(&mut self.reserved[1..5]);
+    }
+
+    /// The partner's share of the creator fee (`reserved[5..7]`), in basis points of it: every
+    /// launch from the config pays the partner named in its [`PartnerFee`] this part of each claim
+    /// (`docs/partner-fee.md`). 0: no partner.
+    pub fn partner_share_bps(&self) -> u16 {
+        u16::from_le_bytes([self.reserved[5], self.reserved[6]])
+    }
+
+    /// The bump of the config's [`PartnerFee`] (`reserved[7]`), when it has a partner.
+    pub fn partner_bump(&self) -> u8 {
+        self.reserved[7]
+    }
+
+    /// Records the partner's share and its account's bump.
+    pub fn set_partner(&mut self, share_bps: u16, bump: u8) {
+        self.reserved[5..7].copy_from_slice(&share_bps.to_le_bytes());
+        self.reserved[7] = bump;
+    }
+}
+
+/// A partner config's partner (`create_partner_config`, `docs/partner-fee.md`), at
+/// `["partner", launch_config]`: the wallet paid `share_bps` of the creator fee of every launch
+/// made from the config, whoever launches, as the author's share is paid. Made with the config,
+/// in the same instruction, and never changed: only its running total moves.
+#[account]
+#[derive(InitSpace, Debug)]
+pub struct PartnerFee {
+    /// Layout version.
+    pub version: u8,
+    /// Bump.
+    pub bump: u8,
+    /// The `LaunchConfig` it belongs to.
+    pub config: Pubkey,
+    /// Who is paid: its holding of the quote receives the partner's part of each claim.
+    pub partner: Pubkey,
+    /// The partner's share of the creator fee, in basis points of it (1 to 10,000).
+    pub share_bps: u16,
+    /// What the partner has been paid so far, from every launch made from the config (quote).
+    pub paid_total: u64,
+    /// Reserved.
+    pub reserved: [u8; 32],
+}
+
+impl PartnerFee {
+    /// Account size.
+    pub const LEN: usize = DISCRIMINATOR_LEN + Self::INIT_SPACE;
+
+    /// The partner account of `launch_config`.
+    pub fn address(launch_config: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[PARTNER_SEED, launch_config.as_ref()], &crate::ID)
     }
 }
 
@@ -377,7 +430,9 @@ pub struct Launch {
     /// ([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of
     /// `creator_fees_accrued`), `reserved[12]` the bump of the hook's `["state", mint]` and
     /// `reserved[13]` of the launchpad's `["quote-cut", hook]` signer; zeros for every launch made
-    /// before (`docs/quote-cut.md`).
+    /// before (`docs/quote-cut.md`). `reserved[14..16]` are the partner's share of the creator fee
+    /// and `reserved[16]` the bump of the config's [`PartnerFee`], from the config
+    /// ([`Launch::partner_share_bps`], `docs/partner-fee.md`); zeros for every launch made before.
     pub reserved: [u8; 22],
 }
 
@@ -442,5 +497,22 @@ impl Launch {
     pub fn add_quote_cut(&mut self, amount: u64) {
         let total = self.quote_cut_accrued().saturating_add(amount);
         self.reserved[4..12].copy_from_slice(&total.to_le_bytes());
+    }
+
+    /// The partner's share of the creator fee, from the config (`reserved[14..16]`): every claim
+    /// pays the partner this part of what it takes. 0: no partner.
+    pub fn partner_share_bps(&self) -> u16 {
+        u16::from_le_bytes([self.reserved[14], self.reserved[15]])
+    }
+
+    /// The bump of the config's [`PartnerFee`] (`reserved[16]`).
+    pub fn partner_bump(&self) -> u8 {
+        self.reserved[16]
+    }
+
+    /// Records the partner at launch: its share and its account's bump.
+    pub fn set_partner(&mut self, share_bps: u16, bump: u8) {
+        self.reserved[14..16].copy_from_slice(&share_bps.to_le_bytes());
+        self.reserved[16] = bump;
     }
 }

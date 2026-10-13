@@ -21,7 +21,7 @@ use bordrless_token::state::AuthorityKind;
 use crate::constants::*;
 use crate::cpi;
 use crate::error::LaunchError;
-use crate::events::{LaunchCreated, LaunchQuoteCut};
+use crate::events::{LaunchCreated, LaunchPartner, LaunchQuoteCut};
 use crate::state::*;
 
 /// Arguments of `create_launch`.
@@ -356,6 +356,9 @@ struct Plan<'info> {
     custom: Option<CustomHook<'info>>,
     /// The custom hook's SOL cut, from the config.
     quote_cut: Option<QuoteCut>,
+    /// The partner's share of the creator fee and its account's bump, from a partner config
+    /// (`docs/partner-fee.md`); none otherwise.
+    partner: Option<(u16, u8)>,
 }
 
 impl<'info> Plan<'info> {
@@ -541,34 +544,69 @@ fn plan<'info>(
     // arguments'. Bounds and the creator fee are checked either way: the config they were made
     // under may have changed.
     // A listed config's author shares the creator fee of every launch someone else makes from it.
-    let (rules, creator_fee_bps, hook, config_key, author_share_bps, timelocked, quote_cut) =
-        match &ctx.accounts.launch_config {
-            Some(lc) => {
-                require!(
-                    args.rules == lc.rules && args.creator_fee_bps == lc.creator_fee_bps,
-                    LaunchError::ConfigMismatch
-                );
-                let share = if lc.creator == ctx.accounts.creator.key() {
-                    0
-                } else {
-                    lc.author_share_bps.min(MAX_AUTHOR_SHARE_BPS)
-                };
-                (
-                    lc.rules,
-                    lc.creator_fee_bps,
-                    lc.hook(),
-                    Some(lc.key()),
-                    share,
-                    lc.hook_timelocked(),
-                    lc.quote_cut(),
-                )
-            }
-            None => (args.rules, args.creator_fee_bps, None, None, 0, false, None),
-        };
+    // A partner config's partner shares the creator fee of every launch made from it, whoever makes it.
+    let (
+        rules,
+        creator_fee_bps,
+        hook,
+        config_key,
+        author_share_bps,
+        timelocked,
+        quote_cut,
+        partner,
+    ) = match &ctx.accounts.launch_config {
+        Some(lc) => {
+            require!(
+                args.rules == lc.rules && args.creator_fee_bps == lc.creator_fee_bps,
+                LaunchError::ConfigMismatch
+            );
+            let share = if lc.creator == ctx.accounts.creator.key() {
+                0
+            } else {
+                lc.author_share_bps.min(MAX_AUTHOR_SHARE_BPS)
+            };
+            (
+                lc.rules,
+                lc.creator_fee_bps,
+                lc.hook(),
+                Some(lc.key()),
+                share,
+                lc.hook_timelocked(),
+                lc.quote_cut(),
+                (lc.partner_share_bps() > 0).then(|| (lc.partner_share_bps(), lc.partner_bump())),
+            )
+        }
+        None => (
+            args.rules,
+            args.creator_fee_bps,
+            None,
+            None,
+            0,
+            false,
+            None,
+            None,
+        ),
+    };
     require!(
         creator_fee_bps <= config.max_creator_fee_bps,
         LaunchError::CreatorFeeTooHigh
     );
+    // A companion coin's creator fees are the companion's to split (its buybacks, pots, scripts'
+    // authors and payees); a partner would take its part before the companion ever saw it, and the
+    // companion's own claim can't pass the partner's accounts (`docs/partner-fee.md`).
+    if partner.is_some() {
+        let (companion_creator, _) = Pubkey::find_program_address(
+            &[
+                bordrless_kit::constants::COMPANION_CREATOR_SEED,
+                ctx.accounts.mint.key().as_ref(),
+            ],
+            &bordrless_kit::constants::COMPANION_ID,
+        );
+        require!(
+            ctx.accounts.creator.key() != companion_creator,
+            LaunchError::PartnerOnCompanion
+        );
+    }
     check_rules(&rules, creator_fee_bps, config)?;
     let modules = rules.modules();
     if hook.is_some() {
@@ -638,6 +676,7 @@ fn plan<'info>(
         author_share_bps,
         custom,
         quote_cut,
+        partner,
     }))
 }
 
@@ -1080,6 +1119,9 @@ fn record_launch<'info>(
             Pubkey::find_program_address(&[QUOTE_CUT_SIGNER_SEED, hook.as_ref()], &crate::ID);
         launch.set_quote_cut(&cut, state_bump, signer_bump);
     }
+    if let Some((share_bps, bump)) = plan.partner {
+        launch.set_partner(share_bps, bump);
+    }
     Ok(())
 }
 
@@ -1133,6 +1175,15 @@ fn emit_launch_created<'info>(
             hook,
             max_buy_bps: cut.max_buy_bps,
             max_sell_bps: cut.max_sell_bps,
+            ts: plan.now,
+        });
+    }
+    if let (Some((partner_share_bps, _)), Some(config)) = (plan.partner, plan.config) {
+        emit_cpi!(LaunchPartner {
+            launch: plan.launch,
+            mint: plan.mint,
+            config,
+            partner_share_bps,
             ts: plan.now,
         });
     }
