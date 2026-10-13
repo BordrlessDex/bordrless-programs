@@ -44,7 +44,7 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
 | `bordrless_swap` | `5d63e257c01aff1bcf86ca554ce3230be7339bced1427954e08300b6b4828d12` |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
-| `bordrless_launch` | `17604ad167bebed7e0a7569903babe66fd06a6405fcd7e8c2d21c018d2bea836` (commit `22932e5`) |
+| `bordrless_launch` | `614760c7f4317b914136e63104ed8f9133bfc713921337d5235f5d82403a8537` (commit `9e644e7`) |
 | `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
