@@ -1,0 +1,275 @@
+{
+  "address": "7M5GTuzhByzBbrJURzLtbBrFjcsC8aHu816qWTXAYD85",
+  "metadata": {
+    "name": "bordrless_router",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Bordrless router: an app's integrator fee on any Bordrless DEX swap. It takes the fee (at most 1%) from the trade's quote side, a buy's input before the swap or a sell's output after it, pays the integrator and Bordrless's share of it (20%) to the DEX config's treasury, and runs the DEX's own swap unchanged in between."
+  },
+  "instructions": [
+    {
+      "name": "swap",
+      "docs": [
+        "A DEX swap with an integrator's fee. Remaining accounts: the DEX swap's own, exactly as",
+        "`bordrless_swap::client::swap` lists them (the trader signing)."
+      ],
+      "discriminator": [
+        248,
+        198,
+        158,
+        145,
+        225,
+        117,
+        135,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "trader",
+          "docs": [
+            "The trader: signs the DEX swap and the fee's transfer."
+          ],
+          "signer": true
+        },
+        {
+          "name": "integrator_quote",
+          "writable": true
+        },
+        {
+          "name": "treasury_quote",
+          "writable": true
+        },
+        {
+          "name": "dex_program",
+          "address": "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RouterSwapArgs"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "IntegratorFeePaid",
+      "discriminator": [
+        27,
+        222,
+        152,
+        174,
+        97,
+        233,
+        86,
+        177
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BadFee",
+      "msg": "an integrator fee is 1 to 100 basis points, and a buy must keep some input to swap"
+    },
+    {
+      "code": 6001,
+      "name": "SwapAccounts",
+      "msg": "the remaining accounts must be the DEX swap's own, the router's trader signing first"
+    },
+    {
+      "code": 6002,
+      "name": "QuoteHasHook",
+      "msg": "the pool's quote mint has a token hook: the router takes fees in a quote without one"
+    },
+    {
+      "code": 6003,
+      "name": "NotTradersHolding",
+      "msg": "the swap's quote holding must be the trader's own: a routed sell delivers to the trader"
+    },
+    {
+      "code": 6004,
+      "name": "WrongTreasury",
+      "msg": "the treasury holding must be the DEX config's treasury's holding of the quote"
+    },
+    {
+      "code": 6005,
+      "name": "WrongIntegratorHolding",
+      "msg": "the integrator's holding must be a holding of the pool's quote, not the trader's nor the pool's"
+    },
+    {
+      "code": 6006,
+      "name": "Slippage",
+      "msg": "what the trader keeps after the fee is under its floor"
+    },
+    {
+      "code": 6007,
+      "name": "WrongProgram",
+      "msg": "a program account is not the expected program"
+    }
+  ],
+  "types": [
+    {
+      "name": "IntegratorFeePaid",
+      "docs": [
+        "A routed swap paid an integrator's fee."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "trader",
+            "type": "pubkey"
+          },
+          {
+            "name": "integrator",
+            "docs": [
+              "The owner of the integrator's holding paid."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "direction",
+            "docs": [
+              "0 a sell, 1 a buy."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "charged_on",
+            "docs": [
+              "What the fee was taken of: a buy's whole input, a sell's delivery."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "docs": [
+              "The whole fee, and Bordrless's share of it (the integrator got the rest)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bordrless_share",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RouterSwapArgs",
+      "docs": [
+        "Arguments of `swap`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "swap",
+            "docs": [
+              "The DEX swap's own arguments; a buy's `amount_in` is the trader's whole input, the fee",
+              "included (the DEX swaps it less the fee)."
+            ],
+            "type": {
+              "defined": {
+                "name": "SwapArgs"
+              }
+            }
+          },
+          {
+            "name": "fee_bps",
+            "docs": [
+              "The integrator's fee: 1 to `MAX_FEE_BPS` basis points of the trade's quote side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "min_quote_after_fee",
+            "docs": [
+              "A sell's floor on what the trader keeps after the fee (the DEX's `min_amount_out` bounds",
+              "what arrives before it); unused on a buy."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapArgs",
+      "docs": [
+        "Arguments of `swap`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "direction",
+            "docs": [
+              "0 base → quote (a sell), 1 quote → base (a buy)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "amount_in",
+            "docs": [
+              "Exact input."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_amount_out",
+            "docs": [
+              "The least the recipient's holding must gain."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "in_hook_accounts",
+            "docs": [
+              "Remaining accounts of the input mint's token hook (its program, the token program's",
+              "signer for it, its extras; none without a hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "out_hook_accounts",
+            "docs": [
+              "Remaining accounts of the output mint's token hook (likewise)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hook_data",
+            "docs": [
+              "Opaque data for the pool hook."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    }
+  ]
+}

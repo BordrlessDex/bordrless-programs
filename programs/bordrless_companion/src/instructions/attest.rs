@@ -29,8 +29,8 @@
 use anchor_lang::prelude::*;
 use bordrless_hook::authority::{
     classify, classify_programdata, code_of, parse_programdata, parse_timelock,
-    programdata_address, timelock_address, trimmed_len_by, AuthorityClass, BPF_LOADER_UPGRADEABLE_ID,
-    PROGRAMDATA_HEADER_LEN,
+    programdata_address, timelock_address, trimmed_len_by, AuthorityClass,
+    BPF_LOADER_UPGRADEABLE_ID, PROGRAMDATA_HEADER_LEN,
 };
 
 use crate::constants::*;
@@ -244,7 +244,9 @@ pub struct Attest<'info> {
 
 pub fn process_attest(ctx: Context<Attest>, args: AttestArgs) -> Result<()> {
     require!(
-        args.sim_pass && (args.review == REVIEW_PASS || args.review == REVIEW_WARN) && args.kind <= ATTEST_KIND_STRATEGY,
+        args.sim_pass
+            && (args.review == REVIEW_PASS || args.review == REVIEW_WARN)
+            && args.kind <= ATTEST_KIND_STRATEGY,
         CompanionError::BadAttestation
     );
     let program = ctx.accounts.target.key();

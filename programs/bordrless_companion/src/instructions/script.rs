@@ -647,14 +647,14 @@ pub fn process_script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Res
     let pot = (c.pending_pot - spent)
         .checked_add(after.sol.saturating_sub(before.sol))
         .ok_or(CompanionError::MathOverflow)?;
-    let wanted = bounty_for(answer.as_ref().map(|a| a.entries.len()));
+    let wanted = bounty_for(answer.as_ref().map(|a| a.len()));
     let bounty = if pot >= wanted { wanted } else { 0 };
     // The payouts the script answered, paid and recorded (the bounty with them); without an
     // answer, or with an empty one, only the bounty.
     let cranker_info = ctx.accounts.cranker.to_account_info();
     let event_authority = ctx.accounts.event_authority.to_account_info();
     let paid = match &answer {
-        Some(a) if !a.entries.is_empty() => {
+        Some(a) if !a.is_empty() => {
             let launch_account = &ctx.accounts.launch;
             let step = StepPayouts {
                 all: &all,

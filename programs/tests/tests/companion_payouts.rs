@@ -823,8 +823,9 @@ fn a_malformed_answer_fails_the_step() {
     let a_at = idx[0];
     let owner_at = idx[0] + 1;
     let good = vec![entry(a_at, 1_000, 1)];
+    // Version 2 is a wallet answer since 2026-10-13 (`companion_payees_wallets.rs`); 3 is none.
     let mut version = answer(good.clone());
-    version[0] = 2;
+    version[0] = 3;
     let mut short = answer(good.clone());
     short.pop();
     let mut long = answer(good.clone());

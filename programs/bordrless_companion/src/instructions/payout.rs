@@ -42,7 +42,7 @@ use bordrless_token::client as token_client;
 
 use crate::constants::*;
 use crate::error::CompanionError;
-use crate::events::ScriptPayout;
+use crate::events::{ScriptPayout, ScriptWalletPayout};
 use crate::instructions::steps::find;
 use crate::instructions::CreatorSeeds;
 use crate::invoke::invoke_built;
@@ -81,15 +81,54 @@ pub(crate) fn clear_answer() {
 /// The script's answer, read from the return data after it ran (and cleared): `None` without one
 /// (no return data, empty, or data another program set: a trade's hooks leave theirs behind, so an
 /// old script that trades answers nothing); the script's own decoded, or `BadPayoutAnswer`.
-pub(crate) fn read_answer(script: &Pubkey) -> Result<Option<PayoutAnswer>> {
+pub(crate) fn read_answer(script: &Pubkey) -> Result<Option<ScriptAnswer>> {
     let answer = match get_return_data() {
         Some((program, bytes)) if program == *script && !bytes.is_empty() => {
-            Some(decode_answer(&bytes)?)
+            Some(decode_script_answer(&bytes)?)
         }
         _ => None,
     };
     set_return_data(&[]);
     Ok(answer)
+}
+
+/// A script's answer: holdings to pay (version 1) or wallets (version 2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScriptAnswer {
+    Holdings(PayoutAnswer),
+    Wallets(WalletPayoutAnswer),
+}
+
+impl ScriptAnswer {
+    /// Its number of entries.
+    pub fn len(&self) -> usize {
+        match self {
+            ScriptAnswer::Holdings(a) => a.entries.len(),
+            ScriptAnswer::Wallets(a) => a.entries.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// `bytes` as a script's answer by its first byte, the version: a [`PayoutAnswer`] (1) or a
+/// [`WalletPayoutAnswer`] (2), exactly its Borsh, at most `MAX_PAYOUTS_PER_STEP` entries;
+/// `BadPayoutAnswer` otherwise.
+pub fn decode_script_answer(bytes: &[u8]) -> Result<ScriptAnswer> {
+    match bytes.first() {
+        Some(&PAYOUT_ANSWER_WALLETS_VERSION) => {
+            let answer = WalletPayoutAnswer::try_from_slice(bytes)
+                .map_err(|_| error!(CompanionError::BadPayoutAnswer))?;
+            require!(
+                answer.entries.len() <= MAX_PAYOUTS_PER_STEP,
+                CompanionError::BadPayoutAnswer
+            );
+            Ok(ScriptAnswer::Wallets(answer))
+        }
+        _ => Ok(ScriptAnswer::Holdings(decode_answer(bytes)?)),
+    }
 }
 
 /// `bytes` as a [`PayoutAnswer`]: exactly its Borsh, version `PAYOUT_ANSWER_VERSION`, at most
@@ -134,10 +173,253 @@ pub fn step_budget(
 
 /// Whether SOL can be paid to `account` (as `pay_strategy`'s `payable`): not executable, not a
 /// sysvar, none of the runtime's reserved keys.
-fn payable(account: &AccountInfo) -> bool {
+pub(crate) fn payable(account: &AccountInfo) -> bool {
     !account.executable
         && *account.owner != SYSVAR_PROGRAM_ID
         && !RESERVED_KEYS.contains(account.key)
+}
+
+/// The script's payout terms among the step's accounts (writable, the companion's, of the mint):
+/// their address, their account and their counters; `PayoutsOff` without them.
+fn load_terms<'a, 'info>(
+    p: &StepPayouts<'a, 'info>,
+) -> Result<(Pubkey, &'a AccountInfo<'info>, PayoutTerms)> {
+    let mint = p.companion.mint;
+    let terms_key = PayoutTerms::address(&mint).0;
+    let terms_info = p
+        .all
+        .iter()
+        .find(|a| *a.key == terms_key)
+        .ok_or(CompanionError::PayoutsOff)?;
+    require!(*terms_info.owner == crate::ID, CompanionError::PayoutsOff);
+    require!(terms_info.is_writable, CompanionError::MissingAccount);
+    let t = {
+        let data = terms_info.try_borrow_data()?;
+        PayoutTerms::try_deserialize(&mut &data[..])
+            .map_err(|_| error!(CompanionError::PayoutsOff))?
+    };
+    require!(t.mint == mint, CompanionError::PayoutsOff);
+    Ok((terms_key, terms_info, t))
+}
+
+/// The step's budget under `t` (its window rolled at its first step), and each entry's cap.
+fn budget_of(p: &StepPayouts, t: &mut PayoutTerms) -> (u64, u64) {
+    let window_start = t.window_start_at(p.now);
+    if t.window_start != window_start {
+        t.window_start = window_start;
+        t.window_pot = p.pot_after_script;
+        t.window_paid = 0;
+    }
+    let budget = step_budget(
+        p.pot_before,
+        p.pot_after_script,
+        p.bounty,
+        t.window_pot,
+        t.window_paid,
+        t.step_bps,
+        t.window_bps,
+    );
+    (budget, bps_of(budget, u64::from(t.holding_bps)))
+}
+
+/// Accounts of `allow_wallet_payouts`.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct AllowWalletPayouts<'info> {
+    /// The launch's mint, the keypair that made the companion: only its holder allows it.
+    pub mint: Signer<'info>,
+    #[account(seeds = [COMPANION_SEED, mint.key().as_ref()], bump = companion.bump)]
+    pub companion: Box<Account<'info, Companion>>,
+    #[account(mut, seeds = [PAYOUT_TERMS_SEED, mint.key().as_ref()], bump = terms.bump)]
+    pub terms: Box<Account<'info, PayoutTerms>>,
+    #[account(seeds = [SCRIPT_SEED, mint.key().as_ref()], bump = script.bump)]
+    pub script: Box<Account<'info, Script>>,
+}
+
+/// `allow_wallet_payouts`: before the launch, the launcher lets its script pay wallets as well as
+/// holders (wallet answers, version 2), within the same terms. Once, for good: a buyer reads it on
+/// chain before the first trade.
+pub fn process_allow_wallet_payouts(ctx: Context<AllowWalletPayouts>) -> Result<()> {
+    require!(
+        !ctx.accounts.companion.launched,
+        CompanionError::AlreadyLaunched
+    );
+    require!(
+        ctx.accounts.companion.is_script(),
+        CompanionError::NotAScript
+    );
+    ctx.accounts.terms.reserved[0] = WALLET_PAYOUTS_ALLOWED;
+    emit_cpi!(crate::events::WalletPayoutsAllowed {
+        companion: ctx.accounts.companion.key(),
+        program: ctx.accounts.script.program,
+    });
+    Ok(())
+}
+
+/// The programs whose accounts a wallet payout never pays: an account of one of them is the
+/// protocol's (a holding, a vault, a pool, a launch, the companion's own records), and lamports
+/// sent there are stranded at best.
+const PROTOCOL_OWNERS: [Pubkey; 6] = [
+    crate::ID,
+    TOKEN_ID,
+    BRIDGE_ID,
+    SWAP_ID,
+    LAUNCH_ID,
+    BPF_LOADER_UPGRADEABLE_ID,
+];
+
+/// Pays a wallet answer (`PAYOUT_ANSWER_WALLETS_VERSION`, 2026-10-13), for a script whose launcher
+/// allowed it (`allow_wallet_payouts`, else `WalletPayoutsOff`). Each entry names the account paid
+/// by its key, which must be among the step's remaining accounts, writable, able to take SOL (not
+/// executable, not a sysvar, no reserved key), left at its rent-exempt minimum at least, owned by
+/// none of the protocol's programs, and none of the launch, its pool, the creator address, the
+/// companion, the script, its state, the terms, the hook, the mint, the payout authority, this
+/// program's event authority or the default key (`WalletPayoutTarget`); named once, above zero
+/// (`BadPayoutAnswer`); within the terms as a holding payout is (`holding_bps` of the step's budget
+/// each, the step's and the window's budget in all: `PayoutOverBound`). All checked before any
+/// payment; then one `unwrap_sol` of the total and the bounty, a transfer each, the counters and
+/// one `ScriptWalletPayout` per entry. No hook records it: there is no holding.
+fn pay_wallets<'info>(p: &StepPayouts<'_, 'info>, answer: &WalletPayoutAnswer) -> Result<u64> {
+    let mint = p.companion.mint;
+    let (terms_key, terms_info, mut t) = load_terms(p)?;
+    require!(t.wallets_allowed(), CompanionError::WalletPayoutsOff);
+    let (budget, cap) = budget_of(p, &mut t);
+    let hook = p.launch.custom_hook.unwrap_or_default();
+    let excluded = [
+        p.launch_key,
+        p.launch.pool,
+        p.creator,
+        p.companion_key,
+        p.script.program,
+        p.script_key,
+        p.script_state_key,
+        terms_key,
+        hook,
+        mint,
+        PAYOUT_AUTHORITY,
+        crate::EVENT_AUTHORITY_AND_BUMP.0,
+        // The bridge's SOL vault: system-owned, so no owner rule catches it; SOL sent there would
+        // back no bridged SOL.
+        bordrless_bridge::client::sol_vault_address(),
+        Pubkey::default(),
+    ];
+    let rent = Rent::get()?;
+    let mut payouts: Vec<(&AccountInfo<'info>, u64, u32)> =
+        Vec::with_capacity(answer.entries.len());
+    let mut total = 0u64;
+    for (i, e) in answer.entries.iter().enumerate() {
+        if e.lamports == 0 || payouts.iter().any(|(q, _, _)| *q.key == e.to) {
+            msg!("wallet payout {}: zero, or an account named twice", i);
+            return err!(CompanionError::BadPayoutAnswer);
+        }
+        let sum = total.checked_add(e.lamports);
+        if e.lamports > cap || sum.is_none_or(|s| s > budget) {
+            msg!(
+                "wallet payout {}: {} over the bound (cap {}, budget {}, paid before it {})",
+                i,
+                e.lamports,
+                cap,
+                budget,
+                total
+            );
+            return err!(CompanionError::PayoutOverBound);
+        }
+        total = sum.unwrap_or(total);
+        let Some(to) = p.remaining.iter().find(|a| *a.key == e.to) else {
+            msg!("wallet payout {}: {} was not passed", i, e.to);
+            return err!(CompanionError::WalletPayoutTarget);
+        };
+        let funded = to
+            .lamports()
+            .checked_add(e.lamports)
+            .is_some_and(|l| l >= rent.minimum_balance(to.data_len()));
+        if excluded.contains(to.key)
+            || PROTOCOL_OWNERS.contains(to.owner)
+            || !to.is_writable
+            || !payable(to)
+            || !funded
+        {
+            msg!("wallet payout {}: account {} can't be paid", i, to.key);
+            return err!(CompanionError::WalletPayoutTarget);
+        }
+        payouts.push((to, e.lamports, e.tag));
+    }
+    let unwrapped = total
+        .checked_add(p.bounty)
+        .ok_or(CompanionError::MathOverflow)?;
+    if unwrapped > 0 {
+        invoke_built(
+            &bordrless_bridge::client::unwrap_sol(p.creator, unwrapped),
+            p.all,
+            &[&p.seeds.seeds()],
+        )?;
+    }
+    let from = find(p.all, &p.creator)?.clone();
+    let system = find(p.all, &system_program::ID)?.clone();
+    let send = |to: &AccountInfo<'info>, lamports: u64| -> Result<()> {
+        system_program::transfer(
+            CpiContext::new_with_signer(
+                *system.key,
+                system_program::Transfer {
+                    from: from.clone(),
+                    to: to.clone(),
+                },
+                &[&p.seeds.seeds()],
+            ),
+            lamports,
+        )
+    };
+    for (to, lamports, _) in &payouts {
+        send(to, *lamports)?;
+    }
+    if p.bounty > 0 {
+        send(p.cranker, p.bounty)?;
+    }
+    let pot_after = p
+        .pot_after_script
+        .checked_sub(unwrapped)
+        .ok_or(CompanionError::MathOverflow)?;
+    let mut event = Instruction {
+        program_id: crate::ID,
+        accounts: vec![AccountMeta::new_readonly(*p.event_authority.key, true)],
+        data: Vec::with_capacity(8 + 8 + 3 * 32 + 8 + 4 + 3 * 8),
+    };
+    for (to, lamports, tag) in &payouts {
+        t.window_paid = t
+            .window_paid
+            .checked_add(*lamports)
+            .ok_or(CompanionError::MathOverflow)?;
+        t.paid_total = t.paid_total.saturating_add(*lamports);
+        t.payouts = t.payouts.saturating_add(1);
+        event.data.clear();
+        event
+            .data
+            .extend_from_slice(anchor_lang::event::EVENT_IX_TAG_LE);
+        event
+            .data
+            .extend_from_slice(ScriptWalletPayout::DISCRIMINATOR);
+        ScriptWalletPayout {
+            companion: p.companion_key,
+            program: p.script.program,
+            to: *to.key,
+            lamports: *lamports,
+            tag: *tag,
+            window_paid: t.window_paid,
+            paid_total: t.paid_total,
+            pot_after,
+        }
+        .serialize(&mut event.data)?;
+        invoke_signed(
+            &event,
+            core::slice::from_ref(p.event_authority),
+            &[&[b"__event_authority", &[crate::EVENT_AUTHORITY_AND_BUMP.1]]],
+        )?;
+    }
+    t.last_paid_at = p.now;
+    let mut data = terms_info.try_borrow_mut_data()?;
+    let mut writer: &mut [u8] = &mut data;
+    t.try_serialize(&mut writer)?;
+    Ok(total)
 }
 
 /// One checked entry: the holding, its owner, the owner's account when paid, what it gets, the
@@ -181,45 +463,25 @@ pub(crate) struct StepPayouts<'a, 'info> {
 /// paid in all, the terms written. The record's and the event's instructions are built once and
 /// reused for every entry: the program's heap (32 KiB, never freed) can't afford one of each per
 /// entry.
-pub(crate) fn pay_answer<'info>(p: &StepPayouts<'_, 'info>, answer: &PayoutAnswer) -> Result<u64> {
+pub(crate) fn pay_answer<'info>(p: &StepPayouts<'_, 'info>, answer: &ScriptAnswer) -> Result<u64> {
+    match answer {
+        ScriptAnswer::Holdings(a) => pay_holdings(p, a),
+        ScriptAnswer::Wallets(a) => pay_wallets(p, a),
+    }
+}
+
+/// Pays and records a holdings answer (version 1); see [`pay_answer`].
+fn pay_holdings<'info>(p: &StepPayouts<'_, 'info>, answer: &PayoutAnswer) -> Result<u64> {
     let mint = p.companion.mint;
     // 1. The terms and the hook.
-    let terms_key = PayoutTerms::address(&mint).0;
-    let terms_info = p
-        .all
-        .iter()
-        .find(|a| *a.key == terms_key)
-        .ok_or(CompanionError::PayoutsOff)?;
-    require!(*terms_info.owner == crate::ID, CompanionError::PayoutsOff);
-    require!(terms_info.is_writable, CompanionError::MissingAccount);
-    let mut t = {
-        let data = terms_info.try_borrow_data()?;
-        PayoutTerms::try_deserialize(&mut &data[..])
-            .map_err(|_| error!(CompanionError::PayoutsOff))?
-    };
-    require!(t.mint == mint, CompanionError::PayoutsOff);
+    let (terms_key, terms_info, mut t) = load_terms(p)?;
     let hook = p
         .launch
         .custom_hook
         .filter(|_| p.launch.custom_hook_flags & token_flags::WRITES_HOOK_DATA != 0)
         .ok_or(CompanionError::PayoutsNeedHook)?;
     // 2. The budget: the window's counters roll at its first step.
-    let window_start = t.window_start_at(p.now);
-    if t.window_start != window_start {
-        t.window_start = window_start;
-        t.window_pot = p.pot_after_script;
-        t.window_paid = 0;
-    }
-    let budget = step_budget(
-        p.pot_before,
-        p.pot_after_script,
-        p.bounty,
-        t.window_pot,
-        t.window_paid,
-        t.step_bps,
-        t.window_bps,
-    );
-    let holding_cap = bps_of(budget, u64::from(t.holding_bps));
+    let (budget, holding_cap) = budget_of(p, &mut t);
     // 3. Each entry.
     let excluded = [
         p.launch_key,
@@ -473,6 +735,34 @@ mod tests {
         let mut bad = one.clone();
         bad[0] = 2;
         assert!(decode_answer(&bad).is_err());
+        // Version 2 is a wallet answer (its own layout: the payee's key, lamports, tag); 3 is none.
+        let mut w = Vec::new();
+        WalletPayoutAnswer {
+            version: PAYOUT_ANSWER_WALLETS_VERSION,
+            entries: vec![
+                WalletPayoutEntry {
+                    to: Pubkey::new_unique(),
+                    lamports: 5,
+                    tag: 1
+                };
+                16
+            ],
+        }
+        .serialize(&mut w)
+        .unwrap();
+        assert_eq!(w.len(), 1 + 4 + 44 * 16);
+        assert!(
+            matches!(decode_script_answer(&w), Ok(ScriptAnswer::Wallets(a)) if a.entries.len() == 16)
+        );
+        assert!(matches!(
+            decode_script_answer(&one),
+            Ok(ScriptAnswer::Holdings(_))
+        ));
+        let mut over = w.clone();
+        over[1] = 17;
+        assert!(decode_script_answer(&over).is_err());
+        bad[0] = 3;
+        assert!(decode_script_answer(&bad).is_err());
         assert!(decode_answer(&one[..one.len() - 1]).is_err());
         let mut longer = one.clone();
         longer.push(0);
@@ -489,7 +779,7 @@ mod tests {
         assert_eq!(bounty_for(Some(4)), SCRIPT_BOUNTY / 2);
         assert_eq!(bounty_for(Some(8)), SCRIPT_BOUNTY);
         assert_eq!(bounty_for(Some(16)), SCRIPT_BOUNTY);
-        const { assert!(SCRIPT_BOUNTY % PAYOUT_BOUNTY_FULL == 0) };
+        const { assert!(SCRIPT_BOUNTY.is_multiple_of(PAYOUT_BOUNTY_FULL)) };
     }
 
     #[test]

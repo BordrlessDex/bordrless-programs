@@ -903,10 +903,100 @@ impl PayoutTerms {
     }
 
     /// The first second of the window `now` falls in.
+    /// Whether the script may answer wallet payouts (`reserved[0]`, set before the launch by
+    /// `allow_wallet_payouts`; 0 for every terms made before).
+    pub fn wallets_allowed(&self) -> bool {
+        self.reserved[0] == WALLET_PAYOUTS_ALLOWED
+    }
+
     pub fn window_start_at(&self, now: i64) -> i64 {
         let secs = i64::from(self.window_secs.max(1));
         now.div_euclid(secs).saturating_mul(secs)
     }
+}
+
+/// The wallets that share a companion's beneficiary part (`set_payees`, 2026-10-13),
+/// `PDA(["payees", mint])`: each gets its basis points of every `withdraw`'s beneficiary part, as
+/// SOL; the beneficiary keeps the rest. A payee whose account can't take a payment (not passed,
+/// read-only, or it would stay below its rent-exempt minimum) is owed it: it stays in the
+/// companion's `pending_beneficiary` and is paid at a later `withdraw`.
+#[account]
+#[derive(InitSpace)]
+pub struct Payees {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// How many of `payees` are set.
+    pub count: u8,
+    /// The beneficiary's own part owed: its account could not take it (not payable, or it would
+    /// stay below its rent-exempt minimum), so it waits, as a payee's does, instead of failing
+    /// every payee's payment with it.
+    pub beneficiary_owed: u64,
+    pub payees: [Payee; MAX_PAYEES],
+}
+
+/// One payee of a `Payees`.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace,
+)]
+pub struct Payee {
+    pub wallet: Pubkey,
+    /// Its part of the beneficiary part, in basis points.
+    pub bps: u16,
+    /// Owed and not yet paid (part of the companion's `pending_beneficiary`).
+    pub owed: u64,
+    /// Paid all time.
+    pub paid: u64,
+}
+
+impl Payees {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[PAYEES_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// The payees set.
+    pub fn set(&self) -> &[Payee] {
+        &self.payees[..usize::from(self.count).min(MAX_PAYEES)]
+    }
+
+    /// What every payee is owed (not the beneficiary's own owed part).
+    pub fn owed(&self) -> u64 {
+        self.set()
+            .iter()
+            .map(|p| p.owed)
+            .fold(0u64, u64::saturating_add)
+    }
+}
+
+/// How `new` lamports of beneficiary part split among `payees` (each its basis points, rounded
+/// down) and the beneficiary (the rest).
+pub fn payee_shares(new: u64, payees: &[Payee]) -> (Vec<u64>, u64) {
+    let shares: Vec<u64> = payees
+        .iter()
+        .map(|p| bps_of(new, u64::from(p.bps)))
+        .collect();
+    let given = shares.iter().fold(0u64, |a, s| a.saturating_add(*s));
+    (shares, new.saturating_sub(given))
+}
+
+/// One entry of a script's wallet answer (`PayoutAnswer` version 2, 2026-10-13): the account paid,
+/// by its key (it must be among the step's remaining accounts, writable), so whoever sends the step
+/// can't put another account in its place.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WalletPayoutEntry {
+    pub to: Pubkey,
+    pub lamports: u64,
+    pub tag: u32,
+}
+
+/// A script's wallet answer: `version` `PAYOUT_ANSWER_WALLETS_VERSION`, at most
+/// `MAX_PAYOUTS_PER_STEP` entries (1 + 4 + 44 * 16 = 709 bytes of return data at most).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct WalletPayoutAnswer {
+    pub version: u8,
+    pub entries: Vec<WalletPayoutEntry>,
 }
 
 /// One entry of a script's payout answer: `account` an index into the step's remaining accounts

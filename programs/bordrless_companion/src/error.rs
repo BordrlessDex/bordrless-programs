@@ -194,4 +194,13 @@ pub enum CompanionError {
     PayoutOverBound,
     #[msg("payout terms are 1 to 10,000 basis points each and a window of 10 seconds to a day")]
     BadPayoutTerms,
+    // ---- Payees and wallet payouts (2026-10-13). Appended, so every code above keeps its number. ----
+    #[msg("payees are 1 to 10 distinct wallets, each 1 to 10,000 basis points of the beneficiary part and 10,000 in all at most, none of them the beneficiary, the creator address or the companion, set once before the launch")]
+    BadPayees,
+    #[msg("this companion shares its beneficiary part: pass its payees account (writable) and each payee")]
+    PayeesMissing,
+    #[msg("a wallet payout goes to an account passed writable that can take SOL and keeps its rent-exempt minimum: no account of a Bordrless program, the launch's, the pool's, the creator address, the companion, the script's or the hook's, named once")]
+    WalletPayoutTarget,
+    #[msg("this script may not pay wallets: its launcher did not allow wallet payouts before the launch (allow_wallet_payouts)")]
+    WalletPayoutsOff,
 }

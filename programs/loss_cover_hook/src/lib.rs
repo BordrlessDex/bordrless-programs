@@ -33,7 +33,7 @@
 //! this program with [`FLAGS`]; then the launch. Registry extras: the state (writable), the launch
 //! (read-only), the pool (read-only), so every transfer of the token carries three extra accounts.
 
-#![allow(unexpected_cfgs)]
+#![allow(unexpected_cfgs, clippy::manual_checked_ops)]
 
 use anchor_lang::prelude::*;
 use bordrless_game::{companion_creator_address, eligible, write_own_hook_data};

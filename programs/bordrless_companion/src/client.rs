@@ -1462,3 +1462,66 @@ pub fn record_payout(
         data,
     }
 }
+
+/// The payees of `mint`'s companion: `PDA(["payees", mint])`.
+pub fn payees_address(mint: &Pubkey) -> Pubkey {
+    crate::state::Payees::address(mint).0
+}
+
+/// `set_payees`: before the launch, `mint` (the launch's keypair) signing, `payer` paying the rent.
+pub fn set_payees(
+    payer: Pubkey,
+    mint: Pubkey,
+    entries: Vec<crate::instructions::PayeeArgs>,
+) -> Instruction {
+    let accounts = crate::accounts::SetPayees {
+        payer,
+        mint,
+        companion: companion_address(&mint),
+        payees: payees_address(&mint),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SetPayees { entries }.data(),
+    }
+}
+
+/// `withdraw` of a companion with payees: [`withdraw`], then its payees account and each payee
+/// (writable), whom it pays their parts first.
+pub fn withdraw_with_payees(
+    sender: Pubkey,
+    mint: Pubkey,
+    beneficiary: Pubkey,
+    payees: &[Pubkey],
+) -> Instruction {
+    let mut ix = withdraw(sender, mint, beneficiary);
+    ix.accounts
+        .push(AccountMeta::new(payees_address(&mint), false));
+    ix.accounts
+        .extend(payees.iter().map(|p| AccountMeta::new(*p, false)));
+    ix
+}
+
+/// `allow_wallet_payouts`: before the launch, `mint` (the launch's keypair) signing, the script may
+/// pay any wallet as well as holders, within its payout terms.
+pub fn allow_wallet_payouts(mint: Pubkey) -> Instruction {
+    let accounts = crate::accounts::AllowWalletPayouts {
+        mint,
+        companion: companion_address(&mint),
+        terms: payout_terms_address(&mint),
+        script: script_address(&mint),
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::AllowWalletPayouts {}.data(),
+    }
+}

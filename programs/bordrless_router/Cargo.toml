@@ -1,0 +1,29 @@
+[package]
+name = "bordrless-router"
+description = "Bordrless router: an app's integrator fee on any Bordrless DEX swap. It takes the fee (at most 1%) from the trade's quote side, a buy's input before the swap or a sell's output after it, pays the integrator and Bordrless's share of it (20%) to the DEX config's treasury, and runs the DEX's own swap unchanged in between."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "bordrless_router"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-swap/idl-build", "bordrless-token/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+solana-security-txt = { workspace = true }
+bordrless-swap = { path = "../bordrless_swap", features = ["no-entrypoint"] }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

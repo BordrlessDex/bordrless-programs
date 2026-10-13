@@ -24,6 +24,7 @@ bordrless-companion = { path = "../bordrless_companion", features = ["no-entrypo
 hook-tester = { path = "../hook_tester", features = ["no-entrypoint"] }
 hook-timelock = { path = "../hook_timelock", features = ["no-entrypoint"] }
 hook-vault = { path = "../hook_vault", features = ["no-entrypoint"] }
+bordrless-router = { path = "../bordrless_router", features = ["no-entrypoint"] }
 # sha256 of a program's code (the executable hash), as solana-verify computes it.
 solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }
 # Studio's game starters (test-only; fixtures/starters): their instructions, built from their crates.

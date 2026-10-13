@@ -991,7 +991,8 @@ pub struct Withdraw<'info> {
 
 /// `withdraw`: the beneficiary's part paid to them as SOL, with whatever SOL the creator address
 /// holds above its rent-exempt minimum (what the launch did not spend of its funding). Anyone may
-/// send it: it pays only the beneficiary. Before the launch, only with the mint's signature (as a
+/// send it: it pays only the beneficiary, and, for a companion with payees (`set_payees`), each
+/// payee its part first (`payees.rs`; its payees account and each payee among the remaining). Before the launch, only with the mint's signature (as a
 /// remaining account): the funding returned to a launch that never happened. Remaining: the
 /// bridge's `unwrap_sol` accounts.
 pub fn process_withdraw<'info>(ctx: Context<'info, Withdraw<'info>>) -> Result<()> {
@@ -1013,6 +1014,36 @@ pub fn process_withdraw<'info>(ctx: Context<'info, Withdraw<'info>>) -> Result<(
     require!(pending > 0 || spare > 0, CompanionError::NothingToDo);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let beneficiary = ctx.accounts.beneficiary.to_account_info();
+    // A companion with payees pays them their parts first (`payees.rs`); what they can't take yet,
+    // or the beneficiary can't, stays owed. Before the launch (or with nothing pending) there is
+    // nothing to split: the spare SOL goes back as it always did.
+    let (to_beneficiary, spare, owed, paid_payees) =
+        if ctx.accounts.companion.version == VERSION_WITH_PAYEES && pending > 0 {
+            let o = crate::instructions::payees::pay_payees(
+                &all,
+                &seeds,
+                creator,
+                ctx.accounts.companion.key(),
+                &mint,
+                pending,
+                &beneficiary,
+                spare,
+            )?;
+            (
+                o.to_beneficiary,
+                if o.pay_spare { spare } else { 0 },
+                o.owed,
+                o.paid,
+            )
+        } else {
+            (pending, spare, 0, 0)
+        };
+    // A withdraw that would pay nobody (every part owed to an account that can't take it yet) is
+    // refused, so nobody pays fees to send it again and again.
+    require!(
+        to_beneficiary > 0 || spare > 0 || paid_payees > 0,
+        CompanionError::NothingToDo
+    );
     if spare > 0 {
         let from = ctx.accounts.creator.to_account_info();
         system_program::transfer(
@@ -1027,13 +1058,15 @@ pub fn process_withdraw<'info>(ctx: Context<'info, Withdraw<'info>>) -> Result<(
             spare,
         )?;
     }
-    pay_sol(&all, &seeds, creator, &beneficiary, pending)?;
+    pay_sol(&all, &seeds, creator, &beneficiary, to_beneficiary)?;
     let c = &mut ctx.accounts.companion;
-    c.pending_beneficiary = 0;
-    c.paid_beneficiary_total = c.paid_beneficiary_total.saturating_add(pending + spare);
+    c.pending_beneficiary = owed;
+    c.paid_beneficiary_total = c
+        .paid_beneficiary_total
+        .saturating_add(to_beneficiary + spare);
     emit_cpi!(BeneficiaryPaid {
         companion: c.key(),
-        lamports: pending + spare
+        lamports: to_beneficiary + spare
     });
     Ok(())
 }

@@ -707,3 +707,52 @@ pub struct ScriptPayout {
     /// The pot after the step (every entry and the bounty paid).
     pub pot_after: u64,
 }
+
+/// A companion's beneficiary part is shared (`set_payees`, before the launch): each payee's basis
+/// points of it; the beneficiary keeps the rest.
+#[event]
+pub struct PayeesSet {
+    pub companion: Pubkey,
+    pub payees: Vec<PayeeShare>,
+}
+
+/// One payee and its share, in `PayeesSet`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayeeShare {
+    pub wallet: Pubkey,
+    pub bps: u16,
+}
+
+/// A payee was paid its part of the beneficiary part, as SOL, by `withdraw`; `owed` is what it is
+/// still owed (its account could not take a payment yet, or was not passed).
+#[event]
+pub struct PayeePaid {
+    pub companion: Pubkey,
+    pub wallet: Pubkey,
+    pub lamports: u64,
+    pub owed: u64,
+}
+
+/// A script paid a wallet as SOL (a wallet payout, `PayoutAnswer` version 2), within its terms.
+#[event]
+pub struct ScriptWalletPayout {
+    pub companion: Pubkey,
+    pub program: Pubkey,
+    pub to: Pubkey,
+    pub lamports: u64,
+    pub tag: u32,
+    /// What the window has paid so far, this entry included.
+    pub window_paid: u64,
+    /// What the terms have paid all time, this entry included.
+    pub paid_total: u64,
+    /// The pot after the step (every entry and the bounty paid).
+    pub pot_after: u64,
+}
+
+/// A script companion's launcher allowed its script to pay wallets (`allow_wallet_payouts`, before
+/// the launch).
+#[event]
+pub struct WalletPayoutsAllowed {
+    pub companion: Pubkey,
+    pub program: Pubkey,
+}

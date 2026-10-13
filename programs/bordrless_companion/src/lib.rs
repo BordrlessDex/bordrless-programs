@@ -309,4 +309,17 @@ pub mod bordrless_companion {
     ) -> Result<()> {
         instructions::script::process_create_script_v2(ctx, args, payout)
     }
+
+    /// Up to 10 wallets that share the beneficiary part, each a fixed share of it, set once before
+    /// the launch by whoever holds the mint (2026-10-13): every `withdraw` pays them their parts as
+    /// SOL, the beneficiary the rest.
+    pub fn set_payees(ctx: Context<SetPayees>, entries: Vec<PayeeArgs>) -> Result<()> {
+        instructions::payees::process_set_payees(ctx, entries)
+    }
+
+    /// Before the launch, whoever holds the mint lets the script pay any wallet SOL (wallet
+    /// answers), within its payout terms (2026-10-13). Without it, a script pays holders only.
+    pub fn allow_wallet_payouts(ctx: Context<AllowWalletPayouts>) -> Result<()> {
+        instructions::payout::process_allow_wallet_payouts(ctx)
+    }
 }

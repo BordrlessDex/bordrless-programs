@@ -371,6 +371,20 @@ pub const PAYOUT_AUTHORITY: Pubkey =
 pub const PAYOUT_AUTHORITY_BUMP: u8 = 251;
 /// The layout of a `PayoutAnswer` a script returns.
 pub const PAYOUT_ANSWER_VERSION: u8 = 1;
+/// A `PayoutAnswer` whose entries name wallets to pay, not holdings (2026-10-13): the same layout,
+/// each `account` an index of the account paid itself, within the same terms; no hook record.
+pub const PAYOUT_ANSWER_WALLETS_VERSION: u8 = 2;
+/// `PDA(["payees", mint])`: the wallets that share a companion's beneficiary part (2026-10-13).
+pub const PAYEES_SEED: &[u8] = b"payees";
+/// The most wallets that share the beneficiary part.
+pub const MAX_PAYEES: usize = 10;
+/// `Companion.version` of a companion whose beneficiary part is shared (`set_payees`): its
+/// `withdraw` takes its `Payees` and pays them. 1 for every other companion.
+pub const VERSION_WITH_PAYEES: u8 = 2;
+/// `Payees.version`.
+pub const PAYEES_VERSION: u8 = 1;
+/// `PayoutTerms.reserved[0]` of a script allowed wallet payouts (`allow_wallet_payouts`).
+pub const WALLET_PAYOUTS_ALLOWED: u8 = 1;
 /// The most entries one answer carries (213 bytes of return data at most).
 pub const MAX_PAYOUTS_PER_STEP: usize = 16;
 /// An answer of this many entries (or more) earns the whole `SCRIPT_BOUNTY`; a thinner one earns

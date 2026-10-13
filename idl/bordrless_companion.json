@@ -8,6 +8,293 @@
   },
   "instructions": [
     {
+      "name": "allow_wallet_payouts",
+      "docs": [
+        "Before the launch, whoever holds the mint lets the script pay any wallet SOL (wallet",
+        "answers), within its payout terms (2026-10-13). Without it, a script pays holders only."
+      ],
+      "discriminator": [
+        71,
+        92,
+        55,
+        9,
+        153,
+        76,
+        199,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint, the keypair that made the companion: only its holder allows it."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116,
+                  45,
+                  116,
+                  101,
+                  114,
+                  109,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "script",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "approve",
+      "docs": [
+        "The protocol's upgrade authority or the script approver (`SCRIPT_APPROVER`): approves",
+        "`program`'s code (its hash recomputed here) as a",
+        "token hook (kind 0) or a companion script (kind 1), `author` its author (a script's earns",
+        "half the creator fees of the companions made with it). Only a program nobody but Bordrless",
+        "can change (immutable, Bordrless's keys, or a hook timelock); an upgrade voids it."
+      ],
+      "discriminator": [
+        69,
+        74,
+        217,
+        36,
+        115,
+        117,
+        97,
+        76
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The companion program's upgrade authority (the protocol's) or the script approver; pays the",
+            "rent the first time."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "target",
+          "docs": [
+            "being an upgradeable-loader program naming `target_programdata`)."
+          ]
+        },
+        {
+          "name": "target_programdata"
+        },
+        {
+          "name": "approval",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  112,
+                  112,
+                  114,
+                  111,
+                  118,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "target"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "program",
+          "type": "pubkey"
+        },
+        {
+          "name": "kind",
+          "type": "u8"
+        },
+        {
+          "name": "code_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "author",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "attest",
+      "docs": [
+        "Studio's attester: attests a program's code (rebuilt from its source, the hash matched with",
+        "the chain, the checks, the simulator and the review passed)."
+      ],
+      "discriminator": [
+        83,
+        148,
+        120,
+        119,
+        144,
+        139,
+        117,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "attester",
+          "docs": [
+            "Studio's attester; pays the rent the first time."
+          ],
+          "writable": true,
+          "signer": true,
+          "address": "3uGLsTJNse7vE3pgRkAf6aKKBoKmCyPUcNNu1bw3KvP2"
+        },
+        {
+          "name": "target"
+        },
+        {
+          "name": "programdata"
+        },
+        {
+          "name": "attestation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "target"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "AttestArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "burn_stranded",
       "docs": [
         "Anyone: burns as SOL a blocked game hook's buyback that no buyback has spent or waited on",
@@ -1308,6 +1595,692 @@
       ]
     },
     {
+      "name": "create_script",
+      "docs": [
+        "Before the launch, the mint signing: the companion becomes a script companion, its pot's part",
+        "of every fee claim spent by a builder's program (the script: approved by Bordrless, or",
+        "immutable), whose",
+        "`companion_init` runs here. The remaining accounts are forwarded to it."
+      ],
+      "discriminator": [
+        161,
+        210,
+        131,
+        101,
+        215,
+        107,
+        219,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent of the script account and of the script's state; never passed to the script."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint, not created yet: it signs, so only whoever made the companion makes its",
+            "script."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "script",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "script_state",
+          "docs": [
+            "the script, when `state_len` is above 0; unused otherwise."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator_quote"
+        },
+        {
+          "name": "approval",
+          "docs": [
+            "for an immutable script)."
+          ]
+        },
+        {
+          "name": "script_program"
+        },
+        {
+          "name": "script_programdata"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateScriptArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_script_v2",
+      "docs": [
+        "`create_script` with payout terms (Loss cover, 2026-10-12): the bounds the script's payouts",
+        "keep within, kept at `PDA([\"payout-terms\", mint])`, the payer paying its rent."
+      ],
+      "discriminator": [
+        122,
+        6,
+        129,
+        158,
+        70,
+        188,
+        71,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent of the script account, of the script's state and of the terms; never passed",
+            "to the script."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint, not created yet: it signs."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "script",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "script_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator_quote"
+        },
+        {
+          "name": "approval"
+        },
+        {
+          "name": "script_program"
+        },
+        {
+          "name": "script_programdata"
+        },
+        {
+          "name": "terms",
+          "docs": [
+            "The payout terms, `PDA([\"payout-terms\", mint])`, made here."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116,
+                  45,
+                  116,
+                  101,
+                  114,
+                  109,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateScriptArgs"
+            }
+          }
+        },
+        {
+          "name": "payout",
+          "type": {
+            "defined": {
+              "name": "PayoutTermsArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_snowball",
+      "docs": [
+        "Snowball (2026-10-12): before the launch, the mint signing, the companion becomes a market",
+        "maker: the pot's part of every fee claim, the step, the trade sizes, the interval and the cap."
+      ],
+      "discriminator": [
+        49,
+        198,
+        9,
+        128,
+        48,
+        81,
+        228,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint, not created yet: it signs, so only whoever made the companion makes its",
+            "Snowball."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "snowball",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  110,
+                  111,
+                  119,
+                  98,
+                  97,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateSnowballArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_strategy_game",
+      "docs": [
+        "Makes the companion's strategy game for `mint` (not launched yet; the mint signs): the game's",
+        "arguments (kind `Strategy`, a lottery hook's tickets) and the strategy's terms."
+      ],
+      "discriminator": [
+        105,
+        56,
+        198,
+        182,
+        3,
+        194,
+        161,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint (not created yet): it signs, as for `create`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hook_state"
+        },
+        {
+          "name": "hook_registry"
+        },
+        {
+          "name": "hook_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "args.hook"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy"
+        },
+        {
+          "name": "strategy_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "s.strategy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy_registry"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateGameArgs"
+            }
+          }
+        },
+        {
+          "name": "s",
+          "type": {
+            "defined": {
+              "name": "StrategyArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "dev_buy",
       "docs": [
         "The beneficiary's buy, held by the companion and vesting to them."
@@ -1839,6 +2812,400 @@
       ]
     },
     {
+      "name": "pay_strategy",
+      "docs": [
+        "Anyone, for up to `max_per_tx` holdings: asks the strategy what each gets of the open",
+        "period's budget and pays it, once a holding."
+      ],
+      "discriminator": [
+        35,
+        244,
+        117,
+        171,
+        129,
+        1,
+        2,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it: pays the receipts' rent (returned by `close_receipt`) and is paid the",
+            "bounties."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hook_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.hook",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "terms.strategy",
+                "account": "StrategyTerms"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "hook_state"
+        },
+        {
+          "name": "strategy"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "period",
+          "type": "u32"
+        },
+        {
+          "name": "n",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "plan_period",
+      "docs": [
+        "Anyone: once strategy period `period` is over, asks the strategy for its budget and opens",
+        "its payments (or closes it with nothing)."
+      ],
+      "discriminator": [
+        49,
+        137,
+        95,
+        163,
+        105,
+        65,
+        79,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it (paid nothing)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hook_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.hook",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy_status",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "terms.strategy",
+                "account": "StrategyTerms"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "hook_state"
+        },
+        {
+          "name": "strategy"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "period",
+          "type": "u32"
+        }
+      ]
+    },
+    {
       "name": "release",
       "docs": [
         "Anyone: sends the beneficiary the dev bag's vested tokens."
@@ -2258,6 +3625,306 @@
       "args": []
     },
     {
+      "name": "revoke",
+      "docs": [
+        "The attester or the protocol's upgrade authority: revokes an attestation."
+      ],
+      "discriminator": [
+        170,
+        23,
+        31,
+        34,
+        133,
+        173,
+        93,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Studio's attester, or the companion's upgrade authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "attestation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "attestation.program",
+                "account": "HookAttestation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revoke_approval",
+      "docs": [
+        "The protocol's upgrade authority or the script approver: revokes `program`'s approval."
+      ],
+      "discriminator": [
+        44,
+        51,
+        184,
+        108,
+        182,
+        202,
+        20,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The companion program's upgrade authority, or the script approver."
+          ],
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "approval",
+          "docs": [
+            "The approval of the instruction's `program` (checked in the handler)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  112,
+                  112,
+                  114,
+                  111,
+                  118,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "approval.program",
+                "account": "Approval"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "program",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "script_step",
+      "docs": [
+        "Anyone, once an interval: the script's `companion_step`, the creator address signing, then",
+        "the companion's checks (the pot spent and nothing else, the dev bag and the lamports kept,",
+        "custody unchanged); pays a bounty from the pot. The remaining accounts are forwarded to it.",
+        "A script may answer payouts in its return data (Loss cover, 2026-10-12): each entry is",
+        "checked against the script's payout terms, paid to the holding's owner as SOL and recorded",
+        "by the launch's hook (`record_payout`)."
+      ],
+      "discriminator": [
+        8,
+        178,
+        42,
+        51,
+        245,
+        179,
+        103,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty. Its signature is never forwarded to the script."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "script",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "script_state",
+          "docs": [
+            "when it has one (`Script.state_len` above 0)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "approval",
+          "docs": [
+            "not read for an immutable script)."
+          ]
+        },
+        {
+          "name": "script_program"
+        },
+        {
+          "name": "script_programdata"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "set_hook_status",
       "docs": [
         "The protocol's upgrade authority: whether a game hook is audited, its pots' cap while not,",
@@ -2337,6 +4004,203 @@
           "type": {
             "defined": {
               "name": "HookStatusArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_hook_status_v2",
+      "docs": [
+        "The protocol's upgrade authority: `set_hook_status`, with an audit tied to the code's hash",
+        "(only of an immutable or Bordrless-managed program; the hash recomputed and kept)."
+      ],
+      "discriminator": [
+        129,
+        20,
+        215,
+        242,
+        223,
+        236,
+        213,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The companion program's upgrade authority (the protocol's), paying the rent the first time."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "hook_status",
+          "docs": [
+            "What the protocol says of `hook`, made the first time."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  117,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "hook"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "hook",
+          "type": "pubkey"
+        },
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "HookStatusArgs"
+            }
+          }
+        },
+        {
+          "name": "audited_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_payees",
+      "docs": [
+        "Up to 10 wallets that share the beneficiary part, each a fixed share of it, set once before",
+        "the launch by whoever holds the mint (2026-10-13): every `withdraw` pays them their parts as",
+        "SOL, the beneficiary the rest."
+      ],
+      "discriminator": [
+        92,
+        10,
+        255,
+        107,
+        111,
+        30,
+        22,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint, the keypair that made the companion: only its holder sets payees."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payees",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  101,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "entries",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "PayeeArgs"
+              }
             }
           }
         }
@@ -2584,6 +4448,125 @@
       "args": []
     },
     {
+      "name": "snowball_step",
+      "docs": [
+        "Anyone: a Snowball's trade on its pool, a buy on a dip or a sell on a rise of its step from",
+        "the reference (or a follow of the price when that side has nothing to trade); pays a bounty."
+      ],
+      "discriminator": [
+        107,
+        108,
+        139,
+        36,
+        101,
+        60,
+        224,
+        117
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty on a trade."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "snowball",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  110,
+                  111,
+                  119,
+                  98,
+                  97,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "withdraw",
       "docs": [
         "Anyone: pays the beneficiary their part as SOL."
@@ -2675,6 +4658,19 @@
   ],
   "accounts": [
     {
+      "name": "Approval",
+      "discriminator": [
+        233,
+        9,
+        153,
+        49,
+        11,
+        222,
+        59,
+        130
+      ]
+    },
+    {
       "name": "Companion",
       "discriminator": [
         189,
@@ -2701,6 +4697,19 @@
       ]
     },
     {
+      "name": "HookAttestation",
+      "discriminator": [
+        232,
+        39,
+        23,
+        164,
+        219,
+        88,
+        242,
+        101
+      ]
+    },
+    {
       "name": "HookStatus",
       "discriminator": [
         165,
@@ -2711,6 +4720,45 @@
         122,
         13,
         118
+      ]
+    },
+    {
+      "name": "Payees",
+      "discriminator": [
+        209,
+        71,
+        156,
+        186,
+        208,
+        21,
+        110,
+        34
+      ]
+    },
+    {
+      "name": "PayoutTerms",
+      "discriminator": [
+        252,
+        164,
+        195,
+        162,
+        43,
+        38,
+        139,
+        7
+      ]
+    },
+    {
+      "name": "Script",
+      "discriminator": [
+        152,
+        19,
+        115,
+        143,
+        1,
+        19,
+        225,
+        121
       ]
     },
     {
@@ -2725,9 +4773,74 @@
         83,
         113
       ]
+    },
+    {
+      "name": "Snowball",
+      "discriminator": [
+        34,
+        188,
+        83,
+        61,
+        87,
+        169,
+        84,
+        139
+      ]
+    },
+    {
+      "name": "StrategyTerms",
+      "discriminator": [
+        244,
+        244,
+        222,
+        235,
+        65,
+        11,
+        20,
+        197
+      ]
     }
   ],
   "events": [
+    {
+      "name": "ApprovalRevoked",
+      "discriminator": [
+        0,
+        143,
+        189,
+        167,
+        179,
+        12,
+        235,
+        123
+      ]
+    },
+    {
+      "name": "AttestationRevoked",
+      "discriminator": [
+        47,
+        106,
+        65,
+        238,
+        200,
+        127,
+        163,
+        50
+      ]
+    },
+    {
+      "name": "AuthorPaid",
+      "discriminator": [
+        41,
+        149,
+        221,
+        32,
+        77,
+        240,
+        249,
+        8
+      ]
+    },
     {
       "name": "BeneficiaryPaid",
       "discriminator": [
@@ -2765,6 +4878,19 @@
         161,
         174,
         228
+      ]
+    },
+    {
+      "name": "CandidateRejected",
+      "discriminator": [
+        253,
+        4,
+        82,
+        97,
+        243,
+        101,
+        73,
+        96
       ]
     },
     {
@@ -2924,6 +5050,32 @@
       ]
     },
     {
+      "name": "HookAttested",
+      "discriminator": [
+        232,
+        176,
+        69,
+        146,
+        157,
+        155,
+        196,
+        9
+      ]
+    },
+    {
+      "name": "HookAuditRecorded",
+      "discriminator": [
+        249,
+        179,
+        188,
+        149,
+        207,
+        156,
+        83,
+        0
+      ]
+    },
+    {
       "name": "HookStatusSet",
       "discriminator": [
         119,
@@ -2973,6 +5125,84 @@
         30,
         119,
         68
+      ]
+    },
+    {
+      "name": "PayeePaid",
+      "discriminator": [
+        60,
+        129,
+        205,
+        198,
+        109,
+        22,
+        177,
+        14
+      ]
+    },
+    {
+      "name": "PayeesSet",
+      "discriminator": [
+        134,
+        94,
+        33,
+        56,
+        99,
+        88,
+        127,
+        198
+      ]
+    },
+    {
+      "name": "PayoutTermsSet",
+      "discriminator": [
+        128,
+        36,
+        79,
+        17,
+        215,
+        82,
+        128,
+        106
+      ]
+    },
+    {
+      "name": "PeriodPlanned",
+      "discriminator": [
+        74,
+        7,
+        36,
+        27,
+        127,
+        22,
+        146,
+        189
+      ]
+    },
+    {
+      "name": "PeriodRejected",
+      "discriminator": [
+        11,
+        37,
+        116,
+        187,
+        94,
+        173,
+        23,
+        57
+      ]
+    },
+    {
+      "name": "PeriodSkipped",
+      "discriminator": [
+        127,
+        124,
+        247,
+        218,
+        51,
+        204,
+        227,
+        237
       ]
     },
     {
@@ -3028,6 +5258,19 @@
       ]
     },
     {
+      "name": "ProgramApproved",
+      "discriminator": [
+        243,
+        40,
+        115,
+        32,
+        163,
+        97,
+        110,
+        22
+      ]
+    },
+    {
       "name": "RolledOver",
       "discriminator": [
         46,
@@ -3038,6 +5281,58 @@
         119,
         39,
         117
+      ]
+    },
+    {
+      "name": "ScriptCreated",
+      "discriminator": [
+        94,
+        124,
+        99,
+        130,
+        208,
+        56,
+        49,
+        122
+      ]
+    },
+    {
+      "name": "ScriptPayout",
+      "discriminator": [
+        82,
+        90,
+        25,
+        247,
+        154,
+        237,
+        100,
+        207
+      ]
+    },
+    {
+      "name": "ScriptStepped",
+      "discriminator": [
+        70,
+        213,
+        224,
+        21,
+        30,
+        216,
+        104,
+        25
+      ]
+    },
+    {
+      "name": "ScriptWalletPayout",
+      "discriminator": [
+        253,
+        212,
+        119,
+        70,
+        190,
+        133,
+        38,
+        167
       ]
     },
     {
@@ -3067,6 +5362,45 @@
       ]
     },
     {
+      "name": "SnowballCreated",
+      "discriminator": [
+        236,
+        150,
+        24,
+        113,
+        167,
+        133,
+        146,
+        246
+      ]
+    },
+    {
+      "name": "SnowballFollowed",
+      "discriminator": [
+        252,
+        44,
+        141,
+        116,
+        143,
+        123,
+        77,
+        44
+      ]
+    },
+    {
+      "name": "SnowballTraded",
+      "discriminator": [
+        239,
+        98,
+        81,
+        179,
+        194,
+        29,
+        227,
+        254
+      ]
+    },
+    {
       "name": "StrandedBurned",
       "discriminator": [
         225,
@@ -3077,6 +5411,45 @@
         101,
         231,
         232
+      ]
+    },
+    {
+      "name": "StrategyPaid",
+      "discriminator": [
+        161,
+        29,
+        133,
+        158,
+        122,
+        85,
+        2,
+        60
+      ]
+    },
+    {
+      "name": "StrategySet",
+      "discriminator": [
+        179,
+        97,
+        111,
+        177,
+        70,
+        5,
+        133,
+        183
+      ]
+    },
+    {
+      "name": "WalletPayoutsAllowed",
+      "discriminator": [
+        179,
+        98,
+        201,
+        80,
+        160,
+        102,
+        92,
+        127
       ]
     }
   ],
@@ -3340,9 +5713,480 @@
       "code": 6051,
       "name": "FeesUnclaimed",
       "msg": "the launch holds creator fees nobody has claimed that could fund this prize: claim the fees first, in the same transaction"
+    },
+    {
+      "code": 6052,
+      "name": "NotAttester",
+      "msg": "only Studio's attester writes an attestation; only it or the protocol's upgrade authority revokes one"
+    },
+    {
+      "code": 6053,
+      "name": "AttestationHashMismatch",
+      "msg": "the attested build hash is not the hash of the program's code on chain"
+    },
+    {
+      "code": 6054,
+      "name": "BadAttestation",
+      "msg": "an attestation records a passing simulation and a review that passed or warned"
+    },
+    {
+      "code": 6055,
+      "name": "HookNotAttested",
+      "msg": "a game hook taken without a status (Studio's, the protocol's or a timelock's to upgrade) needs a current Studio attestation"
+    },
+    {
+      "code": 6056,
+      "name": "AuditNeedsFixedCode",
+      "msg": "only an immutable or Bordrless-managed program can be audited: finalize a timelocked one first"
+    },
+    {
+      "code": 6057,
+      "name": "AuditHashMismatch",
+      "msg": "the audited hash is not the hash of the program's code on chain"
+    },
+    {
+      "code": 6058,
+      "name": "ProgramAccounts",
+      "msg": "the program's accounts (the program, its program data, its timelock) are missing or wrong"
+    },
+    {
+      "code": 6059,
+      "name": "StrategyNotAccepted",
+      "msg": "a strategy must be immutable, timelocked or Bordrless-managed, not blocked, and none of the protocol's programs"
+    },
+    {
+      "code": 6060,
+      "name": "StrategyAccounts",
+      "msg": "a strategy's accounts are not the ones its terms name, or not the strategy's own"
+    },
+    {
+      "code": 6061,
+      "name": "StrategyRegistry",
+      "msg": "a strategy's registry lists at most 2 accounts, each owned by the strategy"
+    },
+    {
+      "code": 6062,
+      "name": "TooManyCandidates",
+      "msg": "a strategy payment takes 1 to max_per_tx candidates"
+    },
+    {
+      "code": 6063,
+      "name": "PeriodNotOpen",
+      "msg": "no strategy period is open for payments"
+    },
+    {
+      "code": 6064,
+      "name": "BadStrategy",
+      "msg": "a strategy's terms are out of bounds"
+    },
+    {
+      "code": 6065,
+      "name": "RevokedByProtocol",
+      "msg": "the protocol revoked this program's attestation: it can't be attested again"
+    },
+    {
+      "code": 6066,
+      "name": "TimelockPending",
+      "msg": "the program's timelock holds a proposal of new code: a game is made on a timelocked program only while nothing is pending (its author cancels it, or it lands first)"
+    },
+    {
+      "code": 6067,
+      "name": "BadSnowball",
+      "msg": "a Snowball's terms are out of bounds, or its companion is launched, a game, a script or already a Snowball"
+    },
+    {
+      "code": 6068,
+      "name": "NotASnowball",
+      "msg": "not a Snowball companion"
+    },
+    {
+      "code": 6069,
+      "name": "SnowballNotDue",
+      "msg": "no Snowball step is due: too soon, or the price is within its step of the reference"
+    },
+    {
+      "code": 6070,
+      "name": "NotApproved",
+      "msg": "the program has no current approval of this kind from Bordrless: none, revoked, of another kind, or its code changed since it was approved"
+    },
+    {
+      "code": 6071,
+      "name": "BadScript",
+      "msg": "a script's terms are out of bounds (interval, init data, split), its program is one of the protocol's, or its companion is launched, a game, a Snowball or a script already"
+    },
+    {
+      "code": 6072,
+      "name": "ScriptNotDue",
+      "msg": "no script step is due: too soon after the launch or the last step"
+    },
+    {
+      "code": 6073,
+      "name": "ScriptOverspent",
+      "msg": "the script spent more bridged SOL than the pot holds"
+    },
+    {
+      "code": 6074,
+      "name": "ScriptTookDevBag",
+      "msg": "the script moved tokens of the dev bag"
+    },
+    {
+      "code": 6075,
+      "name": "ScriptTookLamports",
+      "msg": "the script took lamports from the creator address"
+    },
+    {
+      "code": 6076,
+      "name": "BadApproval",
+      "msg": "an approval is of a token hook (0) or a script (1), a script is none of the protocol's programs, and the hash must be the program's code on chain"
+    },
+    {
+      "code": 6077,
+      "name": "NotAScript",
+      "msg": "not a script companion"
+    },
+    {
+      "code": 6078,
+      "name": "ScriptBrokeCustody",
+      "msg": "the script delegated or closed one of the creator's holdings, changed the creator address's owner or data, or claimed the creator fees"
+    },
+    {
+      "code": 6079,
+      "name": "ProgramNotBounded",
+      "msg": "an approved program must be one only Bordrless can change: immutable, upgradeable only by Bordrless's keys, or behind a hook timelock (passed)"
+    },
+    {
+      "code": 6080,
+      "name": "PayoutsOff",
+      "msg": "this script companion has no payout terms: a script made with create_script pays nobody"
+    },
+    {
+      "code": 6081,
+      "name": "PayoutsNeedHook",
+      "msg": "payouts need a custom hook that writes hook data, which records each one"
+    },
+    {
+      "code": 6082,
+      "name": "BadPayoutAnswer",
+      "msg": "the script's answer does not decode as a payout answer: its version, its length, more than 16 entries, an index past the accounts, an account that is no holding of the mint, or a holding named twice"
+    },
+    {
+      "code": 6083,
+      "name": "PayoutTarget",
+      "msg": "a payout can only go to a wallet holding the token: not the launch, its pool, the creator address, a program's account, an account left out or read-only, or one left below its rent-exempt minimum"
+    },
+    {
+      "code": 6084,
+      "name": "PayoutToBeneficiary",
+      "msg": "the launcher's own holding is never paid by a script"
+    },
+    {
+      "code": 6085,
+      "name": "PayoutOverBound",
+      "msg": "a payout is over the terms: the holding's cap, the step's budget, or the window's"
+    },
+    {
+      "code": 6086,
+      "name": "BadPayoutTerms",
+      "msg": "payout terms are 1 to 10,000 basis points each and a window of 10 seconds to a day"
+    },
+    {
+      "code": 6087,
+      "name": "BadPayees",
+      "msg": "payees are 1 to 10 distinct wallets, each 1 to 10,000 basis points of the beneficiary part and 10,000 in all at most, none of them the beneficiary, the creator address or the companion, set once before the launch"
+    },
+    {
+      "code": 6088,
+      "name": "PayeesMissing",
+      "msg": "this companion shares its beneficiary part: pass its payees account (writable) and each payee"
+    },
+    {
+      "code": 6089,
+      "name": "WalletPayoutTarget",
+      "msg": "a wallet payout goes to an account passed writable that can take SOL and keeps its rent-exempt minimum: no account of a Bordrless program, the launch's, the pool's, the creator address, the companion, the script's or the hook's, named once"
+    },
+    {
+      "code": 6090,
+      "name": "WalletPayoutsOff",
+      "msg": "this script may not pay wallets: its launcher did not allow wallet payouts before the launch (allow_wallet_payouts)"
     }
   ],
   "types": [
+    {
+      "name": "AnswerFault",
+      "docs": [
+        "Why a strategy's answer was refused (never clamped)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "NoAnswer"
+          },
+          {
+            "name": "WrongProgram"
+          },
+          {
+            "name": "BadLength"
+          },
+          {
+            "name": "OverBound"
+          },
+          {
+            "name": "Accounts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Approval",
+      "docs": [
+        "Bordrless's approval of a program's code (2026-10-12), `PDA([\"approval\", program])`, written only",
+        "by the companion program's upgrade authority or the script approver (`SCRIPT_APPROVER`;",
+        "`approve`, `revoke_approval`). It is bound to the",
+        "code: `approve` hashes the program's code on chain and refuses any other hash, and an approval",
+        "counts only while the program still runs that code (`approval::approved`: the ProgramData's slot",
+        "unchanged since, or the code hashed again). Upgrading an approved program voids its approval",
+        "until it is approved again. Only a program nobody but Bordrless can change is approved:",
+        "immutable, upgradeable only by Bordrless's keys, or behind a hook timelock."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "`APPROVAL_KIND_TOKEN_HOOK` (0) or `APPROVAL_KIND_SCRIPT` (1)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "code_hash",
+            "docs": [
+              "`solana-verify`'s executable hash of the approved code."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "approved_at",
+            "type": "i64"
+          },
+          {
+            "name": "revoked",
+            "type": "bool"
+          },
+          {
+            "name": "updated_by",
+            "docs": [
+              "Who last wrote it (the upgrade authority or the script approver that approved or revoked",
+              "it)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "programdata_slot",
+            "docs": [
+              "The program's ProgramData slot when approved: while it is unchanged the code is the approved",
+              "code (the loader refuses a second deploy, upgrade or extension in one slot), so a check needs",
+              "no hash; once it moved (an upgrade, or anyone's `ExtendProgram`) the code is hashed again."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "author",
+            "docs": [
+              "Who wrote the program: a script's author earns `AUTHOR_SHARE_BPS` of the creator fees of",
+              "every script companion made with it afterwards (`create_script` copies it into the `Script`).",
+              "The default key: no author. (From what was `reserved`.)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ApprovalRevoked",
+      "docs": [
+        "Bordrless revoked a program's approval (`revoke_approval`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "code_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestArgs",
+      "docs": [
+        "Arguments of `attest`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "build_hash",
+            "docs": [
+              "`solana-verify`'s executable hash of the code Studio built: must be the code on chain."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "template_commit",
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "sim_version",
+            "type": "u16"
+          },
+          {
+            "name": "sim_pass",
+            "docs": [
+              "Must be true: a failing simulation gets no attestation."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "cut_max_bps",
+            "type": "u16"
+          },
+          {
+            "name": "cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "review",
+            "docs": [
+              "`REVIEW_PASS` or `REVIEW_WARN`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 a token hook, 1 a game hook, 2 a strategy."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestationRevoked",
+      "docs": [
+        "An attestation revoked (by the attester or the protocol's upgrade authority)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "build_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "by",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorPaid",
+      "docs": [
+        "A script companion's fee claim paid the script's author their share (`AUTHOR_SHARE_BPS` of what",
+        "the claim took from the launch), as SOL, before the split."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "BeneficiaryPaid",
       "type": {
@@ -3406,6 +6250,83 @@
           {
             "name": "reference",
             "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CandidateReason",
+      "docs": [
+        "Why a candidate of `pay_strategy` was not paid (the others go on)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "WrongHolding"
+          },
+          {
+            "name": "NotEligible"
+          },
+          {
+            "name": "NoWeight"
+          },
+          {
+            "name": "AlreadyPaid"
+          },
+          {
+            "name": "Answer",
+            "fields": [
+              {
+                "defined": {
+                  "name": "AnswerFault"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Zero"
+          },
+          {
+            "name": "BelowRent"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CandidateRejected",
+      "docs": [
+        "A candidate of `pay_strategy` not paid: no receipt, nothing moved."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": {
+              "defined": {
+                "name": "CandidateReason"
+              }
+            }
+          },
+          {
+            "name": "answered",
+            "docs": [
+              "What the strategy answered, when it was over its bound or too little for an empty wallet."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -3618,13 +6539,12 @@
             "type": "u64"
           },
           {
-            "name": "reserved",
-            "type": {
-              "array": [
-                "u8",
-                1
-              ]
-            }
+            "name": "mode",
+            "docs": [
+              "`MODE_CLASSIC`, `MODE_SNOWBALL` or `MODE_SCRIPT` (2026-10-12), the last byte of what was",
+              "`reserved`: zero, classic, in every companion made before."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -3792,7 +6712,8 @@
           {
             "name": "round_secs",
             "docs": [
-              "An hour to 30 days, as the hook's header says."
+              "As the hook's header says: a lottery's rounds 5 minutes to 30 days, a streak's epochs an",
+              "hour to 30 days."
             ],
             "type": "u32"
           },
@@ -3813,7 +6734,8 @@
           {
             "name": "claim_window_secs",
             "docs": [
-              "How long each claim attempt is open (5 minutes to a day)."
+              "How long each claim attempt is open (a minute to a day; a streak's least time for claims,",
+              "5 minutes to half an epoch)."
             ],
             "type": "u32"
           },
@@ -3885,6 +6807,145 @@
                 "name": "LaunchRules"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateScriptArgs",
+      "docs": [
+        "Arguments of `create_script`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "split",
+            "docs": [
+              "Every fee claim's split besides the pot: the four parts (with `pot_bps`) sum to 10,000."
+            ],
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "pot_bps",
+            "docs": [
+              "The pot's part of every fee claim: what the script spends."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "program",
+            "docs": [
+              "The script: a program with a current approval of kind `APPROVAL_KIND_SCRIPT`, or an immutable",
+              "one, which needs none."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "interval",
+            "docs": [
+              "The least time between steps (10 seconds to a day)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "state_len",
+            "docs": [
+              "The size of the script's state the companion makes (0: none; at most",
+              "`MAX_SCRIPT_STATE_LEN`)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "init_data",
+            "docs": [
+              "Handed to the script's `companion_init` (at most `MAX_SCRIPT_INIT_LEN` bytes)."
+            ],
+            "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateSnowballArgs",
+      "docs": [
+        "Arguments of `create_snowball`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "split",
+            "docs": [
+              "Every fee claim's split besides the pot: the four parts (with `pot_bps`) sum to 10,000."
+            ],
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "pot_bps",
+            "docs": [
+              "The pot's part of every fee claim: what the market maker trades with."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "buy_step_bps",
+            "docs": [
+              "The drop from the reference that triggers a buy, and the rise that triggers a sell (0.5% to",
+              "20% each)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sell_step_bps",
+            "type": "u16"
+          },
+          {
+            "name": "buy_bps",
+            "docs": [
+              "The share of the pot a buy spends, and of its tokens a sell sells (1% to 100% each)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sell_bps",
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "docs": [
+              "The least time between trades (10 seconds to a day)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "max_trade",
+            "docs": [
+              "The most one trade moves, lamports (at least 0.01 SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pool_bps",
+            "docs": [
+              "The most one trade moves as a share of the pool's SOL side (0.25% to 10%)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "flat_trades",
+            "docs": [
+              "Trade every interval even when the price is within its steps (on the side that rebalances)."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -4579,6 +7640,23 @@
             "type": "u64"
           },
           {
+            "name": "hook_audit_slot",
+            "docs": [
+              "The deploy slot of the game hook's code when its audit last held for it (`hook_audit_ok`):",
+              "an audit the protocol recorded with the code's hash (`set_hook_status_v2`) lifts the cap",
+              "only while the hook is immutable or Bordrless-managed and runs that code. A step rehashes the",
+              "code only when its deploy slot moved since (an upgrade, or anyone's `ExtendProgram`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "hook_audit_ok",
+            "docs": [
+              "The hook's hashed audit held at `hook_audit_slot`."
+            ],
+            "type": "bool"
+          },
+          {
             "name": "reserved",
             "docs": [
               "Room for the kinds to come, zero until then."
@@ -4586,7 +7664,7 @@
             "type": {
               "array": [
                 "u8",
-                43
+                34
               ]
             }
           }
@@ -4685,6 +7763,9 @@
           },
           {
             "name": "Streak"
+          },
+          {
+            "name": "Strategy"
           }
         ]
       }
@@ -4782,6 +7863,238 @@
               "The pot's cap (0: none, audited)."
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookAttestation",
+      "docs": [
+        "Bordrless Studio's attestation of a program's code, `PDA([\"attest\", program])`, written only by",
+        "Studio's attester (`STUDIO_ATTESTER`) once Studio's worker has rebuilt the program's source,",
+        "matched the build's hash with the code on chain (checked again here, when written), and passed",
+        "the static checks, the simulator and the review. Revoked by the attester or the protocol's",
+        "upgrade authority. \"Current\" while not revoked and its `build_hash` is the program's code as it",
+        "is (`programdata_slot` unchanged is the fast check; an extension changes the slot, not the code,",
+        "so a reader then recomputes the hash)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "build_hash",
+            "docs": [
+              "`solana-verify`'s executable hash of the attested code."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source_hash",
+            "docs": [
+              "sha256 of the frozen source Studio built."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "template_commit",
+            "docs": [
+              "The Studio template's commit the source was built against (20 bytes of a git sha1)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "sim_version",
+            "type": "u16"
+          },
+          {
+            "name": "sim_pass",
+            "type": "bool"
+          },
+          {
+            "name": "cut_max_bps",
+            "docs": [
+              "The largest cut the simulator saw, and the cap Studio applies, in basis points."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "review",
+            "docs": [
+              "`REVIEW_PASS` or `REVIEW_WARN`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "What it is: 0 a token hook, 1 a game hook, 2 a strategy (informative)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "programdata_slot",
+            "docs": [
+              "The ProgramData's slot when attested."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "attested_at",
+            "type": "i64"
+          },
+          {
+            "name": "attester",
+            "type": "pubkey"
+          },
+          {
+            "name": "revoked",
+            "type": "bool"
+          },
+          {
+            "name": "revoked_at",
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookAttested",
+      "docs": [
+        "Studio's attester attested a program's code (`attest`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "build_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "template_commit",
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          },
+          {
+            "name": "sim_version",
+            "type": "u16"
+          },
+          {
+            "name": "cut_max_bps",
+            "type": "u16"
+          },
+          {
+            "name": "cap_bps",
+            "type": "u16"
+          },
+          {
+            "name": "review",
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "programdata_slot",
+            "type": "u64"
+          },
+          {
+            "name": "attester",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookAuditRecorded",
+      "docs": [
+        "`set_hook_status_v2`: the status, with the audited code's hash (zeros when not audited)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hook",
+            "type": "pubkey"
+          },
+          {
+            "name": "audited",
+            "type": "bool"
+          },
+          {
+            "name": "audited_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
           }
         ]
       }
@@ -5381,7 +8694,11 @@
           {
             "name": "reserved",
             "docs": [
-              "Reserved."
+              "Reserved. `reserved[0..4]` are the custom hook's SOL cut caps from the config",
+              "([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of",
+              "`creator_fees_accrued`), `reserved[12]` the bump of the hook's `[\"state\", mint]` and",
+              "`reserved[13]` of the launchpad's `[\"quote-cut\", hook]` signer; zeros for every launch made",
+              "before (`docs/quote-cut.md`)."
             ],
             "type": {
               "array": [
@@ -5459,6 +8776,479 @@
               "off)."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Payee",
+      "docs": [
+        "One payee of a `Payees`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "bps",
+            "docs": [
+              "Its part of the beneficiary part, in basis points."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "owed",
+            "docs": [
+              "Owed and not yet paid (part of the companion's `pending_beneficiary`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paid",
+            "docs": [
+              "Paid all time."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayeeArgs",
+      "docs": [
+        "One payee of `set_payees`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "bps",
+            "docs": [
+              "Its part of the beneficiary part: 1 to 10,000 basis points."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayeePaid",
+      "docs": [
+        "A payee was paid its part of the beneficiary part, as SOL, by `withdraw`; `owed` is what it is",
+        "still owed (its account could not take a payment yet, or was not passed)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "owed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayeeShare",
+      "docs": [
+        "One payee and its share, in `PayeesSet`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Payees",
+      "docs": [
+        "The wallets that share a companion's beneficiary part (`set_payees`, 2026-10-13),",
+        "`PDA([\"payees\", mint])`: each gets its basis points of every `withdraw`'s beneficiary part, as",
+        "SOL; the beneficiary keeps the rest. A payee whose account can't take a payment (not passed,",
+        "read-only, or it would stay below its rent-exempt minimum) is owed it: it stays in the",
+        "companion's `pending_beneficiary` and is paid at a later `withdraw`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "count",
+            "docs": [
+              "How many of `payees` are set."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "beneficiary_owed",
+            "docs": [
+              "The beneficiary's own part owed: its account could not take it (not payable, or it would",
+              "stay below its rent-exempt minimum), so it waits, as a payee's does, instead of failing",
+              "every payee's payment with it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payees",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Payee"
+                  }
+                },
+                10
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayeesSet",
+      "docs": [
+        "A companion's beneficiary part is shared (`set_payees`, before the launch): each payee's basis",
+        "points of it; the beneficiary keeps the rest."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "payees",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "PayeeShare"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutTerms",
+      "docs": [
+        "The bounds a script companion's payouts keep within (Loss cover, 2026-10-12),",
+        "`PDA([\"payout-terms\", mint])`, 128 bytes, made by `create_script_v2` with the script. A script",
+        "made with `create_script` has none, and its answers pay nobody (`PayoutsOff`). The counters are",
+        "the companion's: a step writes them after it paid."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "step_bps",
+            "docs": [
+              "The most one step pays, of the pot at the step's start (1 to 10,000 basis points)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holding_bps",
+            "docs": [
+              "The most one holding gets of a step's budget (1 to 10,000)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "window_bps",
+            "docs": [
+              "The most a window pays, of the pot as it stood at the window's first step (1 to 10,000)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "window_secs",
+            "docs": [
+              "The window: `floor(now / window_secs)` (10 seconds to a day: a round, or a day)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "window_start",
+            "docs": [
+              "The window the counters are for (its first second), the pot at its first step after the",
+              "script ran, and what it has paid."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "window_pot",
+            "type": "u64"
+          },
+          {
+            "name": "window_paid",
+            "type": "u64"
+          },
+          {
+            "name": "paid_total",
+            "docs": [
+              "Lamports paid to holders all time, entries recorded all time (touches included), when."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payouts",
+            "type": "u64"
+          },
+          {
+            "name": "last_paid_at",
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                28
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutTermsArgs",
+      "docs": [
+        "The terms of `create_script_v2`: each share 1 to 10,000 basis points, the window 10 seconds to",
+        "a day."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "step_bps",
+            "docs": [
+              "The most one step pays, of the pot at the step's start."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holding_bps",
+            "docs": [
+              "The most one holding gets of a step's budget."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "window_bps",
+            "docs": [
+              "The most a window pays, of the pot as it stood at the window's first step."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "window_secs",
+            "docs": [
+              "The window: `floor(now / window_secs)`."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutTermsSet",
+      "docs": [
+        "`create_script_v2`: the bounds the script's payouts keep within (`PayoutTerms`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "terms",
+            "type": "pubkey"
+          },
+          {
+            "name": "step_bps",
+            "type": "u16"
+          },
+          {
+            "name": "holding_bps",
+            "type": "u16"
+          },
+          {
+            "name": "window_bps",
+            "type": "u16"
+          },
+          {
+            "name": "window_secs",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PeriodPlanned",
+      "docs": [
+        "A strategy period planned: its budget is locked for its holders until `claims_end`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "budget",
+            "type": "u64"
+          },
+          {
+            "name": "budget_max",
+            "type": "u64"
+          },
+          {
+            "name": "claims_end",
+            "type": "i64"
+          },
+          {
+            "name": "pending_pot",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PeriodRejected",
+      "docs": [
+        "A strategy period closed with nothing: the strategy's plan was refused. The pot stays."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "reason",
+            "type": {
+              "defined": {
+                "name": "AnswerFault"
+              }
+            }
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PeriodSkipped",
+      "docs": [
+        "A strategy period whose plan answered 0: nothing is paid, the pot stays."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
           }
         ]
       }
@@ -5618,6 +9408,55 @@
       }
     },
     {
+      "name": "ProgramApproved",
+      "docs": [
+        "Bordrless approved a program's code (`approve`): a new approval, or one rewritten."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "`APPROVAL_KIND_TOKEN_HOOK` (0) or `APPROVAL_KIND_SCRIPT` (1)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "code_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "programdata_slot",
+            "docs": [
+              "The program's ProgramData slot at the approval."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "docs": [
+              "The program's author (the default key: none)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "RolledOver",
       "docs": [
         "A round rolled over: the pot stays for the next draw (or, blocked, went to the buyback)."
@@ -5683,6 +9522,317 @@
           },
           {
             "name": "OracleUnpaid"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Script",
+      "docs": [
+        "A script companion's script (2026-10-12), `PDA([\"script\", mint])`, fixed at `create_script`: the",
+        "program that decides what the pot does, and how often a step may run. The pot itself is",
+        "`Companion.pending_pot` (bridged SOL in the creator's holding); what the script buys stays in the",
+        "creator's token holding beside any dev bag."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "program",
+            "docs": [
+              "The script: a program Bordrless approved (`APPROVAL_KIND_SCRIPT`), called with the creator",
+              "address signing."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "interval",
+            "docs": [
+              "The least time between two steps (10 seconds to a day)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "last_at",
+            "docs": [
+              "When it last stepped (0: never)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "steps",
+            "docs": [
+              "Steps run so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "author",
+            "docs": [
+              "The script's author, copied from its approval at `create_script`: paid `AUTHOR_SHARE_BPS` of",
+              "what every fee claim takes from the launch, unless they are the launch's beneficiary. The",
+              "default key: no author (an approval naming nobody, or an immutable script, which needs no",
+              "approval). (From what was `reserved`.)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "author_paid",
+            "docs": [
+              "What the author has been paid so far (lamports)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "state_len",
+            "docs": [
+              "The size of the script's state, `PDA([\"script-state\", mint])`, which `create_script` made",
+              "(zeroed, owned by the script) and every call hands the script; 0: no state, the system",
+              "program's id in its place. (From what was `reserved`.)"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                20
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScriptCreated",
+      "docs": [
+        "A script made for a companion (`create_script`, before the launch), its `companion_init` called."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "split",
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "pot_bps",
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "type": "i64"
+          },
+          {
+            "name": "author",
+            "docs": [
+              "The script's author, from its approval (the default key: none, as for an immutable script,",
+              "which needs no approval)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScriptPayout",
+      "docs": [
+        "One entry of a script's payout answer, paid and recorded (`script_step`): `lamports` paid to the",
+        "holding's owner as SOL (0: a touch, recorded alone), `tag` the script's, passed to the hook's",
+        "`record_payout` untouched."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "tag",
+            "type": "u32"
+          },
+          {
+            "name": "window_paid",
+            "docs": [
+              "What the window has paid so far, this entry included."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paid_total",
+            "docs": [
+              "What the terms have paid all time, this entry included."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pot_after",
+            "docs": [
+              "The pot after the step (every entry and the bounty paid)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScriptStepped",
+      "docs": [
+        "A script step (`script_step`): what the creator's holdings held before and after the script ran",
+        "(bridged SOL and the token), the bounty paid from the pot, and the pot after."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol_before",
+            "docs": [
+              "The creator's bridged SOL, lamports, before and after the script (before the bounty)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sol_after",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_before",
+            "docs": [
+              "The creator's tokens, before and after the script."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "tokens_after",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "docs": [
+              "Paid to the sender from the pot (`SCRIPT_BOUNTY`, or nothing when the pot holds less)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pot_after",
+            "docs": [
+              "The pot after the step, the bounty paid."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScriptWalletPayout",
+      "docs": [
+        "A script paid a wallet as SOL (a wallet payout, `PayoutAnswer` version 2), within its terms."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "to",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "tag",
+            "type": "u32"
+          },
+          {
+            "name": "window_paid",
+            "docs": [
+              "What the window has paid so far, this entry included."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paid_total",
+            "docs": [
+              "What the terms have paid all time, this entry included."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pot_after",
+            "docs": [
+              "The pot after the step (every entry and the bounty paid)."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -5831,6 +9981,303 @@
       }
     },
     {
+      "name": "Snowball",
+      "docs": [
+        "A Snowball's market maker at `PDA([\"snowball\", mint])` (2026-10-12): its terms, fixed at",
+        "`create_snowball`, its reference price and the tokens it holds. Its SOL is the companion's pot",
+        "(`Companion.pending_pot`, `pot_bps` of every fee claim), in the creator's bridged-SOL holding;",
+        "its tokens are in the creator's token holding beside any dev bag, counted here so a sell never",
+        "touches the dev bag."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "buy_step_bps",
+            "docs": [
+              "A drop of this much from the reference price triggers a buy."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sell_step_bps",
+            "docs": [
+              "A rise of this much from the reference price triggers a sell."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "buy_bps",
+            "docs": [
+              "The share of the pot a buy spends."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sell_bps",
+            "docs": [
+              "The share of the tokens it holds a sell sells."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "docs": [
+              "The least time between two steps that trade or follow (10 seconds to a day)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "max_trade",
+            "docs": [
+              "The most one trade moves, lamports (a sell: the SOL value of what it sells)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pool_bps",
+            "docs": [
+              "The most one trade moves as a share of the pool's SOL side, real and virtual (0.25% to 10%)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "flat_trades",
+            "docs": [
+              "Trade every interval even when the price is within its steps, on the side that rebalances what",
+              "it holds (the pot keeps cycling); without it, it waits for a step."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "reference_price",
+            "docs": [
+              "The price the next trade is measured from (quote per base unit times `PRICE_SCALE`): the",
+              "opening price until the first step, then the price each trade left, or the price a follow",
+              "found. Zero until the first step."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "last_at",
+            "docs": [
+              "When it last traded or followed."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "tokens_held",
+            "docs": [
+              "Tokens it holds (bought and not sold yet)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buys",
+            "docs": [
+              "Running totals."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sells",
+            "type": "u64"
+          },
+          {
+            "name": "sol_spent",
+            "type": "u64"
+          },
+          {
+            "name": "sol_received",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_bought",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_sold",
+            "type": "u64"
+          },
+          {
+            "name": "bounties_total",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SnowballCreated",
+      "docs": [
+        "A Snowball made for a companion (`create_snowball`, before the launch)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pot_bps",
+            "type": "u16"
+          },
+          {
+            "name": "buy_step_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sell_step_bps",
+            "type": "u16"
+          },
+          {
+            "name": "buy_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sell_bps",
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "type": "i64"
+          },
+          {
+            "name": "max_trade",
+            "type": "u64"
+          },
+          {
+            "name": "pool_bps",
+            "type": "u16"
+          },
+          {
+            "name": "flat_trades",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SnowballFollowed",
+      "docs": [
+        "A Snowball that could not trade on the side the price called for (nothing left to spend or to",
+        "sell): its reference follows the price, so it stays centred on the market."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "reference_before",
+            "type": "u128"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SnowballTraded",
+      "docs": [
+        "A Snowball trade on the token's pool: `side` 1 a buy (on a dip), 0 a sell (on a rise)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "on_step",
+            "docs": [
+              "A step triggered it (a drop or a rise); false for a flat trade."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "sol",
+            "docs": [
+              "SOL spent (a buy) or received (a sell), lamports, the bounty not counted."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "tokens",
+            "docs": [
+              "Tokens bought or sold."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "price_before",
+            "docs": [
+              "The pool's price before and after (the new reference)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "price_after",
+            "type": "u128"
+          },
+          {
+            "name": "pot_after",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_after",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "Split",
       "docs": [
         "What every creator fee claim pays for, in basis points summing to 10,000."
@@ -5894,6 +10341,373 @@
           },
           {
             "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StrategyArgs",
+      "docs": [
+        "The settings of a strategy game, beside `CreateGameArgs`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "strategy",
+            "docs": [
+              "The strategy program."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "budget_bps",
+            "docs": [
+              "The most of the unlocked pot a period may pay (1 to 5,000 basis points)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_share_bps",
+            "docs": [
+              "The most one holder gets of a period's budget (1 to 2,500 basis points)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_per_tx",
+            "docs": [
+              "The most candidates one payment takes (1 to 4)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "plan_cu_max",
+            "docs": [
+              "The most compute `plan` (to 150,000) and `entitle` (to 60,000) may use."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "entitle_cu_max",
+            "type": "u32"
+          },
+          {
+            "name": "min_weight",
+            "docs": [
+              "The least weight that may be paid (at least 1)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StrategyPaid",
+      "docs": [
+        "`pay_strategy`: the candidates paid, in one unwrap of the pot."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "period",
+            "type": "u32"
+          },
+          {
+            "name": "payments",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "StrategyPayment"
+                }
+              }
+            }
+          },
+          {
+            "name": "bounty",
+            "docs": [
+              "The sender's bounties, in all."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "epoch_paid",
+            "docs": [
+              "What the period has paid so far (bounties included)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_pot",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StrategyPayment",
+      "docs": [
+        "One payment of a strategy period."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Paid to the owner as SOL (the entitlement less the sender's bounty)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StrategySet",
+      "docs": [
+        "`create_strategy_game`: a strategy game's terms (with `GameCreated`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "class",
+            "docs": [
+              "`strategy_class`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "budget_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_per_tx",
+            "type": "u8"
+          },
+          {
+            "name": "plan_cu_max",
+            "type": "u32"
+          },
+          {
+            "name": "entitle_cu_max",
+            "type": "u32"
+          },
+          {
+            "name": "min_weight",
+            "type": "u64"
+          },
+          {
+            "name": "extras",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "audited",
+            "docs": [
+              "The terms then: audited only if both the ticket hook and the strategy are, the lower cap",
+              "(0: none)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "pot_cap",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StrategyTerms",
+      "docs": [
+        "`PDA([\"strategy\", mint])`: a strategy game's terms (phase 3a, `docs/phase3a.md` §4.2), fixed at",
+        "`create_strategy_game`, beside the `Game` (whose period fields are a streak's: `round` the period",
+        "open for payments, `total` its tickets, `prize` its budget, `epoch_paid` what it has paid,",
+        "`status` `Revealed` while it is open)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "docs": [
+              "The strategy program, asked `plan` and `entitle`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status_bump",
+            "docs": [
+              "Bump of the strategy's `[\"hook-status\", strategy]` (it need not exist)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "extras",
+            "docs": [
+              "The extra accounts the strategy sees after the prefix (its registry, resolved when the game",
+              "was made), each owned by the strategy: the first `n_extras`."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                2
+              ]
+            }
+          },
+          {
+            "name": "n_extras",
+            "type": "u8"
+          },
+          {
+            "name": "budget_bps",
+            "docs": [
+              "The most of the unlocked pot a period may pay (1 to `MAX_STRATEGY_BUDGET_BPS`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_share_bps",
+            "docs": [
+              "The most one holder gets of a period's budget (1 to `MAX_STRATEGY_SHARE_BPS`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_per_tx",
+            "docs": [
+              "The most candidates a payment takes (1 to `MAX_STRATEGY_PER_TX`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "plan_cu_max",
+            "docs": [
+              "The most compute `plan` and `entitle` may use (to `MAX_PLAN_CU`, `MAX_ENTITLE_CU`)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "entitle_cu_max",
+            "type": "u32"
+          },
+          {
+            "name": "periods_planned",
+            "docs": [
+              "Running totals."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "paid_total",
+            "type": "u64"
+          },
+          {
+            "name": "last_plan_at",
+            "type": "i64"
+          },
+          {
+            "name": "paid_at_active",
+            "docs": [
+              "`paid_total` when the game last counted as active (`settled_at` moved): it counts again",
+              "once `STRATEGY_ACTIVE_BPS` of the pot has been paid since, over however many periods."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "audit_ok",
+            "docs": [
+              "The strategy's audit, as last checked against its code: whether it held, and the deploy",
+              "slot of the code it held for (a plan recomputes the code's hash only once the slot moved)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "audit_slot",
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                15
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "WalletPayoutsAllowed",
+      "docs": [
+        "A script companion's launcher allowed its script to pay wallets (`allow_wallet_payouts`, before",
+        "the launch)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "program",
             "type": "pubkey"
           }
         ]

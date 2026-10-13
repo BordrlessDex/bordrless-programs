@@ -228,6 +228,7 @@ impl Env {
             ("hook_vault", hook_vault::ID),
             ("loss_cover_hook", loss_cover_hook::ID),
             ("loss_cover_script", loss_cover_script::ID),
+            ("bordrless_router", bordrless_router::ID),
         ];
         for (name, id) in programs {
             svm.add_program(id, bytes_of(name))
