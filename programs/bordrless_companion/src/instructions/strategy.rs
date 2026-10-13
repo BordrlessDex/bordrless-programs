@@ -132,7 +132,10 @@ fn check_strategy_args(args: &CreateGameArgs, s: &StrategyArgs) -> Result<()> {
             && args.prize_bps == 0
             && args.max_attempts == 0
             && bordrless_game::valid_round_secs(args.round_secs)
-            && (MIN_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
+            // Periods of an hour or more (owner decision 4) and windows of five minutes or more,
+            // as before five-minute lottery rounds (`MIN_EPOCH_SECS`).
+            && args.round_secs >= MIN_EPOCH_SECS
+            && (MIN_EPOCH_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
             && u64::from(args.claim_window_secs) * u64::from(CLAIMS_PER_ROUND)
                 <= u64::from(args.round_secs),
         CompanionError::BadGame
@@ -294,7 +297,11 @@ fn audit_holds<'a, 'info>(
 /// lifts its cap only while it holds for the code that runs (`audit_holds`): its hash recorded
 /// (`set_hook_status_v2`; a v1 audit counts as none), the strategy immutable or Bordrless-managed,
 /// and its code that hash.
-fn read_strategy_terms(info: &AccountInfo, strategy: &Pubkey, audit_holds: bool) -> Result<HookTerms> {
+fn read_strategy_terms(
+    info: &AccountInfo,
+    strategy: &Pubkey,
+    audit_holds: bool,
+) -> Result<HookTerms> {
     let terms = read_hook_terms(info, strategy)?;
     if terms.audited && !audit_holds {
         return Ok(HookTerms {
@@ -361,8 +368,11 @@ pub fn process_create_strategy_game<'info>(
 ) -> Result<()> {
     let c = &ctx.accounts.companion;
     require!(!c.launched, CompanionError::AlreadyLaunched);
-    require!(!c.is_game(), CompanionError::BadGame);
-    require!(args.kind == GameKind::Strategy, CompanionError::WrongGameKind);
+    require!(!c.is_game() && c.is_classic(), CompanionError::BadGame);
+    require!(
+        args.kind == GameKind::Strategy,
+        CompanionError::WrongGameKind
+    );
     require!(
         args.pot_bps > 0 && args.split.valid_with_pot(args.pot_bps),
         CompanionError::BadSplit
@@ -1070,10 +1080,7 @@ pub fn process_pay_strategy<'info>(
     }
     let remaining = ctx.remaining_accounts;
     let n = usize::from(n);
-    require!(
-        remaining.len() >= 3 * n,
-        CompanionError::MissingAccount
-    );
+    require!(remaining.len() >= 3 * n, CompanionError::MissingAccount);
     let candidates = &remaining[remaining.len() - 3 * n..];
     require!(class.is_some(), CompanionError::StrategyNotAccepted);
     let extras = extra_infos(&all, &ctx.accounts.terms)?
@@ -1148,7 +1155,12 @@ pub fn process_pay_strategy<'info>(
             continue;
         }
         let (receipt_key, receipt_bump) = Pubkey::find_program_address(
-            &[CLAIMED_SEED, game_key.as_ref(), &period_le, owner.key.as_ref()],
+            &[
+                CLAIMED_SEED,
+                game_key.as_ref(),
+                &period_le,
+                owner.key.as_ref(),
+            ],
             &crate::ID,
         );
         if *receipt.key != receipt_key {
@@ -1214,7 +1226,9 @@ pub fn process_pay_strategy<'info>(
             reject(CandidateReason::BelowRent, amount)?;
             continue;
         }
-        paid = paid.checked_add(amount).ok_or(CompanionError::MathOverflow)?;
+        paid = paid
+            .checked_add(amount)
+            .ok_or(CompanionError::MathOverflow)?;
         payments.push((i, amount, bounty, receipt_bump));
     }
     for (i, amount, bounty, receipt_bump) in &payments {
@@ -1301,7 +1315,12 @@ pub fn process_pay_strategy<'info>(
         // at least `STRATEGY_ACTIVE_BPS` of it since it last counted as active, over however many
         // periods. Dust payments every few weeks keep nothing alive.
         let since = t.paid_total.saturating_sub(t.paid_at_active);
-        if since >= bps_of(c.pending_pot.saturating_add(since), u64::from(STRATEGY_ACTIVE_BPS)) {
+        if since
+            >= bps_of(
+                c.pending_pot.saturating_add(since),
+                u64::from(STRATEGY_ACTIVE_BPS),
+            )
+        {
             g.settled_at = now;
             t.paid_at_active = t.paid_total;
         }

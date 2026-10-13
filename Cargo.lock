@@ -808,7 +808,11 @@ dependencies = [
  "hook-timelock",
  "hook-vault",
  "litesvm",
+ "loss-cover-hook",
+ "loss-cover-script",
  "lottery-hook",
+ "script-example",
+ "script-payouts",
  "solana-account",
  "solana-hash",
  "solana-keypair",
@@ -1913,6 +1917,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "loss-cover-hook"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-game",
+ "bordrless-hook",
+ "bordrless-launch",
+ "bordrless-strategy",
+ "bordrless-token",
+ "solana-security-txt",
+]
+
+[[package]]
+name = "loss-cover-script"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-companion",
+ "bordrless-game",
+ "bordrless-launch",
+ "bordrless-strategy",
+ "bordrless-token",
+ "loss-cover-hook",
+ "solana-security-txt",
+]
+
+[[package]]
 name = "lottery-hook"
 version = "0.1.0"
 dependencies = [
@@ -2310,6 +2341,25 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "script-example"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-launch",
+ "bordrless-token",
+]
+
+[[package]]
+name = "script-payouts"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bordrless-hook",
+ "bordrless-launch",
+ "bordrless-token",
+]
 
 [[package]]
 name = "sec1"

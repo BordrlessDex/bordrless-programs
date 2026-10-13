@@ -26,6 +26,8 @@ members = [
   "programs/hook_tester",
   "programs/hook_timelock",
   "programs/hook_vault",
+  "programs/loss_cover_hook",
+  "programs/loss_cover_script",
 ]
 
 # One set of program IDs on every cluster (generated 2026-10-07; the keypairs are kept off the repo,
@@ -44,6 +46,8 @@ half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
 lottery_hook = "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr"
 hook_tester = "9xrQXAxhbRRCVfE5E7DFnxYHESmy4hrtcKpSvZUNmiWM"
 bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
+loss_cover_hook = "6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr"
+loss_cover_script = "9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm"
 
 [programs.devnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
@@ -57,6 +61,8 @@ tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
 lottery_hook = "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr"
 bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
+loss_cover_hook = "6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr"
+loss_cover_script = "9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm"
 
 [programs.mainnet]
 bordrless_token = "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
@@ -70,6 +76,8 @@ tax_hook = "8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7"
 half_life = "53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8"
 lottery_hook = "HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr"
 bordrless_companion = "6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo"
+loss_cover_hook = "6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr"
+loss_cover_script = "9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm"
 
 [provider]
 cluster = "localnet"

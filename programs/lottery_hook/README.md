@@ -14,7 +14,7 @@ program only keeps the tickets: it never sees SOL, never refuses a transfer and 
 
 ## Tickets
 
-Rounds are `floor(unix_time / round_secs)`, with `round_secs` from an hour to 30 days, fixed when
+Rounds are `floor(unix_time / round_secs)`, with `round_secs` from 5 minutes to 30 days, fixed when
 the hook is prepared for the mint. Each round has a ticket space `[0, total)`. A holding's tickets
 are a range of it, `[start, start + weight)`, kept in the holding's 64 bytes of hook data:
 

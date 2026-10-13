@@ -1,0 +1,32 @@
+[package]
+name = "loss-cover-hook"
+description = "Bordrless Loss cover hook: a token hook that keeps each holding's average entry price, what it holds and the cover it was paid, so the Loss cover script can pay holders who are under water from the companion's pot. It never refuses a transfer, takes no cut and never sees SOL."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "loss_cover_hook"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-game/idl-build", "bordrless-hook/idl-build", "bordrless-strategy/idl-build", "bordrless-token/idl-build", "bordrless-launch/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["event-cpi"] }
+solana-security-txt = { workspace = true }
+bordrless-game = { path = "../../crates/bordrless-game" }
+bordrless-hook = { path = "../../crates/bordrless-hook" }
+bordrless-strategy = { path = "../../crates/bordrless-strategy" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

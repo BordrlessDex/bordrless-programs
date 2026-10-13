@@ -17,8 +17,16 @@
 //! (`retire`); a blocked hook's buyback that can't be spent is burned as SOL (`burn_stranded`): no
 //! pot is locked for ever, and none is ever paid to anyone but a winner.
 //!
-//! Layout: [`state`], [`instructions`] (create and launch, the steps, the game), [`invoke`] (how a
-//! step calls another program), [`oracle`], [`events`], [`error`], [`client`].
+//! Scripts (2026-10-12): a builder's own program may decide what a companion's pot does
+//! (`create_script`, `script_step`), once Bordrless has approved its code (`approve`, bound to the
+//! code's hash). The companion keeps custody and checks every step: the script spends the pot and
+//! nothing else set aside, never the dev bag nor the creator address's lamports. Any companion
+//! launch (a game's must be its game's) may also take a custom token hook, which every step that
+//! moves the token carries.
+//!
+//! Layout: [`state`], [`instructions`] (create and launch, the steps, the game, approvals and
+//! scripts), [`invoke`] (how a step calls another program), [`oracle`], [`events`], [`error`],
+//! [`client`].
 
 #![allow(unexpected_cfgs)]
 
@@ -235,5 +243,70 @@ pub mod bordrless_companion {
         n: u8,
     ) -> Result<()> {
         instructions::strategy::process_pay_strategy(ctx, period, n)
+    }
+
+    /// Snowball (2026-10-12): before the launch, the mint signing, the companion becomes a market
+    /// maker: the pot's part of every fee claim, the step, the trade sizes, the interval and the cap.
+    pub fn create_snowball(ctx: Context<CreateSnowball>, args: CreateSnowballArgs) -> Result<()> {
+        instructions::snowball::process_create_snowball(ctx, args)
+    }
+
+    /// Anyone: a Snowball's trade on its pool, a buy on a dip or a sell on a rise of its step from
+    /// the reference (or a follow of the price when that side has nothing to trade); pays a bounty.
+    pub fn snowball_step<'info>(ctx: Context<'info, SnowballStep<'info>>) -> Result<()> {
+        instructions::snowball::process_snowball_step(ctx)
+    }
+
+    // ---- Approvals and script companions (2026-10-12) ----
+
+    /// The protocol's upgrade authority or the script approver (`SCRIPT_APPROVER`): approves
+    /// `program`'s code (its hash recomputed here) as a
+    /// token hook (kind 0) or a companion script (kind 1), `author` its author (a script's earns
+    /// half the creator fees of the companions made with it). Only a program nobody but Bordrless
+    /// can change (immutable, Bordrless's keys, or a hook timelock); an upgrade voids it.
+    pub fn approve(
+        ctx: Context<Approve>,
+        program: Pubkey,
+        kind: u8,
+        code_hash: [u8; 32],
+        author: Pubkey,
+    ) -> Result<()> {
+        instructions::approval::process_approve(ctx, program, kind, code_hash, author)
+    }
+
+    /// The protocol's upgrade authority or the script approver: revokes `program`'s approval.
+    pub fn revoke_approval(ctx: Context<RevokeApproval>, program: Pubkey) -> Result<()> {
+        instructions::approval::process_revoke_approval(ctx, program)
+    }
+
+    /// Before the launch, the mint signing: the companion becomes a script companion, its pot's part
+    /// of every fee claim spent by a builder's program (the script: approved by Bordrless, or
+    /// immutable), whose
+    /// `companion_init` runs here. The remaining accounts are forwarded to it.
+    pub fn create_script<'info>(
+        ctx: Context<'info, CreateScript<'info>>,
+        args: CreateScriptArgs,
+    ) -> Result<()> {
+        instructions::script::process_create_script(ctx, args)
+    }
+
+    /// Anyone, once an interval: the script's `companion_step`, the creator address signing, then
+    /// the companion's checks (the pot spent and nothing else, the dev bag and the lamports kept,
+    /// custody unchanged); pays a bounty from the pot. The remaining accounts are forwarded to it.
+    /// A script may answer payouts in its return data (Loss cover, 2026-10-12): each entry is
+    /// checked against the script's payout terms, paid to the holding's owner as SOL and recorded
+    /// by the launch's hook (`record_payout`).
+    pub fn script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Result<()> {
+        instructions::script::process_script_step(ctx)
+    }
+
+    /// `create_script` with payout terms (Loss cover, 2026-10-12): the bounds the script's payouts
+    /// keep within, kept at `PDA(["payout-terms", mint])`, the payer paying its rent.
+    pub fn create_script_v2<'info>(
+        ctx: Context<'info, CreateScriptV2<'info>>,
+        args: CreateScriptArgs,
+        payout: PayoutTermsArgs,
+    ) -> Result<()> {
+        instructions::script::process_create_script_v2(ctx, args, payout)
     }
 }

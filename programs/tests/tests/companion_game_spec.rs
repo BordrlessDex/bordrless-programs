@@ -2018,9 +2018,11 @@ fn create_game_is_bounded_signed_by_the_mint_and_before_the_launch() {
     let good = game_args(&o);
     let bad: Vec<(&str, CreateGameArgs, CompanionError)> = vec![
         (
-            "round below an hour",
+            "round below 5 minutes",
             CreateGameArgs {
-                round_secs: 3_599,
+                round_secs: 299,
+                claim_window_secs: 60,
+                max_attempts: 1,
                 ..good.clone()
             },
             CompanionError::BadGame,
@@ -2074,12 +2076,22 @@ fn create_game_is_bounded_signed_by_the_mint_and_before_the_launch() {
             CompanionError::BadGame,
         ),
         (
-            "window below 5 min",
+            "window below a minute",
             CreateGameArgs {
-                claim_window_secs: 299,
+                claim_window_secs: 59,
                 ..good.clone()
             },
             CompanionError::BadGame,
+        ),
+        (
+            "round of 5 minutes, but not the header's",
+            CreateGameArgs {
+                round_secs: 300,
+                claim_window_secs: 60,
+                max_attempts: 2,
+                ..good.clone()
+            },
+            CompanionError::HookState,
         ),
         (
             "window above a day",
@@ -2359,12 +2371,14 @@ fn launch_accepts_only_the_games_hook() {
     let ix = launch_ix(&w, &launcher.pubkey(), &m, Some(good), "GAME");
     w.env.send_paid_by(&[ix], &launcher, &[&mint]).expect_fail();
 
-    // A companion without a game refuses the lottery hook.
+    // A companion without a game takes the lottery hook too (2026-10-12: any companion may launch
+    // with a custom hook), and runs no game.
     let (l2, mint2) = prepared(&mut w, o.round_secs, create_args(0));
     let ix = launch_ix(&w, &l2.pubkey(), &mint2.pubkey(), Some(good), "KIT");
-    w.env
-        .send_paid_by(&[ix], &l2, &[&mint2])
-        .expect_code(code(CompanionError::CustomHookUnsupported));
+    w.env.send_paid_by(&[ix], &l2, &[&mint2]).ok();
+    assert_eq!(w.launch(&mint2.pubkey()).custom_hook, Some(HOOK));
+    let c: Companion = w.env.read(&companion::companion_address(&mint2.pubkey()));
+    assert!(c.launched && !c.is_game());
 }
 
 // ------------------------------------------------------------------------------------------------

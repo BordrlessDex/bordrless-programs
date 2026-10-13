@@ -18,7 +18,7 @@ This page is the reference; `docs/companions.md` has the summary.
 
 ## In plain terms
 
-Part of every creator fee goes into a pot. Each round (an hour to 30 days), every holder's tokens
+Part of every creator fee goes into a pot. Each round (5 minutes to 30 days), every holder's tokens
 held since the round began are their tickets. Once the round is over, anyone can start a verifiable
 draw; the pot pays the holder of the drawn ticket in SOL, if they still hold their tokens. Nobody
 can take the pot: not the launcher, not the hook's author, not Bordrless. The most Bordrless can do
@@ -61,7 +61,7 @@ checking the account's owner (the hook) and its address. Integers are little-end
 |---|---|---|---|
 | 8 | `magic` | `[u8; 4]` | `BRG1` |
 | 12 | `mint` | `Pubkey` | |
-| 44 | `round_secs` | `u32` | Rounds are `floor(unix_time / round_secs)`; 1 hour to 30 days |
+| 44 | `round_secs` | `u32` | Rounds are `floor(unix_time / round_secs)`; 5 minutes to 30 days (`MIN_ROUND_SECS`, `MAX_ROUND_SECS`; the companion takes a streak's epochs and a strategy's periods from an hour) |
 | 48 | `round` | `u32` | The round of the last write |
 | 52 | `total` | `u64` | That round's ticket total |
 | 60 | `prev_round` | `u32` | The round before the last roll |
@@ -151,11 +151,12 @@ at `PDA(["game", mint])`: 486 bytes, 3,119,120 lamports of rent, paid by the lau
 - **`kind`**: `Lottery`.
 - **`split` and `pot_bps`**: the four parts sum to 10,000. There is no holders' part (a game coin
   runs its own hook, so it has no kit), and buyback limits are required.
-- **`round_secs`**: must match the hook's header, so `prepare` runs first, in the same setup
-  transaction.
+- **`round_secs`**: 5 minutes to 30 days; must match the hook's header, so `prepare` runs first,
+  in the same setup transaction.
 - **`min_pot`**: 0.1 to 1,000 SOL.
 - **`prize_bps`**: 10% to 100%.
-- **`claim_window_secs`**: 5 minutes to a day.
+- **`claim_window_secs`**: a minute to a day (a five-minute round takes two attempts of a minute,
+  or one of up to two and a half).
 - **`max_attempts`**: 1 to 16, with `window × attempts × 2 ≤ round_secs`.
 - **The hook** must be Bordrless's `lottery_hook`, or a hook the protocol has written a status for,
   and never a blocked one. A hook nobody vetted could refuse only the companion's own token moves
@@ -188,7 +189,7 @@ Every step is permissionless.
 
 | Step | When | Does | Pays its sender |
 |---|---|---|---|
-| `draw(round, slot)` | The round just ended, no draw in progress, and the pot ≥ `min_pot` (or the cap when lower; or 0.1 SOL once dormant) | Too late, after `last_draw` (10 minutes and a whole claim window before the claims end): rolls over (`Late`). Reads the round's total from the header (none: rolls over, `NoTickets` / `RoundForgotten`). When the pot can't pay for ORAO's request now (the breaker holding, ORAO's fee above the cap, its network state unreadable, the pot short): rolls over (`OracleUnpaid`), no seed committed. Else, in one instruction: commits the round's one seed, `sha256("bordrless-draw", mint, round, 0, slot, slot hash)`, from `slot`, one of the last 3 slots in the slot hashes sysvar; asks ORAO for it, the pot topping up `PDA(["oracle", mint])`, which pays and gets ORAO's refunds (or adopts, for free, a pending request ORAO already holds for the seed: v2 from anyone, or the deprecated v1); fixes the prize, `prize_bps` of the pot. A slot more than 3 slots old, or a seed ORAO already answered, is refused (`StaleSeed`) | `bounty_bps` of the top-up |
+| `draw(round, slot)` | The round just ended, no draw in progress, and the pot ≥ `min_pot` (or the cap when lower; or 0.1 SOL once dormant) | Too late, after `last_draw` (10 minutes, or a quarter of a round shorter than 40 minutes, and a whole claim window before the claims end): rolls over (`Late`). Reads the round's total from the header (none: rolls over, `NoTickets` / `RoundForgotten`). When the pot can't pay for ORAO's request now (the breaker holding, ORAO's fee above the cap, its network state unreadable, the pot short): rolls over (`OracleUnpaid`), no seed committed. Else, in one instruction: commits the round's one seed, `sha256("bordrless-draw", mint, round, 0, slot, slot hash)`, from `slot`, one of the last 3 slots in the slot hashes sysvar; asks ORAO for it, the pot topping up `PDA(["oracle", mint])`, which pays and gets ORAO's refunds (or adopts, for free, a pending request ORAO already holds for the seed: v2 from anyone, or the deprecated v1); fixes the prize, `prize_bps` of the pot. A slot more than 3 slots old, or a seed ORAO already answered, is refused (`StaleSeed`) | `bounty_bps` of the top-up |
 | `reveal` | ORAO answered, before the claims end (`round_end(r + 1)`) | Stores the randomness; the claim windows start | Nothing |
 | `claim_prize(k)` | Inside attempt `k`'s window, `[revealed_at + k·window, +window)`, cut at the claims' end | Pays the holding that holds ticket `draw_index(R, k, total)`, in SOL, to its owner | `bounty_bps` of the prize |
 | `expire` | No claim in any window (`NoClaim`); claims ended (`Late`, `OracleSilent`); ORAO's answer unreadable (`OracleUnreadable`) | Rolls the round over | Nothing |
@@ -225,6 +226,14 @@ Every step is permissionless.
     leaves its winner no time to claim, and only a sender racing every keeper would make it. ORAO's
     mainnet answer took up to 319 slots (about 2 minutes) in the 8 requests measured, so the 10
     minutes cover the slowest seen more than four times over.
+  - A round shorter than 40 minutes leaves a quarter of itself instead (`reveal_secs`): 75 s for a
+    five-minute round, whose draw is then due within 165 s of the round's end with one-minute
+    windows (75 s with the longest, two and a half minutes). Every round of 40 minutes or more,
+    and so every hourly or longer game, keeps the 10 minutes. 75 s is less than ORAO's slowest
+    answers measured, so a short round drawn late, or answered slowly, can roll over
+    (`OracleSilent` when ORAO's answer lands after the claims end, or attempts cut short at the
+    claims' end): a keeper should draw a short round within seconds of its end and reveal and
+    claim at once.
   - Before this (the final audit and its residuals), a seed was committed by `draw` and requested
     by a later `request_randomness`. While the pot could not pay, a holder who previewed each
     answer paid ORAO only for the seeds it won; and a draw committed just before the last request
@@ -402,7 +411,9 @@ and failing whenever it is stale.
   (`decodeSeedSlot`, `fetchSeedSlot`: the slot hashes sysvar's newest entry).
 
 A keeper's loop, each round (the monorepo's `apps/server/src/keeper/games.ts` runs it every two
-minutes for every launched game companion):
+minutes for every launched game companion; a five-minute round needs a loop of seconds instead: its
+draw is due within 75 to 165 s of the round's end, and a one-minute claim window closes before a
+two-minute pass comes round again):
 
 1. `enter` every holder not written this round, late in the round (its last tenth, at least 15
    minutes before it ends): a holding entered early and then sold from adds dead tickets.

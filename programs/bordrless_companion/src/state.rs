@@ -97,7 +97,9 @@ pub struct Companion {
     /// never trims it (`steps::enforce_terms`), and only a block moves it to the buyback. Zero for
     /// every other kind.
     pub pot_locked: u64,
-    pub reserved: [u8; 1],
+    /// `MODE_CLASSIC`, `MODE_SNOWBALL` or `MODE_SCRIPT` (2026-10-12), the last byte of what was
+    /// `reserved`: zero, classic, in every companion made before.
+    pub mode: u8,
 }
 
 impl Companion {
@@ -114,6 +116,28 @@ impl Companion {
     /// Whether it runs a game (`create_game`).
     pub fn is_game(&self) -> bool {
         self.game_hook != Pubkey::default()
+    }
+
+    /// Whether it is a Snowball (`create_snowball`): its pot trades the token.
+    pub fn is_snowball(&self) -> bool {
+        self.mode == MODE_SNOWBALL
+    }
+
+    /// Whether it is a script companion (`create_script`): an approved builder's program decides
+    /// what its pot does.
+    pub fn is_script(&self) -> bool {
+        self.mode == MODE_SCRIPT
+    }
+
+    /// Whether it is a classic companion (a game's included): neither a Snowball nor a script.
+    pub fn is_classic(&self) -> bool {
+        self.mode == MODE_CLASSIC
+    }
+
+    /// Whether its pot is its own, with no game hook to cap or block it: a Snowball's or a
+    /// script's.
+    pub fn has_own_pot(&self) -> bool {
+        self.is_snowball() || self.is_script()
     }
 
     /// Everything set aside in the creator's holding of bridged SOL.
@@ -376,13 +400,13 @@ impl Game {
         claims_end(self.round, self.round_secs)
     }
 
-    /// The last moment a draw of `round` may be made: `REVEAL_SECS` for ORAO's answer and the
-    /// reveal, then a whole claim window, before its claims end. Later, the round rolls over
-    /// (`Late`).
+    /// The last moment a draw of `round` may be made: [`reveal_secs`] for ORAO's answer and the
+    /// reveal (`REVEAL_SECS` for a round of 40 minutes or more, a quarter of a shorter one), then a
+    /// whole claim window, before its claims end. Later, the round rolls over (`Late`).
     pub fn last_draw(&self, round: u32) -> i64 {
         claims_end(round, self.round_secs)
             .saturating_sub(i64::from(self.claim_window_secs))
-            .saturating_sub(REVEAL_SECS)
+            .saturating_sub(reveal_secs(self.round_secs))
     }
 
     /// How long the pot may pay no prize before the game is dormant: `DORMANT_SECS`, or
@@ -686,6 +710,225 @@ impl ShareReceipt {
     }
 }
 
+/// A Snowball's market maker at `PDA(["snowball", mint])` (2026-10-12): its terms, fixed at
+/// `create_snowball`, its reference price and the tokens it holds. Its SOL is the companion's pot
+/// (`Companion.pending_pot`, `pot_bps` of every fee claim), in the creator's bridged-SOL holding;
+/// its tokens are in the creator's token holding beside any dev bag, counted here so a sell never
+/// touches the dev bag.
+#[account]
+#[derive(InitSpace)]
+pub struct Snowball {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// A drop of this much from the reference price triggers a buy.
+    pub buy_step_bps: u16,
+    /// A rise of this much from the reference price triggers a sell.
+    pub sell_step_bps: u16,
+    /// The share of the pot a buy spends.
+    pub buy_bps: u16,
+    /// The share of the tokens it holds a sell sells.
+    pub sell_bps: u16,
+    /// The least time between two steps that trade or follow (10 seconds to a day).
+    pub interval: i64,
+    /// The most one trade moves, lamports (a sell: the SOL value of what it sells).
+    pub max_trade: u64,
+    /// The most one trade moves as a share of the pool's SOL side, real and virtual (0.25% to 10%).
+    pub pool_bps: u16,
+    /// Trade every interval even when the price is within its steps, on the side that rebalances what
+    /// it holds (the pot keeps cycling); without it, it waits for a step.
+    pub flat_trades: bool,
+    /// The price the next trade is measured from (quote per base unit times `PRICE_SCALE`): the
+    /// opening price until the first step, then the price each trade left, or the price a follow
+    /// found. Zero until the first step.
+    pub reference_price: u128,
+    /// When it last traded or followed.
+    pub last_at: i64,
+    /// Tokens it holds (bought and not sold yet).
+    pub tokens_held: u64,
+    /// Running totals.
+    pub buys: u64,
+    pub sells: u64,
+    pub sol_spent: u64,
+    pub sol_received: u64,
+    pub tokens_bought: u64,
+    pub tokens_sold: u64,
+    pub bounties_total: u64,
+    pub created_at: i64,
+    pub reserved: [u8; 64],
+}
+
+impl Snowball {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[SNOWBALL_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// The price a buy waits for: `step_bps` below `reference`.
+    pub fn buy_below(reference: u128, step_bps: u16) -> u128 {
+        reference * u128::from(BPS - u64::from(step_bps)) / u128::from(BPS)
+    }
+
+    /// The price a sell waits for: `step_bps` above `reference`.
+    pub fn sell_above(reference: u128, step_bps: u16) -> u128 {
+        reference * u128::from(BPS + u64::from(step_bps)) / u128::from(BPS)
+    }
+}
+
+/// Bordrless's approval of a program's code (2026-10-12), `PDA(["approval", program])`, written only
+/// by the companion program's upgrade authority or the script approver (`SCRIPT_APPROVER`;
+/// `approve`, `revoke_approval`). It is bound to the
+/// code: `approve` hashes the program's code on chain and refuses any other hash, and an approval
+/// counts only while the program still runs that code (`approval::approved`: the ProgramData's slot
+/// unchanged since, or the code hashed again). Upgrading an approved program voids its approval
+/// until it is approved again. Only a program nobody but Bordrless can change is approved:
+/// immutable, upgradeable only by Bordrless's keys, or behind a hook timelock.
+#[account]
+#[derive(InitSpace)]
+pub struct Approval {
+    pub version: u8,
+    pub bump: u8,
+    pub program: Pubkey,
+    /// `APPROVAL_KIND_TOKEN_HOOK` (0) or `APPROVAL_KIND_SCRIPT` (1).
+    pub kind: u8,
+    /// `solana-verify`'s executable hash of the approved code.
+    pub code_hash: [u8; 32],
+    pub approved_at: i64,
+    pub revoked: bool,
+    /// Who last wrote it (the upgrade authority or the script approver that approved or revoked
+    /// it).
+    pub updated_by: Pubkey,
+    /// The program's ProgramData slot when approved: while it is unchanged the code is the approved
+    /// code (the loader refuses a second deploy, upgrade or extension in one slot), so a check needs
+    /// no hash; once it moved (an upgrade, or anyone's `ExtendProgram`) the code is hashed again.
+    pub programdata_slot: u64,
+    /// Who wrote the program: a script's author earns `AUTHOR_SHARE_BPS` of the creator fees of
+    /// every script companion made with it afterwards (`create_script` copies it into the `Script`).
+    /// The default key: no author. (From what was `reserved`.)
+    pub author: Pubkey,
+    pub reserved: [u8; 24],
+}
+
+impl Approval {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(program: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[APPROVAL_SEED, program.as_ref()], &crate::ID)
+    }
+}
+
+/// A script companion's script (2026-10-12), `PDA(["script", mint])`, fixed at `create_script`: the
+/// program that decides what the pot does, and how often a step may run. The pot itself is
+/// `Companion.pending_pot` (bridged SOL in the creator's holding); what the script buys stays in the
+/// creator's token holding beside any dev bag.
+#[account]
+#[derive(InitSpace)]
+pub struct Script {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// The script: a program Bordrless approved (`APPROVAL_KIND_SCRIPT`), called with the creator
+    /// address signing.
+    pub program: Pubkey,
+    /// The least time between two steps (10 seconds to a day).
+    pub interval: i64,
+    /// When it last stepped (0: never).
+    pub last_at: i64,
+    /// Steps run so far.
+    pub steps: u64,
+    pub created_at: i64,
+    /// The script's author, copied from its approval at `create_script`: paid `AUTHOR_SHARE_BPS` of
+    /// what every fee claim takes from the launch, unless they are the launch's beneficiary. The
+    /// default key: no author (an approval naming nobody, or an immutable script, which needs no
+    /// approval). (From what was `reserved`.)
+    pub author: Pubkey,
+    /// What the author has been paid so far (lamports).
+    pub author_paid: u64,
+    /// The size of the script's state, `PDA(["script-state", mint])`, which `create_script` made
+    /// (zeroed, owned by the script) and every call hands the script; 0: no state, the system
+    /// program's id in its place. (From what was `reserved`.)
+    pub state_len: u32,
+    pub reserved: [u8; 20],
+}
+
+impl Script {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[SCRIPT_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// The script's state: `PDA(["script-state", mint])`, owned by the script once made.
+    pub fn state_address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[SCRIPT_STATE_SEED, mint.as_ref()], &crate::ID)
+    }
+}
+
+/// The bounds a script companion's payouts keep within (Loss cover, 2026-10-12),
+/// `PDA(["payout-terms", mint])`, 128 bytes, made by `create_script_v2` with the script. A script
+/// made with `create_script` has none, and its answers pay nobody (`PayoutsOff`). The counters are
+/// the companion's: a step writes them after it paid.
+#[account]
+#[derive(InitSpace)]
+pub struct PayoutTerms {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// The most one step pays, of the pot at the step's start (1 to 10,000 basis points).
+    pub step_bps: u16,
+    /// The most one holding gets of a step's budget (1 to 10,000).
+    pub holding_bps: u16,
+    /// The most a window pays, of the pot as it stood at the window's first step (1 to 10,000).
+    pub window_bps: u16,
+    /// The window: `floor(now / window_secs)` (10 seconds to a day: a round, or a day).
+    pub window_secs: u32,
+    /// The window the counters are for (its first second), the pot at its first step after the
+    /// script ran, and what it has paid.
+    pub window_start: i64,
+    pub window_pot: u64,
+    pub window_paid: u64,
+    /// Lamports paid to holders all time, entries recorded all time (touches included), when.
+    pub paid_total: u64,
+    pub payouts: u64,
+    pub last_paid_at: i64,
+    pub reserved: [u8; 28],
+}
+
+impl PayoutTerms {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[PAYOUT_TERMS_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// The first second of the window `now` falls in.
+    pub fn window_start_at(&self, now: i64) -> i64 {
+        let secs = i64::from(self.window_secs.max(1));
+        now.div_euclid(secs).saturating_mul(secs)
+    }
+}
+
+/// One entry of a script's payout answer: `account` an index into the step's remaining accounts
+/// (a holding of the launch's mint), `lamports` paid to its owner as SOL (0: a touch, recorded and
+/// not paid), `tag` the script's, passed to the hook's `record_payout` untouched.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PayoutEntry {
+    pub account: u8,
+    pub lamports: u64,
+    pub tag: u32,
+}
+
+/// What a script's `companion_step` may return: its payouts, which the companion checks against
+/// the terms, pays and records (`1 + 4 + 13 * n` bytes of Borsh, `n` at most
+/// `MAX_PAYOUTS_PER_STEP`). No return data, or empty, is no answer: today's step.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct PayoutAnswer {
+    /// `PAYOUT_ANSWER_VERSION`.
+    pub version: u8,
+    pub entries: Vec<PayoutEntry>,
+}
+
 /// The pool's price: its quote side over its base side, real and virtual, times `PRICE_SCALE`.
 pub fn spot_price(
     quote_reserve: u64,
@@ -763,7 +1006,7 @@ mod tests {
             stranded_burned_at: 0,
             game_kind: GameKind::Lottery,
             pot_locked: 0,
-            reserved: [0; 1],
+            mode: MODE_CLASSIC,
         }
     }
 
@@ -866,6 +1109,38 @@ mod tests {
         assert_eq!(after(0, 1, 2_000, 1_000), 2_000);
         // No overflow at the extremes.
         assert_eq!(after(u64::MAX / 2, u64::MAX / 2, 0, i64::MAX), i64::MAX);
+    }
+
+    #[test]
+    fn approvals_and_scripts_have_fixed_sizes_and_modes() {
+        // The author (and a script's author's running total) came from the reserved bytes: the
+        // sizes stay.
+        assert_eq!(
+            Approval::LEN,
+            8 + 1 + 1 + 32 + 1 + 32 + 8 + 1 + 32 + 8 + 32 + 24
+        );
+        assert_eq!(Approval::LEN, 180);
+        assert_eq!(
+            Script::LEN,
+            8 + 1 + 1 + 32 + 32 + 8 + 8 + 8 + 8 + 32 + 8 + 4 + 20
+        );
+        assert_eq!(Script::LEN, 170);
+        let mut c = companion();
+        assert!(c.is_classic() && !c.is_script() && !c.has_own_pot());
+        c.mode = MODE_SCRIPT;
+        assert!(c.is_script() && !c.is_classic() && !c.is_snowball() && c.has_own_pot());
+        c.mode = MODE_SNOWBALL;
+        assert!(c.is_snowball() && !c.is_script() && c.has_own_pot());
+        // The mode is the companion's last byte.
+        let mut data = Vec::new();
+        Companion {
+            mode: MODE_SCRIPT,
+            ..companion()
+        }
+        .try_serialize(&mut data)
+        .unwrap();
+        assert_eq!(data.len(), Companion::LEN);
+        assert_eq!(data[Companion::LEN - 1], MODE_SCRIPT);
     }
 
     #[test]
@@ -1019,6 +1294,108 @@ mod tests {
         assert_eq!(kind, [2, 1]);
         // A receipt is small: its rent is about 0.0015 SOL.
         assert_eq!(ShareReceipt::LEN, 8 + 1 + 1 + 32 + 4 + 32 + 32 + 8 + 8);
+    }
+
+    /// A lottery game with `round_secs` and its claim windows, nothing drawn yet.
+    fn timing_game(round_secs: u32, claim_window_secs: u32, max_attempts: u8) -> Game {
+        Game {
+            version: 1,
+            bump: 0,
+            kind: GameKind::Lottery,
+            mint: Pubkey::default(),
+            hook: Pubkey::default(),
+            state_bump: 0,
+            status_bump: 0,
+            oracle_bump: 0,
+            round_secs,
+            min_pot: MIN_MIN_POT,
+            prize_bps: 10_000,
+            claim_window_secs,
+            max_attempts,
+            created_at: 0,
+            status: DrawStatus::Idle,
+            next_round: 0,
+            round: 0,
+            total: 0,
+            n: 0,
+            seed: [0; 32],
+            request: Pubkey::default(),
+            committed_at: 0,
+            requested_at: 0,
+            randomness: [0; 64],
+            revealed_at: 0,
+            prize: 0,
+            draws: 0,
+            prizes_paid: 0,
+            prizes_total: 0,
+            rollovers: 0,
+            oracle_total: 0,
+            last_winner: Pubkey::default(),
+            settled_at: 0,
+            paid_seed: [0; 32],
+            paid_round: 0,
+            paid_streak: 0,
+            timer_secs: 0,
+            min_tokens: 0,
+            paid_buys: 0,
+            min_streak_secs: 0,
+            min_weight: 0,
+            epoch_paid: 0,
+            hook_audit_slot: 0,
+            hook_audit_ok: false,
+            reserved: [0; 34],
+        }
+    }
+
+    #[test]
+    fn last_draw_keeps_ten_minutes_from_an_hour_and_a_quarter_of_a_shorter_round() {
+        // An hourly game, as every game before five-minute rounds: exactly as before, ten minutes
+        // and a window before the claims end with the round after the drawn one.
+        let hourly = timing_game(3_600, 600, 3);
+        assert_eq!(hourly.last_draw(500_000), 1_800_006_000);
+        assert_eq!(
+            hourly.last_draw(500_000),
+            claims_end(500_000, 3_600) - 600 - REVEAL_SECS
+        );
+        // The SDK vectors' sample game (`companion-games.json`, `clocks.lastDraw`).
+        let six_hours = timing_game(21_600, 600, 8);
+        assert_eq!(six_hours.last_draw(82_870), 1_790_034_000);
+        // Every round of an hour or more keeps 600 s, whatever its window.
+        for (secs, window) in [
+            (3_600u32, 60u32),
+            (3_600, 300),
+            (7_200, 3_600),
+            (86_400, 86_400),
+            (30 * 86_400, 600),
+        ] {
+            let g = timing_game(secs, window, 1);
+            assert_eq!(
+                g.last_draw(1_000),
+                claims_end(1_000, secs) - i64::from(window) - 600,
+                "{secs}"
+            );
+        }
+        // A five-minute round with one-minute windows: the claims of round 6,000,000 (it ends at
+        // 1,800,000,300) end with the next one, at 1,800,000,600; the draw leaves a minute and the
+        // reveal, 75 s, before that: 165 s into the round after its own.
+        let short = timing_game(300, 60, 2);
+        assert_eq!(reveal_secs(300), 75);
+        assert_eq!(claims_end(6_000_000, 300), 1_800_000_600);
+        assert_eq!(short.last_draw(6_000_000), 1_800_000_465);
+        assert_eq!(
+            short.last_draw(6_000_000) - bordrless_game::round_end(6_000_000, 300),
+            165
+        );
+        // Its longest window (two and a half minutes, one attempt) still leaves 75 s to draw.
+        let widest = timing_game(300, 150, 1);
+        assert_eq!(widest.last_draw(6_000_000), 1_800_000_375);
+        // A draw at the very last moment, revealed when the reveal's margin runs out, keeps a whole
+        // window before the claims end.
+        let mut drawn = short.clone();
+        drawn.round = 6_000_000;
+        drawn.revealed_at = short.last_draw(6_000_000) + reveal_secs(300);
+        assert_eq!(drawn.attempt_closes(0), Some(drawn.revealed_at + 60));
+        assert_eq!(drawn.attempt_closes(0), Some(drawn.claims_end()));
     }
 
     #[test]

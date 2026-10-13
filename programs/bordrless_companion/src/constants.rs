@@ -80,9 +80,17 @@ pub const MIN_MIN_POT: u64 = 100_000_000;
 pub const MAX_MIN_POT: u64 = 1_000_000_000_000;
 /// One draw pays at least 10% of the pot (so a prize is never dust), at most all of it.
 pub const MIN_PRIZE_BPS: u16 = 1_000;
-/// Each claim attempt is open from five minutes to a day.
-pub const MIN_CLAIM_WINDOW: u32 = 300;
+/// Each claim attempt of a lottery is open from a minute to a day (a five-minute round takes two
+/// attempts of a minute, or one of up to two and a half).
+pub const MIN_CLAIM_WINDOW: u32 = 60;
 pub const MAX_CLAIM_WINDOW: u32 = 86_400;
+/// A streak's epochs and a strategy's periods last an hour or more, and the least time they leave
+/// for claims (their claim window) is five minutes or more, as before short lottery rounds: a
+/// strategy pays at most one budget a period (`docs/phase3a.md`, owner decision 4), and a streak's
+/// holders claim each epoch's shares themselves. Only a lottery's rounds go down to
+/// `bordrless_game::MIN_ROUND_SECS` and its windows to `MIN_CLAIM_WINDOW`.
+pub const MIN_EPOCH_SECS: u32 = 3_600;
+pub const MIN_EPOCH_CLAIM_WINDOW: u32 = 300;
 /// A draw tries at most this many tickets before the round rolls over.
 pub const MAX_ATTEMPTS: u8 = 16;
 /// A draw's attempts take at most this share of a round (`max_attempts * claim_window_secs <=
@@ -96,8 +104,24 @@ pub const CLAIMS_PER_ROUND: u32 = 2;
 /// claim window (`Game::last_draw`): a draw of round `r` lands
 /// at least this long and a whole claim window before its claims end with `r + 1`, or the round
 /// rolls over (`Late`). So a draw is never made in its last moments, where its winner could hardly
-/// claim and only a sender racing every keeper would draw.
+/// claim and only a sender racing every keeper would draw. A round shorter than 40 minutes leaves
+/// a quarter of itself instead ([`reveal_secs`]).
 pub const REVEAL_SECS: i64 = 600;
+
+/// What a draw of a round of `round_secs` leaves for ORAO's answer and its reveal before its last
+/// claim window (`Game::last_draw`): `REVEAL_SECS`, or a quarter of the round when that is less.
+/// Every round of 40 minutes or more (so every round of an hour or more, all a game could have
+/// before five-minute rounds) keeps exactly `REVEAL_SECS`; a five-minute round leaves 75 s. A
+/// quarter is under half a round, the most a draw's attempts take (`CLAIMS_PER_ROUND`), so a draw
+/// made early in the round after its own is never late, whatever its windows.
+pub const fn reveal_secs(round_secs: u32) -> i64 {
+    let quarter = (round_secs / 4) as i64;
+    if quarter < REVEAL_SECS {
+        quarter
+    } else {
+        REVEAL_SECS
+    }
+}
 /// A game whose pot has paid no prize for this long is dormant (`Game::dormant_secs`: 30 days, or
 /// `DORMANT_ROUNDS` rounds when longer, counted from the launch or the pot's last prize or
 /// retirement). A dormant pot is drawn from `MIN_MIN_POT` instead of the game's `min_pot`, so a pot
@@ -222,6 +246,12 @@ pub const ATTESTATION_VERSION: u8 = 1;
 /// the simulator and the review (owner decision 8). It is not Studio's upgrade key.
 pub const STUDIO_ATTESTER: Pubkey =
     Pubkey::from_str_const("3uGLsTJNse7vE3pgRkAf6aKKBoKmCyPUcNNu1bw3KvP2");
+/// The script approver: a hot key used only by Bordrless's backend (the Workshop), which writes
+/// and revokes approvals (`approve`, `revoke_approval`) once a submission has passed the checks,
+/// and can do nothing else here (not attest, not set a hook's status, nothing of a game or a
+/// companion). It is not Bordrless's upgrade key, which approves and revokes as before.
+pub const SCRIPT_APPROVER: Pubkey =
+    Pubkey::from_str_const("3onVUMKmJYmEqLpbUTv1bdLixowHJyiRPF4ApEW8ipJW");
 /// `hook_timelock`: a program whose upgrade authority is its timelock is "timelocked".
 pub const HOOK_TIMELOCK_ID: Pubkey = bordrless_hook::authority::HOOK_TIMELOCK_ID;
 /// An attestation's review verdicts.
@@ -256,6 +286,102 @@ pub const MAX_PLAN_CU: u32 = 150_000;
 pub const MAX_ENTITLE_CU: u32 = 60_000;
 /// The most extra accounts a strategy's registry may list, each owned by the strategy.
 pub const MAX_STRATEGY_EXTRAS: usize = bordrless_strategy::MAX_EXTRAS;
+
+// ---- Snowball (the market-maker companion, 2026-10-12) ---------------------------------------------
+
+/// `PDA(["snowball", mint])`: a Snowball companion's market maker.
+pub const SNOWBALL_SEED: &[u8] = b"snowball";
+pub const SNOWBALL_VERSION: u8 = 1;
+/// `Companion.mode`: the classic companion (buyback, holders, launcher, or a game).
+pub const MODE_CLASSIC: u8 = 0;
+/// `Companion.mode`: a Snowball: its pot (`pending_pot`, `pot_bps` of every fee claim) trades the
+/// token on its own pool, buying on a dip and selling on a rise.
+pub const MODE_SNOWBALL: u8 = 1;
+/// The price move that triggers a buy (a drop) or a sell (a rise), each its own: 0.5% to 20%.
+pub const MIN_SNOWBALL_STEP_BPS: u16 = 50;
+pub const MAX_SNOWBALL_STEP_BPS: u16 = 2_000;
+/// The share of the pot a buy spends, and of the holding a sell sells: 1% to all of it.
+pub const MIN_SNOWBALL_SIZE_BPS: u16 = 100;
+pub const MAX_SNOWBALL_SIZE_BPS: u16 = 10_000;
+/// The launcher's cap on one trade, as a share of the pool's SOL side (real and virtual): 0.25% to
+/// 10%. Above about a quarter of a buy's and a sell's fees together (1% at the usual fees), a bot can
+/// profitably sandwich a trade; a Snowball's goal is volume, and the launcher chooses.
+pub const MIN_SNOWBALL_POOL_BPS: u16 = 25;
+pub const MAX_SNOWBALL_POOL_BPS: u16 = 1_000;
+/// Trades are at least 10 seconds apart, and at most a day.
+pub const MIN_SNOWBALL_INTERVAL: i64 = 10;
+pub const MAX_SNOWBALL_INTERVAL: i64 = 86_400;
+/// A trade is worth at least 0.001 SOL; a smaller one is not made ([`crate::instructions::snowball`]).
+pub const MIN_SNOWBALL_TRADE: u64 = 1_000_000;
+/// The most one trade moves, lamports (or the SOL value of what a sell sells): at least 0.01 SOL.
+pub const MIN_SNOWBALL_MAX_TRADE: u64 = 10_000_000;
+
+// ---- Approvals and script companions (2026-10-12) ---------------------------------------------------
+
+/// `PDA(["approval", program])`: Bordrless's approval of a program's code (`Approval`).
+pub const APPROVAL_SEED: &[u8] = b"approval";
+pub const APPROVAL_VERSION: u8 = 1;
+/// `Approval.kind`: a token hook the site offers beside a companion (read off chain only: a launch
+/// takes a custom hook without an approval on chain).
+pub const APPROVAL_KIND_TOKEN_HOOK: u8 = 0;
+/// `Approval.kind`: a companion script (`create_script`, `script_step`).
+pub const APPROVAL_KIND_SCRIPT: u8 = 1;
+/// `PDA(["script", mint])`: a script companion's script (`Script`).
+pub const SCRIPT_SEED: &[u8] = b"script";
+pub const SCRIPT_VERSION: u8 = 1;
+/// `Companion.mode`: a script companion: a builder's program (the script, approved by Bordrless)
+/// decides what its pot (`pending_pot`, `pot_bps` of every fee claim) does, the companion keeping
+/// custody and checking what each step spent.
+pub const MODE_SCRIPT: u8 = 2;
+/// Script steps are at least 10 seconds apart, and at most a day.
+pub const MIN_SCRIPT_INTERVAL: i64 = 10;
+pub const MAX_SCRIPT_INTERVAL: i64 = 86_400;
+/// The most bytes `create_script` hands the script's `companion_init`.
+pub const MAX_SCRIPT_INIT_LEN: usize = 512;
+/// `PDA(["script-state", mint])`: a script's state, made by `create_script` (zeroed, owned by the
+/// script, the payer paying its rent) for the script to keep its data in: a script never gets a
+/// payer's signature, so it can't make accounts of its own.
+pub const SCRIPT_STATE_SEED: &[u8] = b"script-state";
+/// The most bytes a script's state holds (what one instruction may allocate).
+pub const MAX_SCRIPT_STATE_LEN: u32 = 10_240;
+/// What a script step pays whoever sends it, from the pot, when the pot holds it (lamports).
+pub const SCRIPT_BOUNTY: u64 = 20_000;
+/// No script step in the launch's first minute (the sniper fee's window, 30 s, with room).
+pub const SCRIPT_AFTER_LAUNCH: i64 = 60;
+/// A script's author earns this share of the creator fees every claim of a script companion takes
+/// from its launch (half, as a listed config's author can), paid as SOL before the split; nothing
+/// when the author is the launch's own launcher (its beneficiary).
+pub const AUTHOR_SHARE_BPS: u16 = 5_000;
+/// The script's two instructions, as Anchor names them: the first 8 bytes of
+/// `sha256("global:companion_init")` and of `sha256("global:companion_step")`.
+pub const COMPANION_INIT_DISCRIMINATOR: [u8; 8] = [0x76, 0xa1, 0xbb, 0xb4, 0x57, 0x56, 0xdc, 0x88];
+pub const COMPANION_STEP_DISCRIMINATOR: [u8; 8] = [0x5e, 0x15, 0xaa, 0xa1, 0xf6, 0x6e, 0x15, 0x28];
+
+// ---- Payouts: a script pays holders through the companion (Loss cover, 2026-10-12) --------------
+
+/// `PDA(["payout-terms", mint])`: the bounds a script companion's payouts keep within
+/// (`PayoutTerms`, made by `create_script_v2`).
+pub const PAYOUT_TERMS_SEED: &[u8] = b"payout-terms";
+pub const PAYOUT_TERMS_VERSION: u8 = 1;
+/// `PDA(["payout-authority"])`: the one signer of a hook's `record_payout`, a program-wide PDA that
+/// signs nothing else. The address and its bump, so a step pays no search.
+pub const PAYOUT_AUTHORITY_SEED: &[u8] = b"payout-authority";
+pub const PAYOUT_AUTHORITY: Pubkey =
+    Pubkey::from_str_const("8XJcBCYmYyggTQBNvK3RausfyRMpmtjJTjKd53W3StkG");
+pub const PAYOUT_AUTHORITY_BUMP: u8 = 251;
+/// The layout of a `PayoutAnswer` a script returns.
+pub const PAYOUT_ANSWER_VERSION: u8 = 1;
+/// The most entries one answer carries (213 bytes of return data at most).
+pub const MAX_PAYOUTS_PER_STEP: usize = 16;
+/// An answer of this many entries (or more) earns the whole `SCRIPT_BOUNTY`; a thinner one earns
+/// its part of it, an empty one nothing.
+pub const PAYOUT_BOUNTY_FULL: u64 = 8;
+/// A payout window (the share of the pot a window may pay is counted over it): 10 seconds to a day.
+pub const MIN_PAYOUT_WINDOW_SECS: u32 = 10;
+pub const MAX_PAYOUT_WINDOW_SECS: u32 = 86_400;
+/// The hook's `record_payout(lamports, tag)`, as Anchor names it: the first 8 bytes of
+/// `sha256("global:record_payout")`.
+pub const RECORD_PAYOUT_DISCRIMINATOR: [u8; 8] = [0xe3, 0xa4, 0xd5, 0x36, 0x45, 0xac, 0x1f, 0xd8];
 
 #[cfg(test)]
 mod tests {
@@ -404,7 +530,12 @@ mod tests {
                 (p.base_mint, p.quote_mint, 125)
             );
             assert_eq!(
-                (r.base_reserve, r.quote_reserve, r.virtual_base, r.virtual_quote),
+                (
+                    r.base_reserve,
+                    r.quote_reserve,
+                    r.virtual_base,
+                    r.virtual_quote
+                ),
                 (11, 12, 13, 14)
             );
         }
@@ -427,20 +558,103 @@ mod tests {
         // A game is retirable only after a second dormant period.
         const { assert!(RETIRE_DORMANT_PERIODS >= 2) };
         // A draw made early in the round after its own leaves the reveal its margin before the
-        // last claim window, whatever the windows (at most half a round).
+        // last claim window, whatever the windows (at most half a round): the reveal is under half
+        // of the shortest round (and of every other: `every_round_leaves_room_to_draw`).
+        const {
+            assert!(
+                reveal_secs(bordrless_game::MIN_ROUND_SECS) > 0
+                    && reveal_secs(bordrless_game::MIN_ROUND_SECS)
+                        < (bordrless_game::MIN_ROUND_SECS / CLAIMS_PER_ROUND) as i64
+            )
+        };
+        // At the shortest round and window, the reveal and a window take less than half the
+        // round: a draw has over half of the round after its own to land.
+        const {
+            assert!(
+                reveal_secs(bordrless_game::MIN_ROUND_SECS) + (MIN_CLAIM_WINDOW as i64)
+                    < (bordrless_game::MIN_ROUND_SECS / CLAIMS_PER_ROUND) as i64
+            )
+        };
+        // Every round of 40 minutes or more (every round of an hour or more included) keeps the
+        // whole `REVEAL_SECS`; a five-minute round leaves 75 s.
         const {
             assert!(
                 REVEAL_SECS > 0
-                    && REVEAL_SECS < (bordrless_game::MIN_ROUND_SECS / CLAIMS_PER_ROUND) as i64
+                    && reveal_secs(2_400) == REVEAL_SECS
+                    && reveal_secs(2_399) < REVEAL_SECS
+                    && reveal_secs(3_600) == REVEAL_SECS
+                    && reveal_secs(bordrless_game::MAX_ROUND_SECS) == REVEAL_SECS
+                    && reveal_secs(u32::MAX) == REVEAL_SECS
+                    && reveal_secs(300) == 75
             )
         };
         // Even the longest rounds give a dormant game a few draws at the lower minimum before
         // its pot may be retired.
         const { assert!(DORMANT_ROUNDS >= 2) };
-        // A round of the shortest length takes at least one attempt of the shortest window.
+        // A round of the shortest length takes at least one attempt of the shortest window; a
+        // streak's epoch or a strategy's period, one of its own shortest window.
         const { assert!(MIN_CLAIM_WINDOW * CLAIMS_PER_ROUND <= bordrless_game::MIN_ROUND_SECS) };
+        const {
+            assert!(
+                MIN_EPOCH_CLAIM_WINDOW * CLAIMS_PER_ROUND <= MIN_EPOCH_SECS
+                    && MIN_EPOCH_SECS >= bordrless_game::MIN_ROUND_SECS
+                    && MIN_EPOCH_SECS <= bordrless_game::MAX_ROUND_SECS
+                    && MIN_EPOCH_CLAIM_WINDOW >= MIN_CLAIM_WINDOW
+            )
+        };
         assert_eq!(LOTTERY_HOOK_FLAGS, 145);
         // A stranded buyback is burned only well after keepers could have landed it.
         const { assert!(STRANDED_SECS >= MAX_BUYBACK_INTERVAL && STRANDED_INTERVALS >= 2) };
+    }
+
+    #[test]
+    fn every_round_leaves_room_to_draw() {
+        // For every round length a game can have: the reveal is positive and under half the round,
+        // so a draw made as the round after its own begins is in time with the longest window the
+        // round allows (half of it), and with the shortest window it has over half that round to
+        // land. Rounds of 40 minutes or more keep exactly `REVEAL_SECS` (as every round did before
+        // five-minute rounds); shorter ones a quarter of themselves.
+        for secs in bordrless_game::MIN_ROUND_SECS..=bordrless_game::MAX_ROUND_SECS {
+            let reveal = reveal_secs(secs);
+            let half = i64::from(secs / CLAIMS_PER_ROUND);
+            let round = i64::from(secs);
+            assert!(reveal > 0 && reveal < half, "{secs}");
+            assert!(
+                round - half - reveal > 0,
+                "{secs}: the longest window leaves no draw"
+            );
+            assert!(
+                round - i64::from(MIN_CLAIM_WINDOW) - reveal > half,
+                "{secs}: the shortest window leaves under half a round to draw"
+            );
+            let expected = if secs >= 2_400 {
+                REVEAL_SECS
+            } else {
+                i64::from(secs / 4)
+            };
+            assert_eq!(reveal, expected, "{secs}");
+        }
+        assert_eq!(reveal_secs(0), 0);
+    }
+
+    #[test]
+    fn a_scripts_instructions_are_named_as_anchor_names_them() {
+        for (name, disc) in [
+            ("global:companion_init", COMPANION_INIT_DISCRIMINATOR),
+            ("global:companion_step", COMPANION_STEP_DISCRIMINATOR),
+        ] {
+            let hash = solana_sha256_hasher::hash(name.as_bytes()).to_bytes();
+            assert_eq!(hash[..8], disc, "{name}");
+        }
+        const {
+            assert!(
+                MODE_CLASSIC != MODE_SNOWBALL
+                    && MODE_SNOWBALL != MODE_SCRIPT
+                    && MODE_SCRIPT != MODE_CLASSIC
+            )
+        };
+        const { assert!(MIN_SCRIPT_INTERVAL > 0 && MIN_SCRIPT_INTERVAL <= MAX_SCRIPT_INTERVAL) };
+        // The bounty is never above what a step's fee is worth many times over.
+        const { assert!(SCRIPT_BOUNTY <= 100_000) };
     }
 }

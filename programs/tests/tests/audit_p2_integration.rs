@@ -502,8 +502,8 @@ fn phase1_accounts_read_the_same() {
     assert_eq!((comp.len(), game.len()), (300, 486));
     let c = Companion::try_deserialize(&mut &comp[..]).unwrap();
     assert_eq!(
-        (c.game_kind, c.pot_locked, c.reserved),
-        (GameKind::Lottery, 0, [0])
+        (c.game_kind, c.pot_locked, c.mode),
+        (GameKind::Lottery, 0, 0)
     );
     let mut back = Vec::new();
     c.try_serialize(&mut back).unwrap();

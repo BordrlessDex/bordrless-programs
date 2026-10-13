@@ -1,6 +1,6 @@
 //! `lottery_hook`: a lottery coin's token hook, under the game ticket standard (`bordrless-game`).
 //!
-//! Every round (`round_secs`, an hour to 30 days, fixed at `prepare`), the tokens a holder has
+//! Every round (`round_secs`, 5 minutes to 30 days, fixed at `prepare`), the tokens a holder has
 //! held since the round began are their tickets: a range of the round's ticket space kept in the
 //! 64 bytes of hook data the token program stores inside each holding. The Bordrless companion
 //! holds the pot, draws a verifiable ticket once the round has ended, and pays the holding whose
@@ -422,7 +422,7 @@ pub enum LotteryError {
     WrongAccount,
     #[msg("the hook signer is not the token program's signer for this hook")]
     BadHookSigner,
-    #[msg("a round lasts from an hour to 30 days")]
+    #[msg("a round lasts from 5 minutes to 30 days")]
     BadRoundSecs,
     #[msg("this mint's hook is not the lottery hook, writing hook data")]
     NotThisHook,

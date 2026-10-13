@@ -218,6 +218,57 @@ fn only_the_attester_or_the_protocol_revokes() {
     .ok();
 }
 
+/// The script approver (`SCRIPT_APPROVER`, the backend's key for approvals, never held here either)
+/// is nobody outside approvals: it neither attests nor revokes an attestation, and sets no hook
+/// status.
+#[test]
+fn the_script_approver_is_refused_outside_approvals() {
+    let mut w = world();
+    w.env.fund(SCRIPT_APPROVER, SOL);
+    let a = args(&w.env, &JACKPOT);
+    let mut ix = companion::attest(SCRIPT_APPROVER, JACKPOT, a.clone());
+    ix.accounts[0] = AccountMeta::new(SCRIPT_APPROVER, true);
+    refused(
+        &send_as(&mut w.env, &[ix], &[], &[SCRIPT_APPROVER]),
+        CompanionError::NotAttester,
+    );
+    assert!(w
+        .env
+        .account(&companion::attestation_address(&JACKPOT))
+        .is_none());
+    attest(&mut w.env, JACKPOT, a).ok();
+    refused(
+        &send_as(
+            &mut w.env,
+            &[companion::revoke(SCRIPT_APPROVER, JACKPOT)],
+            &[],
+            &[SCRIPT_APPROVER],
+        ),
+        CompanionError::NotAttester,
+    );
+    let at: HookAttestation = w.env.read(&companion::attestation_address(&JACKPOT));
+    assert!(!at.revoked);
+    let hash = programdata_hash(&w.env, &JACKPOT);
+    refused(
+        &send_as(
+            &mut w.env,
+            &[companion::set_hook_status_v2(
+                SCRIPT_APPROVER,
+                JACKPOT,
+                status_args(true),
+                hash,
+            )],
+            &[],
+            &[SCRIPT_APPROVER],
+        ),
+        CompanionError::NotProtocolAuthority,
+    );
+    assert!(w
+        .env
+        .account(&companion::hook_status_address(&JACKPOT))
+        .is_none());
+}
+
 // =============================================================================== game hooks
 
 #[test]

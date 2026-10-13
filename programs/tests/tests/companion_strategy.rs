@@ -520,14 +520,22 @@ fn creation_bounds_are_checked() {
         |_, s| s.entitle_cu_max = MAX_ENTITLE_CU + 1,
         |_, s| s.min_weight = 0,
     ];
-    let bad_game: [Tweak; 7] = [
+    let bad_game: [Tweak; 8] = [
         |g, _| g.prize_bps = 1_000,
         |g, _| g.max_attempts = 1,
+        // The hook takes 3,599-second rounds (from 5 minutes); a strategy's periods are an hour
+        // or more.
         |g, _| g.round_secs = 3_599,
         |g, _| g.claim_window_secs = 299,
         |g, _| g.claim_window_secs = 1_801,
         |g, _| g.min_pot = MIN_MIN_POT - 1,
         |g, _| g.kind = GameKind::Streak,
+        // A lottery's shortest round and window: a strategy's periods stay an hour or more
+        // (owner decision 4), its windows 5 minutes or more.
+        |g, _| {
+            g.round_secs = bordrless_game::MIN_ROUND_SECS;
+            g.claim_window_secs = MIN_CLAIM_WINDOW;
+        },
     ];
     let mut w = world(Some(STUDIO_KEY));
     let mut try_with = |f: Tweak| {
@@ -550,9 +558,6 @@ fn creation_bounds_are_checked() {
         let tx = try_with(f);
         if i == 6 {
             refused(&tx, CompanionError::WrongGameKind);
-        } else if i == 2 {
-            // The hook's header says 3,600.
-            tx.expect_fail();
         } else {
             refused(&tx, CompanionError::BadGame);
         }

@@ -32,7 +32,7 @@ use lottery_hook::{client as lottery, Entered, LotteryError, LotteryState, Prepa
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
-/// An hour a round, the shortest the standard allows. `T0` starts a round.
+/// An hour a round (the shortest the standard allows is 5 minutes). `T0` starts a round.
 const ROUND: u32 = 3_600;
 const R: i64 = ROUND as i64;
 
@@ -420,8 +420,8 @@ fn prepare_writes_the_header_and_the_registry() {
     );
     tx.expect_fail();
     assert_eq!(header(&w, &mint).round_secs, 6 * ROUND);
-    // Rounds from an hour to 30 days.
-    for bad in [0, ROUND - 1, 30 * 86_400 + 1] {
+    // Rounds from 5 minutes to 30 days.
+    for bad in [0, 299, 30 * 86_400 + 1] {
         let other = Keypair::new();
         let tx = w.env.send_paid_by(
             &[lottery::prepare(payer.pubkey(), other.pubkey(), bad)],
@@ -440,6 +440,45 @@ fn prepare_writes_the_header_and_the_registry() {
         .env
         .account(&lottery::state_address(&other.pubkey()))
         .is_none());
+}
+
+/// Five-minute rounds, the shortest: `prepare(300)` writes a header of 300-second rounds;
+/// `prepare(299)` is refused and makes nothing.
+#[test]
+fn prepare_takes_rounds_from_five_minutes() {
+    let mut w = World::new();
+    let payer = w.wallet_with_sol(5 * SOL);
+    assert_eq!(bordrless_game::MIN_ROUND_SECS, 300);
+    let short = Keypair::new();
+    let tx = w.env.send_paid_by(
+        &[lottery::prepare(payer.pubkey(), short.pubkey(), 300)],
+        &payer,
+        &[&short],
+    );
+    tx.ok();
+    let now = w.env.now;
+    let h = header(&w, &short.pubkey());
+    assert_eq!(h, GameHeader::new(short.pubkey(), 300, now));
+    assert_eq!((h.round_secs, h.round), (300, (now / 300) as u32));
+    assert_eq!(h.round, 6_000_000, "T0 starts a five-minute round too");
+    let ev: Prepared = tx.event();
+    assert_eq!((ev.round_secs, ev.round), (300, h.round));
+    // A second under: refused, nothing made.
+    let shorter = Keypair::new();
+    let tx = w.env.send_paid_by(
+        &[lottery::prepare(payer.pubkey(), shorter.pubkey(), 299)],
+        &payer,
+        &[&shorter],
+    );
+    refused(&tx, LotteryError::BadRoundSecs);
+    assert!(w
+        .env
+        .account(&lottery::state_address(&shorter.pubkey()))
+        .is_none());
+    // The header rolls every five minutes: a write in the next round moves it there.
+    let header_before = header(&w, &short.pubkey());
+    assert_eq!(header_before.round_at(now + 299), h.round);
+    assert_eq!(header_before.round_at(now + 300), h.round + 1);
 }
 
 #[test]

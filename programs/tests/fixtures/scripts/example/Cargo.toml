@@ -1,0 +1,28 @@
+# A test-only companion script (never deployed): a native program the companion calls with the
+# creator address signing, whose `companion_step` does what its state's mode says (a buy on the
+# launch pool, a sell, nothing, or one of the misdeeds the companion must refuse), so
+# `companion_script.rs` can drive every invariant of `script_step`.
+[package]
+name = "script-example"
+description = "Test-only companion script with scripted steps (script companion suites)."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "script_example"
+
+[features]
+default = []
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+bordrless-launch = { path = "../../../../bordrless_launch", features = ["no-entrypoint"] }
+bordrless-token = { path = "../../../../bordrless_token", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

@@ -127,9 +127,10 @@ an additive upgrade of this program (owner decision a), with `lottery_hook`
   - `Game` at `PDA(["game", mint])`, 486 bytes.
   - Kind `Lottery`.
   - A split with the pot's part and no holders' part. Buyback limits are required.
-  - Rounds of 1 hour to 30 days, matching the hook's header.
+  - Rounds of 5 minutes to 30 days, matching the hook's header.
   - `min_pot` from 0.1 to 1,000 SOL, `prize_bps` from 10% to 100%.
-  - Claim windows of 5 minutes to a day, and 1 to 16 attempts, all within half a round.
+  - Claim windows of a minute to a day, and 1 to 16 attempts, all within half a round (a
+    five-minute round: two attempts of a minute, or one of up to two and a half).
   - Phase 1 takes only `lottery_hook`, or a hook the protocol has given a status, never a blocked
     one. Its registry may list at most 3 extras besides the launch (`create_game_v2`, phase 2,
     and a jackpot's or a streak's launch: at most 2, which fit a packet at the site's longest name
@@ -147,9 +148,9 @@ an additive upgrade of this program (owner decision a), with `lottery_hook`
     (or adopts a pending request ORAO already holds for the seed). A seed is never on chain without
     its request, so nobody can preview an answer and then choose whether it is drawn. A seed ORAO
     already answered, or a slot more than 3 slots old, is refused (`StaleSeed`). It rolls over
-    when the round has no tickets, when it is too late (10 minutes and a claim window before the
-    claims end), or when the pot can't pay for ORAO's request now (`OracleUnpaid`, no seed
-    committed).
+    when the round has no tickets, when it is too late (10 minutes, or a quarter of a round
+    shorter than 40 minutes, and a claim window before the claims end), or when the pot can't pay
+    for ORAO's request now (`OracleUnpaid`, no seed committed).
   - `reveal`.
   - `claim_prize(k)`, in attempt `k`'s window, pays the winner in SOL.
   - `expire` rolls a round over.
@@ -223,3 +224,193 @@ fields as zeros.
   upgrade (its ProgramData passed) without a status; it is not audited, so capped at 10 SOL.
 - **Limits** (v0, 22-address table): setup 784 bytes, launch 1,177, `settle` 610, `claim_share`
   614, `close_epoch` 465. The `.so` grows to 656,936 bytes (extend the ProgramData by 99,688).
+
+## Approvals: the programs a companion runs beside its own (2026-10-12)
+
+A script companion (`create_script`, `script_step`: a builder's own program spends the pot with
+the creator address signing, inside the companion's limits) and a custom hook the site offers
+beside a companion run only programs Bordrless has approved, each approval bound to the program's
+code (a script nobody can change needs none: below):
+
+- **`approve(program, kind, code_hash, author)`** writes `PDA(["approval", program])`: the
+  program (its program account and ProgramData passed, its `Timelock` when it has one) as a token
+  hook (kind 0, read off chain) or a companion script (kind 1), `code_hash` its executable hash
+  (`solana-verify`'s, recomputed on chain: any other is refused), `author` who wrote it (a
+  script's author earns half the creator fees of the companions made with it). Only a program
+  nobody but Bordrless can change is approved: immutable, upgradeable only by Bordrless's keys, or
+  behind a hook timelock (`ProgramNotBounded`). An approval counts while the program still runs
+  the approved code; an upgrade voids it until the new code is approved.
+- **`revoke_approval(program)`** marks it revoked; `approve` writes it again.
+- **Who signs.** The companion program's upgrade authority (the protocol's), or the script
+  approver (`SCRIPT_APPROVER`, `3onVUMKm…ipJW`): a hot key of Bordrless's backend that writes and
+  revokes approvals once a submission has passed the Workshop's checks, so a clean pass waits for
+  nobody. It can do nothing else here (not attest, not set a hook's status, nothing of a game or
+  a companion) and is not an upgrade key, so losing it costs approvals, never a program. The
+  approval records which of the two wrote it (`updated_by`), and each rewrites the other's.
+- **An immutable script needs no approval** (the owner, 2026-10-12: the rule the launchpad applies
+  to hooks). When the script program's upgrade authority is given up, `create_script` and
+  `script_step` read no approval (the approval account passed may be an empty one, and a revoked
+  approval of it has no say: nobody can change its code), and the script has no author: every
+  claim is split as ever, nothing to an author. A program someone can upgrade keeps the rules
+  above: without a current approval it is refused (`NotApproved`).
+
+## Snowball: a market maker run by the companion (2026-10-12, not deployed yet)
+
+The owner's preset: the companion's fee fills a pot that trades the token on its own pool, so the
+chart keeps moving. An additive upgrade of the same program, like v2: every earlier instruction,
+account and error code is unchanged, and every companion made before reads as classic.
+
+- **`create_snowball(args)`**, after `create` and before `launch`, signed by the mint (like
+  `create_game`): `Companion.mode` becomes `MODE_SNOWBALL` (the last byte of what was `reserved`),
+  `args.split` with `pot_bps` replaces `create`'s split (the four add up to 10,000), and
+  `PDA(["snowball", mint])` keeps the market maker's terms: `step_bps` (0.5% to 20%), `buy_bps` and
+  `sell_bps` (1% to 50% each), `interval` (a minute to a day), `max_trade` (at least 0.01 SOL).
+  Refused after the launch, on a game, twice, or out of bounds (`BadSnowball`, `BadSplit`). A game
+  is refused on a Snowball companion (`BadGame`).
+- **Every fee claim** adds the pot's part to `Companion.pending_pot` (the same field a game's pot
+  uses, part of what is set aside): `PotFunded` with nothing to the buyback. No hook, so no cap and
+  no block.
+- **`snowball_step`** (anyone, a bounty on a trade), at most once an `interval`, from a minute
+  after the launch and the end of any early-buyer window (`SnowballNotDue` otherwise):
+  - the pool's price at or below the reference less `step_bps`: a **buy** of `buy_bps` of the pot;
+  - at or above the reference plus `step_bps`: a **sell** of `sell_bps` of the tokens it holds,
+    the SOL back into the pot;
+  - between the two: `SnowballNotDue`.
+  - The reference is the companion's opening reference until the first step, then the price each
+    trade leaves. When the side the price calls for has nothing to trade (less than 0.001 SOL
+    worth), the reference **follows** the price instead (`SnowballFollowed`, no bounty), so the
+    market maker stays centred on the market.
+- **Limits, the buyback's:** a trade moves at most `max_trade` and `pool_share_bps` of the pool's
+  quote side (a quarter of a buy's and a sell's fees, never more than 1%), and takes no less than
+  the pool's own quote less the fees and 2%. Pushing the price to trigger a trade only makes the pot
+  buy lower or sell higher.
+- **The tokens it holds** sit in the creator's token holding beside any dev bag;
+  `Snowball.tokens_held` counts them, so a sell never touches the dev bag (tested with kit rules and
+  a dev bag).
+- **Events:** `SnowballCreated`, `SnowballTraded` (side, SOL, tokens, bounty, the price before and
+  after, the pot and the tokens after), `SnowballFollowed`.
+
+Tests: `programs/tests/tests/companion_snowball.rs` (a dip bought and a rise sold with the
+reference following each trade; the same with kit rules beside a dev bag; the refusals), and
+`snowball_vectors.rs`, which renders `programs/tests/vectors/snowball.json` for the SDK. A trade
+costs about 236k compute units (283k with kit rules).
+
+Site side (the monorepo): the SDK's `companion.createSnowball` / `snowballStep`, `decodeSnowball`,
+`snowballMove`; the launch request's `companion.snowball: { potBps, stepBps, sizeBps }` (steps 1%,
+2%, 3% or 5%, sizes 10%, 25% or 50%, a minute apart, at most 5 SOL a trade); the keeper's 30-second
+`snowballs` loop; the token page's market maker figures. All of it stays off until the upgrade is
+live: `SNOWBALL_OPEN=1` on the API and `NEXT_PUBLIC_SNOWBALL_OPEN=1` on the site.
+
+## Payouts: a script pays holders through the companion (2026-10-12, not deployed yet)
+
+The owner's Loss cover preset needs the pot to pay holders, each up to a sum its own hook has
+measured. The primitive is general: any pair (a hook that marks eligibility in its holdings, a
+script that asks for payouts) can use it with its own rules. An additive upgrade of the same
+program: every earlier instruction, account and error code is unchanged.
+
+- **The answer, not a call.** A script's `companion_step` may return a `PayoutAnswer { version: 1,
+  entries: Vec<{ account: u8, lamports: u64, tag: u32 }> }` in its return data (Borsh, `1 + 4 +
+  13 * n` bytes, at most 16 entries). `account` is an index into the step's remaining accounts, a
+  holding of the launch's mint; `lamports` 0 is a touch (recorded, not paid); `tag` is passed to
+  the hook untouched. The return data is cleared before the call; data another program set (a
+  trade's hooks leave theirs) is no answer, so a script that trades keeps working; the script's own
+  that is no answer fails the step (`BadPayoutAnswer`). The runtime refuses a call back into the
+  companion, so the script names and the companion pays, as the token program's deltas and the
+  strategies' `entitle` work.
+- **The terms**, `PayoutTerms` at `PDA(["payout-terms", mint])` (128 bytes), made by
+  `create_script_v2(args, payout { step_bps, holding_bps, window_bps, window_secs })` beside the
+  script, the payer paying their rent (`BadPayoutTerms` out of bounds: each share 1 to 10,000,
+  the window 10 seconds to a day; `PayoutTermsSet`). A script made with `create_script` has none:
+  its first answer with an entry fails (`PayoutsOff`). The mint must have a custom hook with
+  `WRITES_HOOK_DATA` (`PayoutsNeedHook`): a kit token or a hook without hook data can carry no
+  record, so it can't be paid.
+- **The checks, in order**, after the step's own (the pot spent and nothing else, the dev bag, the
+  lamports, custody), every one before any payment: the budget, `min(step_bps of the pot at the
+  step's start, window_bps of the pot at the window's first step less what the window paid, the
+  pot after the script less the bounty)`, the holding cap `holding_bps` of it; then each entry: the
+  index, a holding of the mint, named once, within the cap and the budget (`PayoutOverBound`), its
+  owner eligible (never the launch, its pool, the creator address, the companion, the script, its
+  state, the terms, the hook, the default key or an address off the curve: `PayoutTarget`), not
+  the launcher (`PayoutToBeneficiary`); with lamports, the owner's account among the remaining
+  accounts, writable, payable and not left below its rent-exempt minimum (`PayoutTarget`). A touch
+  needs no owner account.
+- **The payments**: one `unwrap_sol` of the total (the bounty with it), a transfer per paid entry.
+  **The records**: a CPI per entry into the launch's hook, `record_payout(lamports, tag)` with
+  `sha256("global:record_payout")[..8] ++ u64 ++ u32` and `[payout_authority (signer), mint,
+  holding (writable), hook state PDA(["state", mint], hook) (writable), hook_authority
+  PDA(["hook-authority"], hook), token program, token event authority]`, signed by
+  `PDA(["payout-authority"])`, a program-wide address that signs nothing else. The hook writes its
+  record through the token program's `write_hook_data`; a hook that can't record an entry fails
+  the step. Depth: the step (1), the hook (2), the token program (3), its event (4). This is the one
+  place the companion calls a hook: the hook can't re-enter it, and its worst case is refusing.
+- **The accounting**: `pending_pot` less the total and the bounty; the window's and the terms'
+  counters; one `ScriptPayout { companion, program, holding, owner, lamports, tag, window_paid,
+  paid_total, pot_after }` per entry, touches included; `ScriptStepped` unchanged.
+- **The bounty** of a step with an answer of `n` entries is `SCRIPT_BOUNTY * min(n, 8) / 8`: an
+  empty answer pays nothing, a thin step earns less than its fee, a full one the bounty. A step
+  with no answer keeps the flat bounty.
+- **What a pair can do with it.** A script names holdings its author controls: it pays, per step,
+  at most `step_bps` of the pot, at most `holding_bps` of that per holding, at most `window_bps`
+  of the pot per window, only to wallets holding the mint, never the launcher, never any program's
+  account; nothing leaves but SOL of the pot, and every entry is an event with the owner. The gate
+  stays Bordrless's approval, which reads the terms a pair asks for; `revoke_approval` stops the
+  steps at once.
+- **Limits.** The runtime's instruction trace (64 a transaction) binds a step before its size: a
+  touch costs four inner instructions (the hook's record, the token program's write and its event,
+  the `ScriptPayout` event), a payment five (a transfer more), on a base of eleven (the compute
+  budget's two instructions and the step, the script's call, the unwrap and its four, the bounty's
+  transfer, the step's event; two more when the step makes the creator's token holding). So a step
+  pays at most 10 holdings or touches 13 (measured in `companion_payouts.rs` and `loss_cover.rs`);
+  the answer's 16 is the layout's bound.
+
+Errors appended: `PayoutsOff`, `PayoutsNeedHook`, `BadPayoutAnswer`, `PayoutTarget`,
+`PayoutToBeneficiary`, `PayoutOverBound`, `BadPayoutTerms`. Constants: `PAYOUT_TERMS_SEED`,
+`PAYOUT_AUTHORITY_SEED`, `PAYOUT_AUTHORITY` (`8XJcBCYmYyggTQBNvK3RausfyRMpmtjJTjKd53W3StkG`, bump
+251), `MAX_PAYOUTS_PER_STEP`, `PAYOUT_BOUNTY_FULL`, `RECORD_PAYOUT_DISCRIMINATOR`. Tests:
+`programs/tests/tests/companion_payouts.rs` (every rule, with the fixture script
+`fixtures/scripts/payouts`, which answers whatever its state holds) and `payout_vectors.rs`
+(`vectors/payouts.json`).
+
+## Loss cover: the creator fee pays the holders who are under water (2026-10-12, not deployed yet)
+
+The owner's preset, built on the payouts above: a pair Bordrless owns, `loss_cover_hook`
+(`6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr`) and `loss_cover_script`
+(`9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm`), each with its README. The hook keeps every
+holding's average entry price, what it holds, the cover it was paid and the round it was last
+recorded in; the script pays every under-water holder the same fraction `f = min(1, B / L)` of its
+uncovered loss, `B` the pot at the round's start and `L` the uncovered loss the previous round
+measured, both on chain. A round is many short steps, each holding once a round.
+
+- **The launch**: `create`, `loss_cover_hook.prepare(payer, mint)` (the mint signs; the pool's
+  address follows from the launchpad's LP fee), `create_script_v2(... program: loss_cover_script,
+  state_len: 128, init_data: the six terms ..., payout { every cap 10,000, window_secs: round_secs
+  })`, the mint signing all three; then `launch` from a config naming the hook with flags 145 and
+  no kit rules. The launcher's holding is never paid (`PayoutToBeneficiary`, and the script skips
+  it).
+- **The hook's rules**: a buy's basis is the swap's effective curve price (read from the pool
+  after the DEX wrote its reserves and before it delivered, pinned in `loss_cover_hook.rs` against
+  the DEX's write order), capped at 20% above a slow reference (5% a step, once in 10 minutes); a
+  plain transfer in at the spot; a send, a sell or a burn keeps the cover pro rata and clears an
+  emptied holding; the launch, the pool, the creator address and every off-curve address are
+  exempt; `record_payout` takes only the companion's payout authority and a holding with a record.
+- **The script's rules**: rounds of `round_secs` (a minute to a day), starting only on a pot of at
+  least `min_pot_lamports` (below it a step fails with `NothingToDo`: no slot, no measuring); the
+  first round and the round after a gap measure only; a holding counts from `min_holding` and
+  `min_loss`, `min_age_secs` after its last buy, once a round (the hook's `round`); each payment is
+  `uncovered * b / l_prev`, capped at `uncovered`, the round's budget and the companion's; a round
+  whose budget runs out touches the rest, and the next round includes them in `l_prev` and catches
+  up at a smaller fraction; a step with nothing to measure or pay fails. A sender chooses only
+  which holdings a step carries and in what order: it cannot change `f`, pay anyone twice a round
+  or more than its fraction, or inflate `L`.
+- **Measured** (`loss_cover.rs`, v0 with a compute limit and price, the protocol table and the
+  pair's addresses): a paying step of 7 pairs and a measuring step of 13 holdings fit a packet and
+  the trace; 8 pairs are over the packet with the protocol table alone (1,233 bytes) and 10 fit it
+  with a per-coin table of the pairs; 14 touches and 11 pairs do not fit the trace, so the keeper's
+  batches are 7 and 13 (`vectors/loss-cover.json`, `batchPaying`, `batchMeasuring`); a coin's first step ever
+  also creates the creator's token holding (two instructions more) and carries 12 touches at most.
+
+Site side (the monorepo, `docs/loss-cover.md`): the SDK's coders from the three IDLs,
+`companion.createScriptV2`, `decodePayoutTerms`, `payoutAuthorityAddress`,
+`lossCoverHook.prepare/accounts/recordPayout`, the record and state decoders, `lossCoverOwed`,
+`lossCoverFraction`, the step's accounts; the keeper's candidates and cursor; the launch preset,
+the token page's panel. All of it stays off until the upgrade and the two programs are live.

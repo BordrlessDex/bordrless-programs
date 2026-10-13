@@ -564,3 +564,146 @@ pub struct StrategyPaid {
     pub pending_pot: u64,
     pub cranker: Pubkey,
 }
+
+/// A Snowball made for a companion (`create_snowball`, before the launch).
+#[event]
+pub struct SnowballCreated {
+    pub companion: Pubkey,
+    pub mint: Pubkey,
+    pub pot_bps: u16,
+    pub buy_step_bps: u16,
+    pub sell_step_bps: u16,
+    pub buy_bps: u16,
+    pub sell_bps: u16,
+    pub interval: i64,
+    pub max_trade: u64,
+    pub pool_bps: u16,
+    pub flat_trades: bool,
+}
+
+/// A Snowball trade on the token's pool: `side` 1 a buy (on a dip), 0 a sell (on a rise).
+#[event]
+pub struct SnowballTraded {
+    pub companion: Pubkey,
+    pub side: u8,
+    /// A step triggered it (a drop or a rise); false for a flat trade.
+    pub on_step: bool,
+    /// SOL spent (a buy) or received (a sell), lamports, the bounty not counted.
+    pub sol: u64,
+    /// Tokens bought or sold.
+    pub tokens: u64,
+    pub bounty: u64,
+    /// The pool's price before and after (the new reference).
+    pub price_before: u128,
+    pub price_after: u128,
+    pub pot_after: u64,
+    pub tokens_after: u64,
+    pub cranker: Pubkey,
+}
+
+/// A Snowball that could not trade on the side the price called for (nothing left to spend or to
+/// sell): its reference follows the price, so it stays centred on the market.
+#[event]
+pub struct SnowballFollowed {
+    pub companion: Pubkey,
+    pub reference_before: u128,
+    pub price: u128,
+}
+
+/// Bordrless approved a program's code (`approve`): a new approval, or one rewritten.
+#[event]
+pub struct ProgramApproved {
+    pub program: Pubkey,
+    /// `APPROVAL_KIND_TOKEN_HOOK` (0) or `APPROVAL_KIND_SCRIPT` (1).
+    pub kind: u8,
+    pub code_hash: [u8; 32],
+    /// The program's ProgramData slot at the approval.
+    pub programdata_slot: u64,
+    pub authority: Pubkey,
+    /// The program's author (the default key: none).
+    pub author: Pubkey,
+}
+
+/// Bordrless revoked a program's approval (`revoke_approval`).
+#[event]
+pub struct ApprovalRevoked {
+    pub program: Pubkey,
+    pub kind: u8,
+    pub code_hash: [u8; 32],
+    pub authority: Pubkey,
+}
+
+/// A script made for a companion (`create_script`, before the launch), its `companion_init` called.
+#[event]
+pub struct ScriptCreated {
+    pub companion: Pubkey,
+    pub mint: Pubkey,
+    pub program: Pubkey,
+    pub split: Split,
+    pub pot_bps: u16,
+    pub interval: i64,
+    /// The script's author, from its approval (the default key: none, as for an immutable script,
+    /// which needs no approval).
+    pub author: Pubkey,
+}
+
+/// A script companion's fee claim paid the script's author their share (`AUTHOR_SHARE_BPS` of what
+/// the claim took from the launch), as SOL, before the split.
+#[event]
+pub struct AuthorPaid {
+    pub companion: Pubkey,
+    pub author: Pubkey,
+    pub amount: u64,
+}
+
+/// A script step (`script_step`): what the creator's holdings held before and after the script ran
+/// (bridged SOL and the token), the bounty paid from the pot, and the pot after.
+#[event]
+pub struct ScriptStepped {
+    pub companion: Pubkey,
+    pub program: Pubkey,
+    /// The creator's bridged SOL, lamports, before and after the script (before the bounty).
+    pub sol_before: u64,
+    pub sol_after: u64,
+    /// The creator's tokens, before and after the script.
+    pub tokens_before: u64,
+    pub tokens_after: u64,
+    /// Paid to the sender from the pot (`SCRIPT_BOUNTY`, or nothing when the pot holds less).
+    pub bounty: u64,
+    /// The pot after the step, the bounty paid.
+    pub pot_after: u64,
+    pub cranker: Pubkey,
+}
+
+// ---- Payouts (Loss cover, 2026-10-12) ----------------------------------------------------------------
+
+/// `create_script_v2`: the bounds the script's payouts keep within (`PayoutTerms`).
+#[event]
+pub struct PayoutTermsSet {
+    pub companion: Pubkey,
+    pub mint: Pubkey,
+    pub terms: Pubkey,
+    pub step_bps: u16,
+    pub holding_bps: u16,
+    pub window_bps: u16,
+    pub window_secs: u32,
+}
+
+/// One entry of a script's payout answer, paid and recorded (`script_step`): `lamports` paid to the
+/// holding's owner as SOL (0: a touch, recorded alone), `tag` the script's, passed to the hook's
+/// `record_payout` untouched.
+#[event]
+pub struct ScriptPayout {
+    pub companion: Pubkey,
+    pub program: Pubkey,
+    pub holding: Pubkey,
+    pub owner: Pubkey,
+    pub lamports: u64,
+    pub tag: u32,
+    /// What the window has paid so far, this entry included.
+    pub window_paid: u64,
+    /// What the terms have paid all time, this entry included.
+    pub paid_total: u64,
+    /// The pot after the step (every entry and the bounty paid).
+    pub pot_after: u64,
+}

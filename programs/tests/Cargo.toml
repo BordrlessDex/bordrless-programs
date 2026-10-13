@@ -33,6 +33,13 @@ studio-streak = { path = "fixtures/starters/streak", features = ["no-entrypoint"
 bordrless-strategy = { path = "../../crates/bordrless-strategy" }
 strategy-tester = { path = "fixtures/strategies/tester", features = ["no-entrypoint"] }
 strategy-pro-rata = { path = "fixtures/strategies/pro_rata", features = ["no-entrypoint"] }
+# Script companions (2026-10-12): a test-only script with scripted steps.
+script-example = { path = "fixtures/scripts/example", features = ["no-entrypoint"] }
+# Loss cover (2026-10-12): the hook and the script, and a test-only script with scripted payout
+# answers (the companion's payout primitive).
+loss-cover-hook = { path = "../loss_cover_hook", features = ["no-entrypoint"] }
+loss-cover-script = { path = "../loss_cover_script", features = ["no-entrypoint"] }
+script-payouts = { path = "fixtures/scripts/payouts", features = ["no-entrypoint"] }
 # The runtime's reserved keys, which the companion's jackpot must know (`RESERVED_KEYS`).
 agave-reserved-account-keys = "=4.3.0"
 solana-account = "=4.7.0"

@@ -47,8 +47,9 @@
 //!   (`RolloverReason::OracleUnpaid`). Its seed comes from a slot so recent that nobody could have
 //!   previewed it, and a seed ORAO already answered is refused (`StaleSeed`). A pending request
 //!   someone made for the seed is adopted: it was made blind, and ORAO answers it the same way.
-//! - **A draw leaves time to be claimed.** It is made at least `REVEAL_SECS` and a whole claim
-//!   window before its claims end (`Game::last_draw`), or the round rolls over (`Late`).
+//! - **A draw leaves time to be claimed.** It is made at least `reveal_secs(round_secs)`
+//!   (`REVEAL_SECS`, or a quarter of a round shorter than 40 minutes) and a whole claim window
+//!   before its claims end (`Game::last_draw`), or the round rolls over (`Late`).
 //! - **A draw of round `r` ends with round `r + 1`** (`Game::claims_end`): a holding keeps its
 //!   ranges of two rounds, so in `r + 2` anyone could make a winner's range of `r` forgotten (one
 //!   write to its holding in `r + 1` and one in `r + 2`) and hand its attempt to a later one. No
@@ -121,13 +122,15 @@ pub struct CreateGameArgs {
     /// game coin has its own hook, so no kit.
     pub split: Split,
     pub pot_bps: u16,
-    /// An hour to 30 days, as the hook's header says.
+    /// As the hook's header says: a lottery's rounds 5 minutes to 30 days, a streak's epochs an
+    /// hour to 30 days.
     pub round_secs: u32,
     /// No draw while the pot holds less (0.1 to 1,000 SOL).
     pub min_pot: u64,
     /// The part of the pot one draw pays (10% to 100%).
     pub prize_bps: u16,
-    /// How long each claim attempt is open (5 minutes to a day).
+    /// How long each claim attempt is open (a minute to a day; a streak's least time for claims,
+    /// 5 minutes to half an epoch).
     pub claim_window_secs: u32,
     /// Attempts per draw (1 to 16); all of them within half a round (`max_attempts *
     /// claim_window_secs <= round_secs / 2`), so a draw made early in the round after its own
@@ -270,7 +273,8 @@ pub(crate) fn vet_game_hook(
 }
 
 /// The settings of a game of `args.kind`, within its bounds (`BadGame` otherwise). A lottery's are
-/// phase 1's, and takes no kind settings. A jackpot has no rounds (`round_secs` 0), no claim
+/// phase 1's (but rounds from 5 minutes and claim windows from a minute), and takes no kind
+/// settings. A jackpot has no rounds (`round_secs` 0), no claim
 /// windows or attempts; a streak's epochs are its rounds (an hour to 30 days), and its claim window
 /// is the least time a closed epoch leaves for claims (5 minutes to half an epoch), with no
 /// attempts.
@@ -301,8 +305,11 @@ fn check_game_args(args: &CreateGameArgs, k: &GameKindArgs) -> Result<()> {
                     && k.min_weight == 0
             }
             GameKind::Streak => {
+                // Epochs of an hour or more and windows of five minutes or more, as before
+                // five-minute lottery rounds (`MIN_EPOCH_SECS`).
                 valid_round_secs(args.round_secs)
-                    && (MIN_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
+                    && args.round_secs >= MIN_EPOCH_SECS
+                    && (MIN_EPOCH_CLAIM_WINDOW..=MAX_CLAIM_WINDOW).contains(&args.claim_window_secs)
                     && u64::from(args.claim_window_secs) * u64::from(CLAIMS_PER_ROUND)
                         <= u64::from(args.round_secs)
                     && args.max_attempts == 0
@@ -376,7 +383,7 @@ fn create_any_game(
 ) -> Result<()> {
     let c = &ctx.accounts.companion;
     require!(!c.launched, CompanionError::AlreadyLaunched);
-    require!(!c.is_game(), CompanionError::BadGame);
+    require!(!c.is_game() && c.is_classic(), CompanionError::BadGame);
     require!(
         args.pot_bps > 0 && args.split.valid_with_pot(args.pot_bps),
         CompanionError::BadSplit
@@ -1199,7 +1206,10 @@ pub fn process_retire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
     else {
         return Ok(());
     };
-    if matches!(ctx.accounts.game.kind, GameKind::Streak | GameKind::Strategy) {
+    if matches!(
+        ctx.accounts.game.kind,
+        GameKind::Streak | GameKind::Strategy
+    ) {
         // A streak epoch (or a strategy period) whose claims have ended releases what it still
         // held: it rolls over.
         crate::instructions::kinds::end_epoch_if_over(
@@ -1213,7 +1223,11 @@ pub fn process_retire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
     // that plans a dust budget every period never holds the pot for ever.
     if ctx.accounts.game.kind == GameKind::Strategy
         && ctx.accounts.game.status == DrawStatus::Revealed
-        && now >= ctx.accounts.game.retirable_at(ctx.accounts.companion.launched_at)
+        && now
+            >= ctx
+                .accounts
+                .game
+                .retirable_at(ctx.accounts.companion.launched_at)
     {
         ctx.accounts.game.status = DrawStatus::Idle;
         ctx.accounts.companion.pot_locked = 0;

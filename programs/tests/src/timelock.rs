@@ -119,11 +119,12 @@ pub fn send_as(env: &mut Env, ixs: &[Instruction], signers: &[&Keypair], fakes: 
     let message = v0::Message::try_compile(&payer.pubkey(), &all, &[], env.svm.latest_blockhash())
         .expect("compile");
     let n = message.header.num_required_signatures as usize;
-    let keys: Vec<Pubkey> = message.account_keys[..n].to_vec();
+    // No lookup tables here, so the static keys are all the keys (kept for the events).
+    let keys: Vec<Pubkey> = message.account_keys.clone();
     let message = VersionedMessage::V0(message);
     let bytes = message.serialize();
     let mut signatures = Vec::with_capacity(n);
-    for key in &keys {
+    for key in &keys[..n] {
         if *key == payer.pubkey() {
             signatures.push(payer.sign_message(&bytes));
         } else if let Some(kp) = signers.iter().find(|k| k.pubkey() == *key) {
@@ -140,11 +141,7 @@ pub fn send_as(env: &mut Env, ixs: &[Instruction], signers: &[&Keypair], fakes: 
     let size = wire_size(&tx);
     let result = env.svm.send_transaction(tx);
     env.svm.expire_blockhash();
-    Tx {
-        result,
-        size,
-        keys: vec![],
-    }
+    Tx { result, size, keys }
 }
 
 impl Env {

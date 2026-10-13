@@ -3,10 +3,11 @@
 //! moves (as SOL). Every step is one call into a Bordrless program (plus the bridge's `unwrap_sol`
 //! and a system transfer for a bounty), built here with that program's own client (`invoke.rs`).
 //!
-//! A game coin's mint has a custom token hook (`Launch.custom_hook`, the game's): every token
-//! instruction a step builds then carries that hook and its extra accounts, resolved from the
-//! hook's registry exactly as the token program's callers resolve them. A mint whose hook is the
-//! kit, or none, takes the very instructions it always did.
+//! A game coin's mint has a custom token hook (`Launch.custom_hook`, the game's), and since
+//! 2026-10-12 any companion's mint may have one: every token instruction a step builds then carries
+//! that hook and its extra accounts, resolved from the hook's registry exactly as the token
+//! program's callers resolve them. A mint whose hook is the kit, or none, takes the very
+//! instructions it always did.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
@@ -155,7 +156,7 @@ fn token_hook(
 /// A buy on the launch's pool by the creator address, delivered to it: the launchpad client's
 /// `swap` for a kit (or hook-less) token, as it always was; for a custom-hook token, with the
 /// hook's slice on the token's side, resolved for the pool vault's transfer to the creator.
-fn creator_buy(
+pub(crate) fn creator_buy(
     available: &[AccountInfo],
     launch: &Launch,
     creator: Pubkey,
@@ -187,8 +188,43 @@ fn creator_buy(
     ))
 }
 
+/// A sell on the launch's pool by the creator address, the SOL delivered to it: the launchpad
+/// client's `swap` for a kit (or hook-less) token; for a custom-hook token, with the hook's slice on
+/// the token's side, resolved for the creator's transfer to the pool's vault (the creator signing).
+pub(crate) fn creator_sell(
+    available: &[AccountInfo],
+    launch: &Launch,
+    creator: Pubkey,
+    amount_in: u64,
+    min_out: u64,
+) -> Result<Instruction> {
+    let keys = launch_client::LaunchKeys::of(launch);
+    let Some(hook) = launch.custom_hook else {
+        return Ok(launch_client::swap(
+            &keys, creator, creator, 0, amount_in, min_out,
+        ));
+    };
+    let op = OpKeys {
+        source: token_client::holding_address(&launch.mint, &creator),
+        destination: bordrless_swap::client::vault_address(&launch.pool, &launch.mint),
+        authority: creator,
+        source_owner: creator,
+        destination_owner: launch.pool,
+    };
+    let extras = custom_extras(available, &hook, &launch.mint, &op)?;
+    Ok(launch_client::swap_with_base_slice(
+        &keys,
+        creator,
+        creator,
+        0,
+        amount_in,
+        min_out,
+        launch_client::custom_hook_slice(hook, extras),
+    ))
+}
+
 /// An account of `T`'s program, deserialized (owner and discriminator checked).
-fn read<T: AccountDeserialize + Owner>(info: &AccountInfo) -> Result<T> {
+pub(crate) fn read<T: AccountDeserialize + Owner>(info: &AccountInfo) -> Result<T> {
     require_keys_eq!(*info.owner, T::owner(), CompanionError::MissingAccount);
     let data = info.try_borrow_data()?;
     T::try_deserialize(&mut &data[..])
@@ -202,6 +238,17 @@ pub(crate) fn find<'a, 'info>(
         .iter()
         .find(|a| a.key == key)
         .ok_or_else(|| error!(CompanionError::MissingAccount))
+}
+
+/// A script companion's `Script` of `mint` among `available` (address and owner checked), which
+/// must be passed writable: a fee claim keeps its author's running total in it.
+fn script_of<'a, 'info>(
+    available: &'a [AccountInfo<'info>],
+    mint: &Pubkey,
+) -> Result<(&'a AccountInfo<'info>, Script)> {
+    let info = find(available, &Script::address(mint).0)?;
+    require!(info.is_writable, CompanionError::MissingAccount);
+    Ok((info, read::<Script>(info)?))
 }
 
 /// The launch's kit config, when it has kit rules.
@@ -232,7 +279,7 @@ pub(crate) fn balance(available: &[AccountInfo], mint: &Pubkey, owner: &Pubkey) 
 }
 
 /// Creates `owner`'s holding of `mint` when it does not exist, `payer` (a signer) paying.
-fn ensure_holding(
+pub(crate) fn ensure_holding(
     available: &[AccountInfo],
     payer: Pubkey,
     mint: Pubkey,
@@ -399,7 +446,16 @@ pub struct Step<'info> {
 /// audited the pot holds at most the hook's cap, and the pot's share above it goes to the buyback;
 /// once the hook is blocked, all of it does, and the pot with it. Under a block, a claim that
 /// credits the buyback at least what it held restarts the stranded wait
-/// ([`Companion::restart_stranded_wait`]).
+/// ([`Companion::restart_stranded_wait`]). A Snowball's or a script's pot has no hook: its part is
+/// credited whole ([`Companion::has_own_pot`]).
+///
+/// A script companion's claim (2026-10-12) first pays the script's author (`Script.author`, copied
+/// from the script's approval) `AUTHOR_SHARE_BPS` of what this claim took from the launch, as SOL
+/// to their wallet, unless the author is the launch's beneficiary (who gets no extra share), none,
+/// or an account no transfer can pay (a program, a reserved key); the rest is split as above
+/// (`FeesClaimed.claimed` and `claimed_total` count what was split). Its remaining accounts also
+/// hold its `Script` (writable: the author's running total) and, when the author is to be paid,
+/// the author's wallet (writable).
 pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
@@ -411,7 +467,13 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     } else {
         None
     };
+    let script = if c.is_script() {
+        Some(script_of(&all, &mint)?)
+    } else {
+        None
+    };
     let launch_key = launch_client::launch_address(&mint);
+    let before = balance(&all, &BRIDGED_SOL_MINT, &creator)?;
     if balance(&all, &BRIDGED_SOL_MINT, &launch_key)? > 0 {
         invoke_built(
             &launch_client::claim_creator_fees(creator, mint, BRIDGED_SOL_MINT),
@@ -419,9 +481,41 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
             &[&seeds.seeds()],
         )?;
     }
+    let holding = balance(&all, &BRIDGED_SOL_MINT, &creator)?;
     let set_aside = c.set_aside().ok_or(CompanionError::MathOverflow)?;
-    let got = balance(&all, &BRIDGED_SOL_MINT, &creator)?.saturating_sub(set_aside);
+    let got = holding.saturating_sub(set_aside);
     require!(got > 0, CompanionError::NothingToDo);
+    // A script's author: their share of what this claim took from the launch, first. No author (the
+    // default key: an approval naming nobody, or an immutable script, which has none), the launch's
+    // beneficiary, or an author no transfer can pay (a program, or one of the runtime's reserved
+    // keys, which no transaction can write) is paid nothing, so no claim is ever stuck on it: the
+    // whole claim is split as ever.
+    let wallet = match &script {
+        Some((_, s)) if s.author != Pubkey::default() && s.author != c.beneficiary => {
+            let wallet = find(&all, &s.author)?;
+            (!wallet.executable && !RESERVED_KEYS.contains(&s.author)).then(|| wallet.clone())
+        }
+        _ => None,
+    };
+    let to_author = match wallet {
+        Some(_) => bps_of(holding.saturating_sub(before), u64::from(AUTHOR_SHARE_BPS)),
+        None => 0,
+    };
+    let got = got
+        .checked_sub(to_author)
+        .ok_or(CompanionError::MathOverflow)?;
+    if let (Some((info, mut s)), Some(wallet)) = (script.filter(|_| to_author > 0), wallet) {
+        pay_sol(&all, &seeds, creator, &wallet, to_author)?;
+        s.author_paid = s.author_paid.saturating_add(to_author);
+        let mut data = info.try_borrow_mut_data()?;
+        let mut writer: &mut [u8] = &mut data;
+        s.try_serialize(&mut writer)?;
+        emit_cpi!(AuthorPaid {
+            companion: c.key(),
+            author: s.author,
+            amount: to_author,
+        });
+    }
     let bounty = bps_of(got, u64::from(c.bounty_bps));
     let rest = got - bounty;
     let to_holders = bps_of(rest, u64::from(c.split.holders_bps));
@@ -496,6 +590,19 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         if terms.blocked {
             c.restart_stranded_wait(held, now);
         }
+    } else if c.has_own_pot() && to_pot > 0 {
+        // A Snowball's pot (what its market maker trades with) or a script's (what the script
+        // spends): no game hook, so no cap and no block.
+        c.pending_pot = c
+            .pending_pot
+            .checked_add(to_pot)
+            .ok_or(CompanionError::MathOverflow)?;
+        emit_cpi!(PotFunded {
+            companion: c.key(),
+            to_pot,
+            to_buyback: 0,
+            pending_pot: c.pending_pot,
+        });
     }
     Ok(())
 }
@@ -649,7 +756,7 @@ fn fund_pot(c: &mut Companion, amount: u64, terms: &HookTerms) -> Result<(u64, u
 
 /// The fee bound of a buy on the launch's pool, in basis points of the input: the LP fee, the
 /// creator and holder fees, Bordrless's share of them (rounded up), the burn on buys.
-fn buy_fee_bound(launch: &Launch) -> u64 {
+pub(crate) fn buy_fee_bound(launch: &Launch) -> u64 {
     let r = &launch.rules;
     let cuts = u64::from(launch.creator_fee_bps) + u64::from(r.holder_fee_buy_bps);
     u64::from(launch.lp_fee_bps) + cuts + cuts.div_ceil(4) + u64::from(r.burn_buy_bps)

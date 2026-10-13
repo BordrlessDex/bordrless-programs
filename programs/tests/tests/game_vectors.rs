@@ -516,7 +516,7 @@ fn sample_companion() -> Companion {
         stranded_burned_at: 1_792_600_000,
         game_kind: GameKind::Lottery,
         pot_locked: 0,
-        reserved: [0; 1],
+        mode: MODE_CLASSIC,
     }
 }
 
@@ -730,7 +730,7 @@ fn standard() -> J {
         ])
     })
     .collect();
-    let valid: Vec<J> = [0u32, 3_599, 3_600, 2_592_000, 2_592_001]
+    let valid: Vec<J> = [0u32, 299, 300, 3_599, 3_600, 2_592_000, 2_592_001]
         .iter()
         .map(|&secs| J::Arr(vec![num(secs), J::Bool(valid_round_secs(secs))]))
         .collect();
@@ -879,10 +879,40 @@ fn clocks() -> J {
             ]));
         }
     }
+    // The reveal's margin by round length (`reveal_secs`): `REVEAL_SECS` from 40 minutes, a
+    // quarter of a shorter round.
+    let reveals: Vec<J> = [300u32, 301, 1_000, 2_399, 2_400, 3_600, 21_600, 2_592_000]
+        .iter()
+        .map(|&secs| J::Arr(vec![num(secs), big(reveal_secs(secs))]))
+        .collect();
+    // `last_draw` for five-minute rounds with one-minute and two-and-a-half-minute windows, and for
+    // hourly ones: `[round_secs, claim_window_secs, round, last_draw]`.
+    let last_draws: Vec<J> = [
+        (300u32, 60u32, 5_966_666u32),
+        (300, 150, 5_966_666),
+        (3_600, 300, 497_222),
+    ]
+    .iter()
+    .map(|&(secs, window, round)| {
+        let game = Game {
+            round_secs: secs,
+            claim_window_secs: window,
+            ..g.clone()
+        };
+        J::Arr(vec![
+            num(secs),
+            num(window),
+            num(round),
+            big(game.last_draw(round)),
+        ])
+    })
+    .collect();
     J::Obj(vec![
         ("launchedAt", big(launched_at)),
         ("claimsEnd", big(g.claims_end())),
         ("lastDraw", big(g.last_draw(g.round))),
+        ("revealFor", J::Arr(reveals)),
+        ("lastDraws", J::Arr(last_draws)),
         ("attempts", J::Arr(attempts)),
         ("lateRevealedAt", big(late.revealed_at)),
         ("lateAttempts", J::Arr(late_attempts)),
@@ -1004,6 +1034,9 @@ fn constants() -> J {
         ("strandedIntervals", big(STRANDED_INTERVALS)),
         ("minRoundSecs", num(bordrless_game::MIN_ROUND_SECS)),
         ("maxRoundSecs", num(bordrless_game::MAX_ROUND_SECS)),
+        // A streak's epochs and a strategy's periods: from an hour, their windows from 5 minutes.
+        ("minEpochSecs", num(MIN_EPOCH_SECS)),
+        ("minEpochClaimWindow", num(MIN_EPOCH_CLAIM_WINDOW)),
     ])
 }
 

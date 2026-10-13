@@ -125,7 +125,7 @@ pub fn process_create(ctx: Context<Create>, args: CreateArgs) -> Result<()> {
     c.stranded_burned_at = 0;
     c.game_kind = GameKind::Lottery;
     c.pot_locked = 0;
-    c.reserved = [0; 1];
+    c.mode = MODE_CLASSIC;
     emit_cpi!(CompanionCreated {
         companion: c.key(),
         mint,
@@ -211,18 +211,16 @@ pub fn process_launch<'info>(
     available.push(ctx.accounts.creator.to_account_info());
     invoke_built(&ix, &available, &[&seeds.seeds()])?;
 
-    // The launch as created: its creator this companion's, no custom hook but its game's (whose
-    // state must be the game's), no config author paid (their claims would pay the companion
-    // outside its steps).
+    // The launch as created: its creator this companion's, a game's hook the game's (whose state
+    // must be the game's), no config author paid (their claims would pay the companion outside its
+    // steps). Any other companion may launch with a custom hook (2026-10-12; the launchpad takes
+    // only a hook that Bordrless or nobody can upgrade, and the site offers approved ones): every
+    // step that moves the token carries it. A custom hook excludes kit rules, so a holders' share
+    // stays impossible beside one (`HolderRewardsOff` above).
     let launch = Account::<Launch>::try_from(&remaining[LAUNCH_AT])?;
     require_keys_eq!(launch.creator, creator, CompanionError::WrongCreator);
     if c.is_game() {
         check_game_launch(c, &launch, remaining)?;
-    } else {
-        require!(
-            launch.custom_hook.is_none(),
-            CompanionError::CustomHookUnsupported
-        );
     }
     require!(
         launch.author_share_bps == 0,

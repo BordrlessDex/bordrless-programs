@@ -108,8 +108,9 @@ pub const DISCRIMINATOR_LEN: usize = 8;
 pub const HEADER_LEN: usize = 112;
 /// Bytes of hook data per holding (the token standard's `Holding.hook_data`).
 pub const HOOK_DATA_LEN: usize = 64;
-/// The shortest round: an hour.
-pub const MIN_ROUND_SECS: u32 = 3_600;
+/// The shortest round: five minutes (a lottery's; the companion keeps a streak's epochs and a
+/// strategy's periods at an hour or more).
+pub const MIN_ROUND_SECS: u32 = 300;
 /// The longest round: 30 days.
 pub const MAX_ROUND_SECS: u32 = 30 * 86_400;
 

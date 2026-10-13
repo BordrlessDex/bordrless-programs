@@ -138,8 +138,16 @@ fn rounds_are_the_clock_divided_and_never_panic() {
     assert_eq!(round_start(500_001, 3_600), 1_800_003_600);
     assert_eq!(round_end(500_000, 3_600), 1_800_003_600);
     assert_eq!(round_end(u32::MAX, u32::MAX), i64::MAX, "saturates");
-    assert!(valid_round_secs(3_600) && valid_round_secs(30 * 86_400));
-    assert!(!valid_round_secs(3_599) && !valid_round_secs(30 * 86_400 + 1) && !valid_round_secs(0));
+    // Five minutes to 30 days.
+    assert_eq!((MIN_ROUND_SECS, MAX_ROUND_SECS), (300, 2_592_000));
+    assert!(valid_round_secs(300) && valid_round_secs(3_599) && valid_round_secs(3_600));
+    assert!(valid_round_secs(30 * 86_400));
+    assert!(!valid_round_secs(299) && !valid_round_secs(30 * 86_400 + 1) && !valid_round_secs(0));
+    // A five-minute round: 6,000,000 of them to `1_800_000_000`.
+    assert_eq!(round_of(1_800_000_000, 300), 6_000_000);
+    assert_eq!(round_of(1_800_000_299, 300), 6_000_000);
+    assert_eq!(round_of(1_800_000_300, 300), 6_000_001);
+    assert_eq!(round_end(6_000_000, 300), 1_800_000_300);
 }
 
 #[test]

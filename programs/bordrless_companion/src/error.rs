@@ -24,6 +24,9 @@ pub enum CompanionError {
     CreatorLockUnsupported,
     #[msg("a share for holders needs holder rewards on")]
     HolderRewardsOff,
+    /// No longer returned (2026-10-12): every companion launch may have a custom hook (a game's must
+    /// be its game's), and every step that moves the token carries it. Kept so every code after it
+    /// keeps its number.
     #[msg("a companion launch can't use a custom token hook unless it runs that hook's game")]
     CustomHookUnsupported,
     #[msg("nothing to do yet")]
@@ -126,7 +129,9 @@ pub enum CompanionError {
     AuditNeedsFixedCode,
     #[msg("the audited hash is not the hash of the program's code on chain")]
     AuditHashMismatch,
-    #[msg("the program's accounts (the program, its program data, its timelock) are missing or wrong")]
+    #[msg(
+        "the program's accounts (the program, its program data, its timelock) are missing or wrong"
+    )]
     ProgramAccounts,
     #[msg("a strategy must be immutable, timelocked or Bordrless-managed, not blocked, and none of the protocol's programs")]
     StrategyNotAccepted,
@@ -144,4 +149,49 @@ pub enum CompanionError {
     RevokedByProtocol,
     #[msg("the program's timelock holds a proposal of new code: a game is made on a timelocked program only while nothing is pending (its author cancels it, or it lands first)")]
     TimelockPending,
+    #[msg("a Snowball's terms are out of bounds, or its companion is launched, a game, a script or already a Snowball")]
+    BadSnowball,
+    #[msg("not a Snowball companion")]
+    NotASnowball,
+    #[msg("no Snowball step is due: too soon, or the price is within its step of the reference")]
+    SnowballNotDue,
+    // ---- Approvals and script companions (2026-10-12). Appended, so every code above keeps its
+    // number. ----
+    #[msg("the program has no current approval of this kind from Bordrless: none, revoked, of another kind, or its code changed since it was approved")]
+    NotApproved,
+    #[msg("a script's terms are out of bounds (interval, init data, split), its program is one of the protocol's, or its companion is launched, a game, a Snowball or a script already")]
+    BadScript,
+    #[msg("no script step is due: too soon after the launch or the last step")]
+    ScriptNotDue,
+    #[msg("the script spent more bridged SOL than the pot holds")]
+    ScriptOverspent,
+    #[msg("the script moved tokens of the dev bag")]
+    ScriptTookDevBag,
+    #[msg("the script took lamports from the creator address")]
+    ScriptTookLamports,
+    #[msg("an approval is of a token hook (0) or a script (1), a script is none of the protocol's programs, and the hash must be the program's code on chain")]
+    BadApproval,
+    #[msg("not a script companion")]
+    NotAScript,
+    #[msg("the script delegated or closed one of the creator's holdings, changed the creator address's owner or data, or claimed the creator fees")]
+    ScriptBrokeCustody,
+    #[msg("an approved program must be one only Bordrless can change: immutable, upgradeable only by Bordrless's keys, or behind a hook timelock (passed)")]
+    ProgramNotBounded,
+    // ---- Payouts (Loss cover, 2026-10-12). Appended, so every code above keeps its number. ----
+    #[msg(
+        "this script companion has no payout terms: a script made with create_script pays nobody"
+    )]
+    PayoutsOff,
+    #[msg("payouts need a custom hook that writes hook data, which records each one")]
+    PayoutsNeedHook,
+    #[msg("the script's answer does not decode as a payout answer: its version, its length, more than 16 entries, an index past the accounts, an account that is no holding of the mint, or a holding named twice")]
+    BadPayoutAnswer,
+    #[msg("a payout can only go to a wallet holding the token: not the launch, its pool, the creator address, a program's account, an account left out or read-only, or one left below its rent-exempt minimum")]
+    PayoutTarget,
+    #[msg("the launcher's own holding is never paid by a script")]
+    PayoutToBeneficiary,
+    #[msg("a payout is over the terms: the holding's cap, the step's budget, or the window's")]
+    PayoutOverBound,
+    #[msg("payout terms are 1 to 10,000 basis points each and a window of 10 seconds to a day")]
+    BadPayoutTerms,
 }

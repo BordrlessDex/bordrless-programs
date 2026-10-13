@@ -226,6 +226,8 @@ impl Env {
             ("bordrless_companion", bordrless_companion::ID),
             ("hook_timelock", hook_timelock::ID),
             ("hook_vault", hook_vault::ID),
+            ("loss_cover_hook", loss_cover_hook::ID),
+            ("loss_cover_script", loss_cover_script::ID),
         ];
         for (name, id) in programs {
             svm.add_program(id, bytes_of(name))
@@ -250,6 +252,7 @@ impl Env {
             tax_hook::ID,
             half_life::ID,
             lottery_hook::ID,
+            loss_cover_hook::ID,
             hook_tester::ID,
         ];
         for (_, id) in programs {

@@ -1,0 +1,33 @@
+[package]
+name = "loss-cover-script"
+description = "Bordrless Loss cover script: the companion script that pays every holder under water the same fraction of its uncovered loss from the companion's pot, in rounds, reading the Loss cover hook's records. It moves nothing itself: it names, the companion pays and the hook records."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "loss_cover_script"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "bordrless-companion/idl-build", "loss-cover-hook/idl-build", "bordrless-game/idl-build", "bordrless-strategy/idl-build", "bordrless-token/idl-build", "bordrless-launch/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+solana-security-txt = { workspace = true }
+bordrless-companion = { path = "../bordrless_companion", features = ["no-entrypoint"] }
+loss-cover-hook = { path = "../loss_cover_hook", features = ["no-entrypoint"] }
+bordrless-game = { path = "../../crates/bordrless-game" }
+bordrless-strategy = { path = "../../crates/bordrless-strategy" }
+bordrless-token = { path = "../bordrless_token", features = ["no-entrypoint"] }
+bordrless-launch = { path = "../bordrless_launch", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true

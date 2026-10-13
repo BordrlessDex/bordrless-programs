@@ -43,7 +43,8 @@ use lottery_hook::client as lottery;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
-/// An hour a round, the shortest the standard allows. `T0` starts a round.
+/// An hour a round, the shortest before five-minute rounds (`a_five_minute_round_*` below has
+/// those). `T0` starts a round.
 const ROUND: u32 = 3_600;
 const R: i64 = ROUND as i64;
 const CREATOR_FEE: u16 = 200;
@@ -901,6 +902,9 @@ fn every_rollover() {
         last,
         i64::from(r0 + 2) * R - i64::from(WINDOW) - REVEAL_SECS
     );
+    // An hourly game's deadline, exactly as before five-minute rounds: round 500,001's claims end
+    // at 1,800,010,800, less a window (300 s) and the whole `REVEAL_SECS` (600 s).
+    assert_eq!((r0, last), (500_001, 1_800_009_900));
     l.w.env.warp(last + 1 - l.w.env.now);
     let pot = l.companion().pending_pot;
     let tx = l.draw_round(r0);
@@ -1842,7 +1846,8 @@ fn what_a_game_refuses() {
             CompanionError::GameHookMismatch,
         );
     }
-    // A companion without a game can't launch a custom hook.
+    // A companion without a game may launch with a custom hook too (2026-10-12): here the lottery
+    // hook, its tickets kept for a game nobody runs.
     let other = Keypair::new();
     w.env
         .send_paid_by(
@@ -1860,16 +1865,12 @@ fn what_a_game_refuses() {
         )
         .ok();
     let ix = launch_ix(&w, &launcher.pubkey(), &other.pubkey(), &lottery_cfg);
-    refused(
-        &w.env.send_paid_by(&[ix], &launcher, &[&other]),
-        CompanionError::CustomHookUnsupported,
-    );
+    w.env.send_paid_by(&[ix], &launcher, &[&other]).ok();
+    assert_eq!(w.launch(&other.pubkey()).custom_hook, Some(HOOK));
     // The game companion launches from the lottery config.
     let ix = launch_ix(&w, &launcher.pubkey(), &mint.pubkey(), &lottery_cfg);
     w.env.send_paid_by(&[ix], &launcher, &[&mint]).ok();
     // A companion that launched without a game never gets one.
-    let ix = launch_ix(&w, &launcher.pubkey(), &other.pubkey(), &plain);
-    w.env.send_paid_by(&[ix], &launcher, &[&other]).ok();
     refused(
         &w.env.send_paid_by(
             &[companion::create_game(
@@ -2052,9 +2053,9 @@ fn kit_companions_are_unchanged() {
             c.pending_pot,
             c.round_secs,
             c.stranded_burned_at,
-            (c.game_kind, c.pot_locked, c.reserved)
+            (c.game_kind, c.pot_locked, c.mode)
         ),
-        (0, 0, 0, 0, (GameKind::Lottery, 0, [0; 1]))
+        (0, 0, 0, 0, (GameKind::Lottery, 0, 0))
     );
     assert!(w.env.account(&companion::game_address(&mint)).is_none());
     let keys = LaunchKeys::of(&w.launch(&mint));
@@ -2212,4 +2213,152 @@ fn builders_name_the_programs_accounts() {
         retire.data,
         bordrless_companion::instruction::Retire {}.data()
     );
+}
+
+/// A lottery of five-minute rounds (the shortest the standard allows) with one-minute claim
+/// windows, two attempts in half a round.
+fn five_minutes(g: &mut CreateGameArgs) {
+    g.round_secs = 300;
+    g.claim_window_secs = 60;
+    g.max_attempts = 2;
+}
+
+/// `create_game` takes five-minute rounds with one-minute windows (two attempts of a minute, or
+/// one of two and a half), the hook prepared for them; a shorter window or round, or attempts past
+/// half a round, are refused before anything is made.
+#[test]
+fn a_lottery_takes_five_minute_rounds_and_one_minute_windows() {
+    assert_eq!(
+        (bordrless_game::MIN_ROUND_SECS, MIN_CLAIM_WINDOW),
+        (300, 60)
+    );
+    let mut w = World::new();
+    orao::load(&mut w.env);
+    let launcher = w.wallet_with_sol(50 * SOL);
+    for (window, attempts) in [(60u32, 2u8), (150, 1)] {
+        let mint = Keypair::new();
+        let mut g = game_args();
+        five_minutes(&mut g);
+        g.claim_window_secs = window;
+        g.max_attempts = attempts;
+        let tx = w.env.send_paid_by(
+            &setup_ixs(&launcher.pubkey(), &mint.pubkey(), create_args(), g),
+            &launcher,
+            &[&mint],
+        );
+        tx.ok();
+        let ev: GameCreated = tx.event();
+        assert_eq!(
+            (ev.round_secs, ev.claim_window_secs, ev.max_attempts),
+            (300, window, attempts)
+        );
+        assert_eq!(ev.first_round, round_of(w.env.now, 300));
+        let game: Game = w.env.read(&companion::game_address(&mint.pubkey()));
+        assert_eq!(
+            (game.round_secs, game.claim_window_secs, game.max_attempts),
+            (300, window, attempts)
+        );
+        let c: Companion = w.env.read(&companion::companion_address(&mint.pubkey()));
+        assert_eq!(c.round_secs, 300);
+    }
+    type Case = (fn(&mut CreateGameArgs), CompanionError);
+    let bad: [Case; 4] = [
+        // A window under a minute.
+        (
+            |g| g.claim_window_secs = MIN_CLAIM_WINDOW - 1,
+            CompanionError::BadGame,
+        ),
+        // Three attempts of a minute, or two of 76 s, take more than half the round.
+        (|g| g.max_attempts = 3, CompanionError::BadGame),
+        (|g| g.claim_window_secs = 76, CompanionError::BadGame),
+        // A round under five minutes (which the hook would not prepare either).
+        (|g| g.round_secs = 299, CompanionError::BadGame),
+    ];
+    for (i, (f, e)) in bad.into_iter().enumerate() {
+        let mint = Keypair::new();
+        let mut g = game_args();
+        five_minutes(&mut g);
+        f(&mut g);
+        let ixs = [
+            companion::create(
+                launcher.pubkey(),
+                launcher.pubkey(),
+                mint.pubkey(),
+                create_args(),
+            ),
+            lottery::prepare(launcher.pubkey(), mint.pubkey(), 300),
+            companion::create_game(launcher.pubkey(), mint.pubkey(), g),
+        ];
+        let tx = w.env.send_paid_by(&ixs, &launcher, &[&mint]);
+        assert_eq!(tx.custom(), code(e), "case {i}\n{}", tx.logs().join("\n"));
+        assert!(w
+            .env
+            .account(&companion::game_address(&mint.pubkey()))
+            .is_none());
+    }
+}
+
+/// A five-minute round's draw, as the program times it: due by its claims' end (the end of the
+/// round after it) less a window and the reveal, a quarter of the round (75 s): 165 s into the
+/// round after it. A second later the round rolls over (`Late`), nothing committed or paid; at
+/// that very moment it is drawn, and when ORAO answers as the reveal's 75 s run out, the winner
+/// still has a whole window, which ends as the claims do.
+#[test]
+fn a_five_minute_round_leaves_its_draw_a_quarter_round_to_reveal() {
+    // A second late.
+    let mut l = Lotto::with(|_| {}, five_minutes);
+    let a = l.buyer(SOL);
+    let r0 = l.start_round(&[&a]);
+    l.fund_pot();
+    let g = l.game();
+    assert_eq!(
+        (g.round_secs, g.claim_window_secs, g.max_attempts),
+        (300, 60, 2)
+    );
+    let last = g.last_draw(r0);
+    assert_eq!(reveal_secs(300), 75);
+    assert_eq!(last, i64::from(r0 + 2) * 300 - 60 - 75);
+    assert_eq!(last - i64::from(r0 + 1) * 300, 165);
+    // Round 6,000,001 (`T0` starts round 6,000,000): its claims end at 1,800,000,900.
+    assert_eq!((r0, last), (6_000_001, 1_800_000_765));
+    l.w.env.warp(last + 1 - l.w.env.now);
+    assert_eq!(l.round(), r0 + 1);
+    let pot = l.companion().pending_pot;
+    let tx = l.draw_round(r0);
+    tx.ok();
+    assert_eq!(tx.event::<RolledOver>().reason, RolloverReason::Late);
+    assert!(tx.events::<DrawCommitted>().is_empty());
+    let g = l.game();
+    assert_eq!(
+        (g.status, g.next_round, g.seed),
+        (DrawStatus::Idle, r0 + 1, [0; 32])
+    );
+    assert_eq!(l.companion().pending_pot, pot);
+
+    // Right on time.
+    let mut l = Lotto::with(|_| {}, five_minutes);
+    let a = l.buyer(SOL);
+    let r0 = l.start_round(&[&a]);
+    l.fund_pot();
+    let last = l.game().last_draw(r0);
+    l.w.env.warp(last - l.w.env.now);
+    l.draw_round(r0).ok();
+    let g = l.game();
+    assert_eq!((g.status, g.round), (DrawStatus::Requested, r0));
+    let ra = l.range(&a.pubkey(), r0);
+    let r = randomness_where(g.total, |_, x| ra.contains(x));
+    l.fulfil(&r);
+    l.w.env.warp(reveal_secs(300));
+    l.reveal().ok();
+    let g = l.game();
+    assert_eq!(g.revealed_at, last + 75);
+    assert_eq!(g.attempt_closes(0), Some(g.revealed_at + 60));
+    assert_eq!(g.attempt_closes(0), Some(g.claims_end()));
+    // The winner claims in the window's last second, the claims' last.
+    l.w.env.warp(59);
+    let tx = l.claim(0, &a.pubkey());
+    tx.ok();
+    let paid: PrizePaid = tx.event();
+    assert_eq!((paid.winner, paid.round, paid.attempt), (a.pubkey(), r0, 0));
+    assert_eq!(l.game().status, DrawStatus::Idle);
 }

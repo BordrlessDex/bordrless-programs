@@ -1204,12 +1204,23 @@ fn create_game_v2_checks_each_kinds_settings_against_its_hook() {
             CompanionError::BadGame,
         );
     }
-    let streak_bad: [Tweak; 5] = [
+    let streak_bad: [Tweak; 8] = [
         |_, k| k.min_weight = 0,
         |_, k| k.timer_secs = 600,
         |a, _| a.max_attempts = 1,
         |a, _| a.claim_window_secs = EPOCH,
         |_, k| k.min_streak_secs = 366 * 86_400,
+        // Epochs of an hour or more and claims of 5 minutes or more, as before five-minute lottery
+        // rounds: within the standard's bounds, and refused before the hook's header is read.
+        |a, _| {
+            a.round_secs = MIN_EPOCH_SECS - 1;
+            a.claim_window_secs = 600;
+        },
+        |a, _| {
+            a.round_secs = bordrless_game::MIN_ROUND_SECS;
+            a.claim_window_secs = 60;
+        },
+        |a, _| a.claim_window_secs = MIN_EPOCH_CLAIM_WINDOW - 1,
     ];
     for f in streak_bad {
         refused(

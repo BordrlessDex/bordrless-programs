@@ -3,10 +3,10 @@
 //! own clients exactly as the program builds them on chain; the program looks them up by key. The
 //! creator address signs only inside the program, so it is never marked a signer here.
 //!
-//! A game coin's token instructions carry its custom hook: the `_with` builders take the hook's
-//! accounts as the client resolved them from its registry (`CustomHookAccounts`), and add the
-//! registry, which the program resolves them from itself. Without one they build exactly what the
-//! plain builders build.
+//! A token with a custom hook (a game coin's, or since 2026-10-12 any companion's) has its token
+//! instructions carry the hook: the `_with` builders take the hook's accounts as the client
+//! resolved them from its registry (`CustomHookAccounts`), and add the registry, which the program
+//! resolves them from itself. Without one they build exactly what the plain builders build.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
@@ -18,10 +18,14 @@ use bordrless_token::client::{self as token_client, Hook};
 
 use crate::constants::*;
 use crate::instructions::{
-    AttestArgs, CreateArgs, CreateGameArgs, GameKindArgs, HookStatusArgs, StrategyArgs,
+    AttestArgs, CreateArgs, CreateGameArgs, CreateScriptArgs, CreateSnowballArgs, GameKindArgs,
+    HookStatusArgs, PayoutTermsArgs, StrategyArgs,
 };
 use crate::oracle;
-use crate::state::{Companion, Game, HookAttestation, HookStatus, ShareReceipt, StrategyTerms};
+use crate::state::{
+    Approval, Companion, Game, HookAttestation, HookStatus, PayoutTerms, Script, ShareReceipt,
+    Snowball, StrategyTerms,
+};
 
 /// This program's event authority.
 pub fn event_authority() -> Pubkey {
@@ -964,7 +968,11 @@ pub fn set_hook_status_v2(
 /// [`set_hook_status`] (v1) with the hook's [`audit_accounts`], so the program can refuse an audit
 /// of a timelocked or author-upgradeable hook (what the SDK sends; the bare builder is the deployed
 /// instruction).
-pub fn set_hook_status_checked(authority: Pubkey, hook: Pubkey, args: HookStatusArgs) -> Instruction {
+pub fn set_hook_status_checked(
+    authority: Pubkey,
+    hook: Pubkey,
+    args: HookStatusArgs,
+) -> Instruction {
     let mut ix = set_hook_status(authority, hook, args);
     ix.accounts.extend(audit_accounts(&hook));
     ix
@@ -1013,7 +1021,10 @@ pub fn create_strategy_game(
         false,
     ));
     if strategy_timelocked {
-        accounts.push(AccountMeta::new_readonly(timelock_address(&s.strategy), false));
+        accounts.push(AccountMeta::new_readonly(
+            timelock_address(&s.strategy),
+            false,
+        ));
     }
     accounts.extend(extras.iter().map(|k| AccountMeta::new_readonly(*k, false)));
     Instruction {
@@ -1104,7 +1115,10 @@ pub fn pay_strategy(
             false,
         ));
         accounts.push(AccountMeta::new(*owner, false));
-        accounts.push(AccountMeta::new(receipt_address(&mint, period, owner), false));
+        accounts.push(AccountMeta::new(
+            receipt_address(&mint, period, owner),
+            false,
+        ));
     }
     Instruction {
         program_id: crate::ID,
@@ -1114,5 +1128,337 @@ pub fn pay_strategy(
             n: owners.len() as u8,
         }
         .data(),
+    }
+}
+
+// ---- Snowball (2026-10-12) ----------------------------------------------------------------------------
+
+/// A Snowball's market maker: `PDA(["snowball", mint])`.
+pub fn snowball_address(mint: &Pubkey) -> Pubkey {
+    Snowball::address(mint).0
+}
+
+/// `create_snowball`: the companion of `mint` (whose keypair signs) becomes a Snowball, `payer`
+/// paying the rent. After `create`, before `launch`.
+pub fn create_snowball(payer: Pubkey, mint: Pubkey, args: CreateSnowballArgs) -> Instruction {
+    let accounts = crate::accounts::CreateSnowball {
+        payer,
+        mint,
+        companion: companion_address(&mint),
+        snowball: snowball_address(&mint),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateSnowball { args }.data(),
+    }
+}
+
+/// `snowball_step` (anyone): the swap's accounts (a buy's, which a sell uses too), the pool, the
+/// creator's token holding, the bridge's `unwrap_sol`'s. The swap's accounts carry the kit's
+/// extras as the launch's modules name them (`LaunchKeys`), holder vault included when on. For a
+/// custom-hook token, [`snowball_step_with`].
+pub fn snowball_step(cranker: Pubkey, keys: &LaunchKeys) -> Instruction {
+    snowball_step_with(cranker, keys, None, None)
+}
+
+/// `snowball_step` of a token with a custom hook: `buy` the hook's accounts resolved for a buy (the
+/// pool vault's transfer to the creator address) and `sell` for a sell (the creator address's
+/// transfer to the vault), as the client resolved them from the hook's registry; one given alone
+/// serves both directions (a hook whose extras do not depend on them). The step trades one side,
+/// which the program decides; it resolves that side's extras itself from the registry, passed too.
+/// Without a hook, exactly [`snowball_step`].
+pub fn snowball_step_with(
+    cranker: Pubkey,
+    keys: &LaunchKeys,
+    buy: Option<&CustomHookAccounts>,
+    sell: Option<&CustomHookAccounts>,
+) -> Instruction {
+    let (buy, sell) = (buy.or(sell), sell.or(buy));
+    let creator = creator_address(&keys.mint);
+    let mut extra = remaining(&creator_buy(keys, 0, 0, buy), &[]);
+    if let Some(s) = sell {
+        extra.extend(s.extras.iter().cloned());
+    }
+    extra.push(AccountMeta::new_readonly(
+        launch_client::pool_address(&keys.mint, &keys.quote_mint, keys.lp_fee_bps),
+        false,
+    ));
+    extra.extend(remaining(
+        &token_client::create_holding(cranker, keys.mint, creator),
+        &[],
+    ));
+    extra.extend(unwrap_accounts(creator));
+    extra.extend(registry(&keys.mint, buy));
+    let named = vec![
+        AccountMeta::new(cranker, true),
+        AccountMeta::new(companion_address(&keys.mint), false),
+        AccountMeta::new(creator, false),
+        AccountMeta::new_readonly(launch_client::launch_address(&keys.mint), false),
+        AccountMeta::new(snowball_address(&keys.mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ];
+    build(named, extra, crate::instruction::SnowballStep {}.data())
+}
+
+// ---- Approvals and script companions (2026-10-12) ----------------------------------------------------
+
+/// Bordrless's approval of `program`: `PDA(["approval", program])`.
+pub fn approval_address(program: &Pubkey) -> Pubkey {
+    Approval::address(program).0
+}
+
+/// A script companion's script: `PDA(["script", mint])`.
+pub fn script_address(mint: &Pubkey) -> Pubkey {
+    Script::address(mint).0
+}
+
+/// A script's state, made by `create_script` when it asks for one: `PDA(["script-state", mint])`.
+pub fn script_state_address(mint: &Pubkey) -> Pubkey {
+    Script::state_address(mint).0
+}
+
+/// `approve(program, kind, code_hash, author)`, signed (and paid the first time) by the companion
+/// program's upgrade authority: `program`'s account and ProgramData are passed, its code hashed on
+/// chain, and its `Timelock`'s address after them (read only when the program is timelocked; an
+/// unused address otherwise), so its upgrade authority can be classed.
+pub fn approve(
+    authority: Pubkey,
+    program: Pubkey,
+    kind: u8,
+    code_hash: [u8; 32],
+    author: Pubkey,
+) -> Instruction {
+    let mut accounts = crate::accounts::Approve {
+        authority,
+        program_data: program_data_address(),
+        target: program,
+        target_programdata: hook_program_data_address(&program),
+        approval: approval_address(&program),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.push(AccountMeta::new_readonly(timelock_address(&program), false));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::Approve {
+            program,
+            kind,
+            code_hash,
+            author,
+        }
+        .data(),
+    }
+}
+
+/// `claim_fees` of a script companion: the plain claim, then its `Script` (writable: it keeps its
+/// author's running total) and, when the claim may pay the script's author (`Script.author`, unless
+/// it is the default key or the launch's beneficiary), the author's wallet (writable).
+pub fn claim_fees_script(cranker: Pubkey, mint: Pubkey, author: Option<Pubkey>) -> Instruction {
+    let mut ix = claim_fees(cranker, mint, None);
+    ix.accounts
+        .push(AccountMeta::new(script_address(&mint), false));
+    if let Some(author) = author {
+        ix.accounts.push(AccountMeta::new(author, false));
+    }
+    ix
+}
+
+/// `revoke_approval(program)`, signed by the companion program's upgrade authority.
+pub fn revoke_approval(authority: Pubkey, program: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: crate::accounts::RevokeApproval {
+            authority,
+            program_data: program_data_address(),
+            approval: approval_address(&program),
+            event_authority: event_authority(),
+            program: crate::ID,
+        }
+        .to_account_metas(None),
+        data: crate::instruction::RevokeApproval { program }.data(),
+    }
+}
+
+/// `create_script`: the companion of `mint` (whose keypair signs) becomes a script companion running
+/// `args.program`, `payer` paying the rent of the script account and of the script's state
+/// (`args.state_len` bytes at [`script_state_address`], made by the companion; none when 0). After
+/// `create`, before `launch`. `script_extra`: the accounts the script's `companion_init` takes after
+/// its four (`[creator, mint, state (or the system program's id), system program]`), as the script
+/// documents them; forwarded with their writability, never as signers (the payer is never passed).
+pub fn create_script(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateScriptArgs,
+    script_extra: Vec<AccountMeta>,
+) -> Instruction {
+    let creator = creator_address(&mint);
+    let program = args.program;
+    let mut accounts = crate::accounts::CreateScript {
+        payer,
+        mint,
+        companion: companion_address(&mint),
+        script: script_address(&mint),
+        script_state: script_state_address(&mint),
+        creator,
+        creator_quote: token_client::holding_address(&BRIDGED_SOL_MINT, &creator),
+        approval: approval_address(&program),
+        script_program: program,
+        script_programdata: hook_program_data_address(&program),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(script_extra);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateScript { args }.data(),
+    }
+}
+
+/// `script_step` (anyone) of the script companion of `keys.mint`, whose script is `script_program`:
+/// `extra` are the accounts the script's `companion_step` takes after its six (`[creator, mint,
+/// launch, companion, pool, state (or the system program's id)]`), as the script documents them;
+/// then the creator's token holding's `create_holding` accounts (the sender pays its rent the first
+/// time) and the bridge's `unwrap_sol` accounts (the bounty). Every remaining account is forwarded
+/// to the script with its writability, never as a signer.
+pub fn script_step(
+    cranker: Pubkey,
+    keys: &LaunchKeys,
+    script_program: Pubkey,
+    extra: Vec<AccountMeta>,
+) -> Instruction {
+    let mint = keys.mint;
+    let creator = creator_address(&mint);
+    let mut accounts = crate::accounts::ScriptStep {
+        cranker,
+        companion: companion_address(&mint),
+        creator,
+        launch: launch_client::launch_address(&mint),
+        mint,
+        pool: keys.pool(),
+        script: script_address(&mint),
+        script_state: script_state_address(&mint),
+        approval: approval_address(&script_program),
+        script_program,
+        script_programdata: hook_program_data_address(&script_program),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(extra);
+    accounts.extend(remaining(
+        &token_client::create_holding(cranker, mint, creator),
+        &[],
+    ));
+    accounts.extend(unwrap_accounts(creator));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::ScriptStep {}.data(),
+    }
+}
+
+// ---- Payouts (Loss cover, 2026-10-12) ----------------------------------------------------------------
+
+/// A script companion's payout terms: `PDA(["payout-terms", mint])`.
+pub fn payout_terms_address(mint: &Pubkey) -> Pubkey {
+    PayoutTerms::address(mint).0
+}
+
+/// The one signer of a hook's `record_payout`: `PDA(["payout-authority"])`, a program-wide address.
+pub fn payout_authority_address() -> Pubkey {
+    PAYOUT_AUTHORITY
+}
+
+/// `create_script_v2`: [`create_script`] with the script's payout terms, made at
+/// [`payout_terms_address`], `payer` paying their rent too.
+pub fn create_script_v2(
+    payer: Pubkey,
+    mint: Pubkey,
+    args: CreateScriptArgs,
+    payout: PayoutTermsArgs,
+    script_extra: Vec<AccountMeta>,
+) -> Instruction {
+    let creator = creator_address(&mint);
+    let program = args.program;
+    let mut accounts = crate::accounts::CreateScriptV2 {
+        payer,
+        mint,
+        companion: companion_address(&mint),
+        script: script_address(&mint),
+        script_state: script_state_address(&mint),
+        creator,
+        creator_quote: token_client::holding_address(&BRIDGED_SOL_MINT, &creator),
+        approval: approval_address(&program),
+        script_program: program,
+        script_programdata: hook_program_data_address(&program),
+        terms: payout_terms_address(&mint),
+        system_program: system_program::ID,
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    accounts.extend(script_extra);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateScriptV2 { args, payout }.data(),
+    }
+}
+
+/// The accounts a step that answers payouts needs beside the script's own, as the program looks
+/// them up: the terms (writable), the launch's hook program `hook`, the payout authority, the hook's
+/// state for the mint (writable) and its `["hook-authority"]`, the token program and its event
+/// authority. The candidates follow: each holding (writable: the hook records into it) and, when
+/// it is paid, its owner (writable).
+pub fn payout_accounts(mint: &Pubkey, hook: &Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new(payout_terms_address(mint), false),
+        AccountMeta::new_readonly(*hook, false),
+        AccountMeta::new_readonly(PAYOUT_AUTHORITY, false),
+        AccountMeta::new(bordrless_game::state_address(hook, mint).0, false),
+        AccountMeta::new_readonly(bordrless_hook::hook_authority(hook).0, false),
+        AccountMeta::new_readonly(TOKEN_ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+    ]
+}
+
+/// The hook's `record_payout(lamports, tag)` for `holding` of `mint`, exactly as `script_step`
+/// builds and signs it (the SDK's reference; never sent on its own: only the companion signs for
+/// the payout authority).
+pub fn record_payout(
+    hook: Pubkey,
+    mint: Pubkey,
+    holding: Pubkey,
+    lamports: u64,
+    tag: u32,
+) -> Instruction {
+    let mut data = Vec::with_capacity(8 + 8 + 4);
+    data.extend_from_slice(&RECORD_PAYOUT_DISCRIMINATOR);
+    data.extend_from_slice(&lamports.to_le_bytes());
+    data.extend_from_slice(&tag.to_le_bytes());
+    Instruction {
+        program_id: hook,
+        accounts: vec![
+            AccountMeta::new_readonly(PAYOUT_AUTHORITY, true),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(holding, false),
+            AccountMeta::new(bordrless_game::state_address(&hook, &mint).0, false),
+            AccountMeta::new_readonly(bordrless_hook::hook_authority(&hook).0, false),
+            AccountMeta::new_readonly(TOKEN_ID, false),
+            AccountMeta::new_readonly(token_client::event_authority(), false),
+        ],
+        data,
     }
 }

@@ -1,0 +1,29 @@
+# A test-only companion script (never deployed): a native program the companion calls with the
+# creator address signing, whose `companion_step` answers the payouts its state scripts (any bytes,
+# so a bad answer is as easy as a good one), trades first when told, or tries to re-enter the
+# companion, so `companion_payouts.rs` can drive every rule of the companion's payout primitive.
+[package]
+name = "script-payouts"
+description = "Test-only companion script with scripted payout answers (the payout primitive's suite)."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "script_payouts"
+
+[features]
+default = []
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+bordrless-hook = { path = "../../../../../crates/bordrless-hook" }
+bordrless-launch = { path = "../../../../bordrless_launch", features = ["no-entrypoint"] }
+bordrless-token = { path = "../../../../bordrless_token", features = ["no-entrypoint"] }
+
+[lints]
+workspace = true
