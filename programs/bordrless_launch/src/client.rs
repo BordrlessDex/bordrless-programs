@@ -13,7 +13,7 @@ use bordrless_token::client as token_client;
 use crate::constants::*;
 use crate::instructions::launch_config::programdata_address;
 use crate::instructions::{ConfigArgs, CreateConfigArgs, CreateLaunchArgs};
-use crate::state::{Launch, LaunchConfig, LaunchRules};
+use crate::state::{Launch, LaunchConfig, LaunchRules, QuoteCut};
 
 /// This program's `["hook-authority"]` PDA.
 pub fn hook_signer() -> Pubkey {
@@ -73,6 +73,41 @@ pub fn hook_extras(mint: &Pubkey, quote_mint: &Pubkey) -> Vec<AccountMeta> {
         AccountMeta::new(holder_vault_address(mint, quote_mint), false),
         AccountMeta::new_readonly(kit_config_address(mint), false),
     ]
+}
+
+/// The launchpad's signer of `hook`'s `quote_cut`: `PDA(["quote-cut", hook])`.
+pub fn quote_cut_signer(hook: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[QUOTE_CUT_SIGNER_SEED, hook.as_ref()], &crate::ID).0
+}
+
+/// The custom hook's state the launchpad passes to its `quote_cut`: `PDA(["state", mint], hook)`.
+pub fn hook_state_address(hook: &Pubkey, mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[HOOK_STATE_SEED, mint.as_ref()], hook).0
+}
+
+/// The four accounts a trade by `actor` on a launch whose custom hook `hook` takes a SOL cut
+/// passes after [`hook_extras`] (`docs/quote-cut.md`; the pool's registry lists them at 9 to 12):
+/// the hook, `actor`'s holding of the token, the hook's state (writable) and the launchpad's
+/// signer for the hook. The creator and the token's hook-vault slots may leave them out.
+pub fn quote_cut_extras(hook: &Pubkey, mint: &Pubkey, actor: &Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new_readonly(*hook, false),
+        AccountMeta::new_readonly(token_client::holding_address(mint, actor), false),
+        AccountMeta::new(hook_state_address(hook, mint), false),
+        AccountMeta::new_readonly(quote_cut_signer(hook), false),
+    ]
+}
+
+/// A swap built by [`swap`] or [`swap_with_base_slice`] on a launch whose custom hook `hook` takes
+/// a SOL cut, with [`quote_cut_extras`] for its trader appended.
+pub fn with_quote_cut(
+    mut ix: Instruction,
+    hook: &Pubkey,
+    mint: &Pubkey,
+    actor: &Pubkey,
+) -> Instruction {
+    ix.accounts.extend(quote_cut_extras(hook, mint, actor));
+    ix
 }
 
 /// The token-hook slice of a launch's mint for a DEX instruction when its hook is the kit or
@@ -222,6 +257,26 @@ pub fn create_config_timelocked(
             false,
         ));
     }
+    ix
+}
+
+/// `create_quote_cut_config`: as [`create_config`] (the same accounts, with any timelock the
+/// client appends), for a custom hook that also takes a SOL cut of at most `cut`'s caps;
+/// `author_share_bps` above 0 lists it.
+pub fn create_quote_cut_config(
+    creator: Pubkey,
+    launch_config: Pubkey,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+    cut: QuoteCut,
+) -> Instruction {
+    let mut ix = create_config(creator, launch_config, args.clone());
+    ix.data = crate::instruction::CreateQuoteCutConfig {
+        args,
+        author_share_bps,
+        cut,
+    }
+    .data();
     ix
 }
 

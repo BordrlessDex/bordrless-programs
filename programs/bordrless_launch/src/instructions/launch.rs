@@ -21,7 +21,7 @@ use bordrless_token::state::AuthorityKind;
 use crate::constants::*;
 use crate::cpi;
 use crate::error::LaunchError;
-use crate::events::LaunchCreated;
+use crate::events::{LaunchCreated, LaunchQuoteCut};
 use crate::state::*;
 
 /// Arguments of `create_launch`.
@@ -215,6 +215,54 @@ pub fn registry_list(holder_vault: Pubkey, kit_config: Pubkey) -> HookAccountLis
     ])
 }
 
+/// [`registry_list`] of a launch whose custom hook `hook` takes a SOL cut (`docs/quote-cut.md`):
+/// four more extras at 9 to 12, which the pool hook checks on every trade but the creator's and
+/// the token's hook-vault slots': the hook program, the trader's holding of the token
+/// (`holding(base mint, actor)`), the hook's state (`PDA(["state", base mint], hook)`, writable)
+/// and the launchpad's signer for the hook (`PDA(["quote-cut", hook])`).
+pub fn registry_list_with_quote_cut(
+    holder_vault: Pubkey,
+    kit_config: Pubkey,
+    hook: Pubkey,
+) -> HookAccountList {
+    let mut list = registry_list(holder_vault, kit_config);
+    list.accounts.extend([
+        ExtraAccount {
+            writable: false,
+            source: AccountSource::Key(hook),
+        },
+        ExtraAccount {
+            writable: false,
+            source: AccountSource::Pda {
+                program: bordrless_token::ID,
+                seeds: vec![
+                    Seed::Literal(bordrless_token::constants::HOLDING_SEED.to_vec()),
+                    Seed::Account(2),
+                    Seed::Account(4),
+                ],
+            },
+        },
+        ExtraAccount {
+            writable: true,
+            source: AccountSource::Pda {
+                program: hook,
+                seeds: vec![Seed::Literal(HOOK_STATE_SEED.to_vec()), Seed::Account(2)],
+            },
+        },
+        ExtraAccount {
+            writable: false,
+            source: AccountSource::Pda {
+                program: crate::ID,
+                seeds: vec![
+                    Seed::Literal(QUOTE_CUT_SIGNER_SEED.to_vec()),
+                    Seed::Account(9),
+                ],
+            },
+        },
+    ]);
+    list
+}
+
 /// Why `create_launch` refuses `rules` with `creator_fee_bps` under `config` (§5.2), checked in
 /// the order the launch form checks them.
 pub fn check_rules(rules: &LaunchRules, creator_fee_bps: u16, config: &Config) -> Result<()> {
@@ -306,6 +354,8 @@ struct Plan<'info> {
     /// The config author's share of the creator fee (a listed config made by someone else).
     author_share_bps: u16,
     custom: Option<CustomHook<'info>>,
+    /// The custom hook's SOL cut, from the config.
+    quote_cut: Option<QuoteCut>,
 }
 
 impl<'info> Plan<'info> {
@@ -491,7 +541,7 @@ fn plan<'info>(
     // arguments'. Bounds and the creator fee are checked either way: the config they were made
     // under may have changed.
     // A listed config's author shares the creator fee of every launch someone else makes from it.
-    let (rules, creator_fee_bps, hook, config_key, author_share_bps, timelocked) =
+    let (rules, creator_fee_bps, hook, config_key, author_share_bps, timelocked, quote_cut) =
         match &ctx.accounts.launch_config {
             Some(lc) => {
                 require!(
@@ -510,9 +560,10 @@ fn plan<'info>(
                     Some(lc.key()),
                     share,
                     lc.hook_timelocked(),
+                    lc.quote_cut(),
                 )
             }
-            None => (args.rules, args.creator_fee_bps, None, None, 0, false),
+            None => (args.rules, args.creator_fee_bps, None, None, 0, false, None),
         };
     require!(
         creator_fee_bps <= config.max_creator_fee_bps,
@@ -586,6 +637,7 @@ fn plan<'info>(
         config: config_key,
         author_share_bps,
         custom,
+        quote_cut,
     }))
 }
 
@@ -948,7 +1000,12 @@ fn write_pool_registry<'info>(
         &crate::ID,
         &plan.pool,
         plan.registry_bump,
-        &registry_list(plan.holder_vault, plan.kit_config),
+        &match (plan.quote_cut, plan.custom_hook()) {
+            (Some(_), Some(hook)) => {
+                registry_list_with_quote_cut(plan.holder_vault, plan.kit_config, hook)
+            }
+            _ => registry_list(plan.holder_vault, plan.kit_config),
+        },
     )
 }
 
@@ -1016,6 +1073,13 @@ fn record_launch<'info>(
     launch.author_share_bps = plan.author_share_bps;
     launch.author_fees_paid = 0;
     launch.reserved = [0; 22];
+    if let (Some(cut), Some(hook)) = (plan.quote_cut, plan.custom_hook()) {
+        let (_, state_bump) =
+            Pubkey::find_program_address(&[HOOK_STATE_SEED, plan.mint.as_ref()], &hook);
+        let (_, signer_bump) =
+            Pubkey::find_program_address(&[QUOTE_CUT_SIGNER_SEED, hook.as_ref()], &crate::ID);
+        launch.set_quote_cut(&cut, state_bump, signer_bump);
+    }
     Ok(())
 }
 
@@ -1062,6 +1126,16 @@ fn emit_launch_created<'info>(
         slot: plan.slot,
         ts: plan.now,
     });
+    if let (Some(cut), Some(hook)) = (plan.quote_cut, plan.custom_hook()) {
+        emit_cpi!(LaunchQuoteCut {
+            launch: plan.launch,
+            mint: plan.mint,
+            hook,
+            max_buy_bps: cut.max_buy_bps,
+            max_sell_bps: cut.max_sell_bps,
+            ts: plan.now,
+        });
+    }
     Ok(())
 }
 

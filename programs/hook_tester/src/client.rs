@@ -178,6 +178,37 @@ pub fn write_hook_data(mint: Pubkey, holding: Pubkey, data: [u8; 64]) -> Instruc
     )
 }
 
+/// The quote-cut script of `mint`: `["state", mint]`.
+pub fn quote_state_address(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[crate::QUOTE_STATE_SEED, mint.as_ref()], &crate::ID).0
+}
+
+/// `init_quote_state`: the quote-cut script of `mint`.
+pub fn init_quote_state(payer: Pubkey, mint: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(quote_state_address(&mint), false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ],
+        data: crate::instruction::InitQuoteState {}.data(),
+    }
+}
+
+/// `set_quote_answer`: `mint`'s `quote_cut` does `action` ([`crate::quote_mode`]) with `data`.
+pub fn set_quote_answer(authority: Pubkey, mint: Pubkey, action: u8, data: Vec<u8>) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: vec![
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new(quote_state_address(&mint), false),
+        ],
+        data: crate::instruction::SetQuoteAnswer { action, data }.data(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

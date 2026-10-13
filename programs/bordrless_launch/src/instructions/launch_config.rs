@@ -9,7 +9,7 @@ use bordrless_hook::token_flags;
 
 use crate::constants::*;
 use crate::error::LaunchError;
-use crate::events::{ConfigListed, LaunchConfigCreated};
+use crate::events::{ConfigListed, LaunchConfigCreated, QuoteCutConfigured};
 use crate::instructions::launch::check_rules;
 use crate::state::*;
 
@@ -158,7 +158,29 @@ pub fn check_timelock_idle(hook: &Pubkey, timelock: Option<&AccountInfo>) -> Res
 
 /// `create_config`.
 pub fn process_create_config(ctx: Context<CreateConfig>, args: CreateConfigArgs) -> Result<()> {
-    make_config(ctx, args, 0)
+    make_config(ctx, args, 0, None)
+}
+
+/// `create_quote_cut_config`: a config whose custom hook also takes a SOL cut on every trade
+/// (`docs/quote-cut.md`): the hook's `quote_cut` answers a rate, the pool hook takes at most `cut`'s
+/// cap of the trade's SOL with the creator fee. `author_share_bps` 0 makes it as `create_config`
+/// does, else as `create_listed_config` (the author's share covers the SOL cut too: it is part of
+/// the creator fee).
+pub fn process_create_quote_cut_config(
+    ctx: Context<CreateConfig>,
+    args: CreateConfigArgs,
+    author_share_bps: u16,
+    cut: QuoteCut,
+) -> Result<()> {
+    require!(
+        args.custom_hook.is_some() && cut.valid(),
+        LaunchError::InvalidQuoteCut
+    );
+    require!(
+        author_share_bps <= MAX_AUTHOR_SHARE_BPS,
+        LaunchError::InvalidAuthorShare
+    );
+    make_config(ctx, args, author_share_bps, Some(cut))
 }
 
 /// `create_listed_config`: `create_config`, plus the author's share of the creator fee on every
@@ -172,13 +194,14 @@ pub fn process_create_listed_config(
         author_share_bps > 0 && author_share_bps <= MAX_AUTHOR_SHARE_BPS,
         LaunchError::InvalidAuthorShare
     );
-    make_config(ctx, args, author_share_bps)
+    make_config(ctx, args, author_share_bps, None)
 }
 
 fn make_config(
     ctx: Context<CreateConfig>,
     args: CreateConfigArgs,
     author_share_bps: u16,
+    quote_cut: Option<QuoteCut>,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let config = &ctx.accounts.config;
@@ -225,6 +248,9 @@ fn make_config(
     if timelocked {
         lc.reserved[0] = LaunchConfig::TIMELOCKED_HOOK;
     }
+    if let Some(cut) = &quote_cut {
+        lc.set_quote_cut(cut);
+    }
     emit_cpi!(LaunchConfigCreated {
         config: key,
         creator,
@@ -235,6 +261,15 @@ fn make_config(
         label: args.label,
         ts: now,
     });
+    if let (Some(cut), Some(hook)) = (quote_cut, args.custom_hook) {
+        emit_cpi!(QuoteCutConfigured {
+            config: key,
+            hook,
+            max_buy_bps: cut.max_buy_bps,
+            max_sell_bps: cut.max_sell_bps,
+            ts: now,
+        });
+    }
     if author_share_bps > 0 {
         emit_cpi!(ConfigListed {
             config: key,

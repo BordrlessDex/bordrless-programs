@@ -25,6 +25,7 @@
 
 use anchor_lang::prelude::*;
 use bordrless_hook::{HookReturn, PoolHookArgs};
+use state::QuoteCut;
 
 pub mod client;
 pub mod constants;
@@ -79,6 +80,19 @@ pub mod bordrless_launch {
         launch_config::process_create_listed_config(ctx, args, author_share_bps)
     }
 
+    /// Anyone: makes a `LaunchConfig` whose custom hook also takes a SOL cut on every trade
+    /// (`docs/quote-cut.md`): the hook's `quote_cut` answers a rate, the pool hook takes at most
+    /// `cut`'s cap (at most 1,000 basis points a side) of the trade's SOL with the creator fee.
+    /// `author_share_bps` 0: as `create_config`; else as `create_listed_config`.
+    pub fn create_quote_cut_config(
+        ctx: Context<CreateConfig>,
+        args: CreateConfigArgs,
+        author_share_bps: u16,
+        cut: QuoteCut,
+    ) -> Result<()> {
+        launch_config::process_create_quote_cut_config(ctx, args, author_share_bps, cut)
+    }
+
     /// Creates a token and its curve pool, from the inline rules or from a `LaunchConfig`. With
     /// a custom hook, the remaining accounts are the hook, the token program's signer for it,
     /// its registry for the mint and the registry's extras.
@@ -115,14 +129,21 @@ pub mod bordrless_launch {
         hooks::process_before_initialize(ctx, args)
     }
 
-    /// Pool hook: the anti-sniper LP fee; a buy's creator and holder fees, a sell's burn.
-    pub fn before_swap(ctx: Context<HookCallback>, args: PoolHookArgs) -> Result<HookReturn> {
+    /// Pool hook: the anti-sniper LP fee; a buy's creator and holder fees (and its custom hook's
+    /// SOL cut), a sell's burn.
+    pub fn before_swap<'info>(
+        ctx: Context<'info, HookCallback<'info>>,
+        args: PoolHookArgs,
+    ) -> Result<HookReturn> {
         hooks::process_before_swap(ctx, args)
     }
 
-    /// Pool hook: a buy's burn; a sell's creator and holder fees, from the output the DEX hands
-    /// on.
-    pub fn after_swap(ctx: Context<HookCallback>, args: PoolHookArgs) -> Result<HookReturn> {
+    /// Pool hook: a buy's burn; a sell's creator and holder fees (and its custom hook's SOL cut),
+    /// from the output the DEX hands on.
+    pub fn after_swap<'info>(
+        ctx: Context<'info, HookCallback<'info>>,
+        args: PoolHookArgs,
+    ) -> Result<HookReturn> {
         hooks::process_after_swap(ctx, args)
     }
 }

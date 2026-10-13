@@ -62,6 +62,34 @@ pub const DEX_HOOK_SIGNER: Pubkey =
 /// Most extra accounts a test may add to the registry after the script.
 pub const MAX_EXTRAS: usize = 16;
 
+/// The launchpad, whose `["quote-cut", hook]` PDA signs a hook's `quote_cut` (a constant: this
+/// test program does not depend on the launchpad; the tests check the two agree).
+pub const LAUNCH_ID: Pubkey = Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
+/// `["state", mint]`: the quote-cut script of a mint, the account the launchpad passes writable
+/// to `quote_cut` (`docs/quote-cut.md`).
+pub const QUOTE_STATE_SEED: &[u8] = b"state";
+/// Bytes allocated for a quote-cut script.
+pub const QUOTE_STATE_SPACE: usize = 1_024;
+
+/// What `quote_cut` does.
+pub mod quote_mode {
+    /// Answers nothing (no return data): no cut.
+    pub const NONE: u8 = 0;
+    /// Returns the scripted bytes as its return data (2 bytes is a rate; anything else is
+    /// malformed).
+    pub const RETURN: u8 = 1;
+    /// Fails with `TesterError::Refused`.
+    pub const FAIL: u8 = 2;
+    /// Whale bait: the scripted bytes are a threshold (u64 LE) and a rate (u16 LE); answers the
+    /// rate when the trader's holding of the token holds at least the threshold, else 0.
+    pub const WHALE: u8 = 3;
+    /// Answers the scripted rate (u16 LE), but only when called by the launchpad's signer for
+    /// this hook; fails otherwise (`TesterError::BadHookSigner`).
+    pub const SIGNED: u8 = 4;
+    /// Burns compute: loops the scripted number of times (u32 LE), then answers nothing.
+    pub const SPIN: u8 = 5;
+}
+
 /// Callback ids: which callback a scripted answer and a record belong to.
 pub mod callback {
     /// `before_transfer`.
@@ -300,6 +328,89 @@ pub mod hook_tester {
         run_pool(ctx, callback::AFTER_SWAP, &args)
     }
 
+    /// Creates the quote-cut script of `mint` at `["state", mint]` (`docs/quote-cut.md`).
+    pub fn init_quote_state(ctx: Context<InitQuoteState>) -> Result<()> {
+        let state = &mut ctx.accounts.state;
+        state.bump = ctx.bumps.state;
+        state.authority = ctx.accounts.payer.key();
+        state.mint = ctx.accounts.mint.key();
+        Ok(())
+    }
+
+    /// Scripts what `quote_cut` does ([`quote_mode`]).
+    pub fn set_quote_answer(ctx: Context<SetQuoteAnswer>, action: u8, data: Vec<u8>) -> Result<()> {
+        require!(
+            action <= quote_mode::SPIN && data.len() <= 64,
+            TesterError::BadParams
+        );
+        let state = &mut ctx.accounts.state;
+        state.mode = action;
+        state.data = data;
+        Ok(())
+    }
+
+    /// The SOL cut a launch asks of its custom hook (`docs/quote-cut.md`), as scripted in the
+    /// mint's `["state", mint]`, recording what it was told (the arguments, the signer, the
+    /// trader's balance). Without a script it answers nothing.
+    pub fn quote_cut(ctx: Context<QuoteCutCall>, args: PoolHookArgs) -> Result<()> {
+        let signer_ok = ctx.accounts.signer.is_signer
+            && ctx.accounts.signer.key()
+                == Pubkey::find_program_address(&[b"quote-cut", crate::ID.as_ref()], &LAUNCH_ID).0;
+        let balance = if ctx.accounts.holding.owner == &bordrless_token::ID {
+            token_client::read_holding(&ctx.accounts.holding)
+                .map(|h| h.amount)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let info = &ctx.accounts.state;
+        if info.owner != &crate::ID || info.data_is_empty() {
+            return Ok(());
+        }
+        let mut state = QuoteState::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+        state.calls = state.calls.checked_add(1).ok_or(TesterError::Overflow)?;
+        let mut told = Vec::with_capacity(256);
+        args.serialize(&mut told)?;
+        state.told = told;
+        state.signer_ok = signer_ok;
+        state.balance = balance;
+        state.actor = ctx.accounts.actor.key();
+        let (mode, data) = (state.mode, state.data.clone());
+        state.try_serialize(&mut &mut info.try_borrow_mut_data()?[..])?;
+        let rate = |b: &[u8]| -> Result<[u8; 2]> {
+            b.get(0..2)
+                .and_then(|x| x.try_into().ok())
+                .ok_or_else(|| error!(TesterError::BadParams))
+        };
+        match mode {
+            quote_mode::RETURN => set_return_data(&data),
+            quote_mode::FAIL => return err!(TesterError::Refused),
+            quote_mode::WHALE => {
+                let threshold = u64::from_le_bytes(
+                    data.get(0..8)
+                        .and_then(|x| x.try_into().ok())
+                        .ok_or(TesterError::BadParams)?,
+                );
+                let bps = rate(&data[8..])?;
+                set_return_data(if balance >= threshold { &bps } else { &[0, 0] });
+            }
+            quote_mode::SIGNED => {
+                require!(signer_ok, TesterError::BadHookSigner);
+                set_return_data(&rate(&data)?);
+            }
+            quote_mode::SPIN => {
+                let n = u32::from_le_bytes(rate4(&data)?);
+                let mut x: u64 = 0;
+                for i in 0..n {
+                    x = core::hint::black_box(x.wrapping_mul(31).wrapping_add(u64::from(i)));
+                }
+                msg!("spun {}", x);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// A router: calls the DEX's `swap(args)` by CPI. The remaining accounts are the swap's
     /// accounts in its order (as `bordrless_swap::client::swap` lists them, its event authority,
     /// program and extras included), passed on with the signer and writable flags they arrived
@@ -510,6 +621,87 @@ fn forward<'info>(
     };
     invoke(&ix, &infos)?;
     Ok(())
+}
+
+fn rate4(b: &[u8]) -> Result<[u8; 4]> {
+    b.get(0..4)
+        .and_then(|x| x.try_into().ok())
+        .ok_or_else(|| error!(TesterError::BadParams))
+}
+
+/// The quote-cut script of a mint, at `["state", mint]`.
+#[account]
+#[derive(Debug, Default)]
+pub struct QuoteState {
+    /// Bump.
+    pub bump: u8,
+    /// May change the answer.
+    pub authority: Pubkey,
+    /// The mint.
+    pub mint: Pubkey,
+    /// [`quote_mode`].
+    pub mode: u8,
+    /// Its data.
+    pub data: Vec<u8>,
+    /// Times asked.
+    pub calls: u64,
+    /// The `PoolHookArgs` it was last told (Borsh).
+    pub told: Vec<u8>,
+    /// Whether the last call was signed by the launchpad's signer for this hook.
+    pub signer_ok: bool,
+    /// The trader's balance of the token it last read.
+    pub balance: u64,
+    /// The trader it was last told.
+    pub actor: Pubkey,
+}
+
+impl QuoteState {
+    /// The pool arguments it was last told.
+    pub fn told_pool(&self) -> Option<PoolHookArgs> {
+        PoolHookArgs::deserialize(&mut self.told.as_slice()).ok()
+    }
+}
+
+/// Accounts of `init_quote_state`.
+#[derive(Accounts)]
+pub struct InitQuoteState<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: any mint.
+    pub mint: UncheckedAccount<'info>,
+    #[account(init, payer = payer, space = QUOTE_STATE_SPACE, seeds = [QUOTE_STATE_SEED, mint.key().as_ref()], bump)]
+    pub state: Account<'info, QuoteState>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Accounts of `set_quote_answer`.
+#[derive(Accounts)]
+pub struct SetQuoteAnswer<'info> {
+    pub authority: Signer<'info>,
+    #[account(mut, has_one = authority @ TesterError::BadParams)]
+    pub state: Account<'info, QuoteState>,
+}
+
+/// Accounts of `quote_cut`, as the launchpad passes them.
+#[derive(Accounts)]
+pub struct QuoteCutCall<'info> {
+    /// CHECK: the launchpad's signer for this hook (recorded, checked by `quote_mode::SIGNED`).
+    pub signer: UncheckedAccount<'info>,
+    /// CHECK: the launch.
+    pub launch: UncheckedAccount<'info>,
+    /// CHECK: the pool.
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: the base mint.
+    pub base_mint: UncheckedAccount<'info>,
+    /// CHECK: the quote mint.
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: the trader.
+    pub actor: UncheckedAccount<'info>,
+    /// CHECK: the trader's holding of the token (may not exist).
+    pub holding: UncheckedAccount<'info>,
+    /// CHECK: `["state", mint]` (may not exist).
+    #[account(mut)]
+    pub state: UncheckedAccount<'info>,
 }
 
 /// The script of one key (a mint, or a pool), at `["script", key]`.

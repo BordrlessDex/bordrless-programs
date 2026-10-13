@@ -365,7 +365,7 @@ impl World {
         min_out: u64,
     ) -> Instruction {
         let slice = self.launch_base_slice(mint, trader, trader, direction == 1);
-        launch::swap_with_base_slice(
+        let ix = launch::swap_with_base_slice(
             &self.launch_keys(mint),
             *trader,
             *trader,
@@ -373,7 +373,21 @@ impl World {
             amount_in,
             min_out,
             slice,
-        )
+        );
+        self.with_quote_cut(ix, mint, trader)
+    }
+
+    /// `ix` (a swap by `actor` on the launch of `mint`) with the SOL cut's four accounts appended
+    /// when the launch's custom hook takes one (`docs/quote-cut.md`), as a client resolves them.
+    pub fn with_quote_cut(&self, ix: Instruction, mint: &Pubkey, actor: &Pubkey) -> Instruction {
+        match self
+            .env
+            .try_read::<bordrless_launch::state::Launch>(&launch::launch_address(mint))
+            .and_then(|l| l.quote_cut())
+        {
+            Some((hook, _)) => launch::with_quote_cut(ix, &hook, mint, actor),
+            None => ix,
+        }
     }
 
     /// The `graduate` instruction of the launch of `mint`, cranked by `cranker` (with a custom

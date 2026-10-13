@@ -193,7 +193,8 @@ pub struct LaunchConfig {
     pub author_share_bps: u16,
     /// Reserved. `reserved[0]` is [`LaunchConfig::TIMELOCKED_HOOK`] when the custom hook's upgrade
     /// authority was its own `hook_timelock` when the config was made (phase 3a); 0 for every other
-    /// config, and for every config made before.
+    /// config, and for every config made before. `reserved[1..5]` are the SOL cut's caps
+    /// ([`LaunchConfig::quote_cut`], `docs/quote-cut.md`), 0 for every config made before.
     pub reserved: [u8; 30],
 }
 
@@ -216,6 +217,68 @@ impl LaunchConfig {
     /// The custom hook and its flags, when the config names one.
     pub fn hook(&self) -> Option<(Pubkey, u16)> {
         self.custom_hook.map(|h| (h, self.custom_hook_flags))
+    }
+
+    /// The custom hook's SOL cut caps (`reserved[1..5]`), when it takes one: every launch from the
+    /// config asks the hook's `quote_cut` on every trade (`docs/quote-cut.md`).
+    pub fn quote_cut(&self) -> Option<QuoteCut> {
+        let cut = QuoteCut::read(&self.reserved[1..5]);
+        (self.custom_hook.is_some() && cut.on()).then_some(cut)
+    }
+
+    /// Records the SOL cut's caps.
+    pub fn set_quote_cut(&mut self, cut: &QuoteCut) {
+        cut.write(&mut self.reserved[1..5]);
+    }
+}
+
+/// A custom hook's SOL cut (`docs/quote-cut.md`): on every trade the pool hook asks the hook's
+/// `quote_cut` for a rate in basis points, takes at most these caps of the trade's SOL (a buy's
+/// input, a sell's output) and adds it to the creator fee. Kept in reserved bytes, little-endian,
+/// so every account made before reads zeros: off.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QuoteCut {
+    /// The most the hook may take of a buy's SOL input, in basis points.
+    pub max_buy_bps: u16,
+    /// The most the hook may take of a sell's SOL output, in basis points.
+    pub max_sell_bps: u16,
+}
+
+impl QuoteCut {
+    /// Whether either side takes a cut.
+    pub fn on(&self) -> bool {
+        self.max_buy_bps > 0 || self.max_sell_bps > 0
+    }
+
+    /// The cap of a buy (`buy`) or a sell.
+    pub fn max_bps(&self, buy: bool) -> u16 {
+        if buy {
+            self.max_buy_bps
+        } else {
+            self.max_sell_bps
+        }
+    }
+
+    /// Within [`QUOTE_CUT_MAX_BPS`] on both sides, and asking on buys (`max_buy_bps` above 0;
+    /// the hook may answer 0 there): a hook that can't answer (no `quote_cut`) then fails every
+    /// buy, so nobody can buy a coin whose sells it would fail. A sell-only cap on such a hook
+    /// would let anyone buy and only the creator sell.
+    pub fn valid(&self) -> bool {
+        self.max_buy_bps > 0
+            && self.max_buy_bps <= QUOTE_CUT_MAX_BPS
+            && self.max_sell_bps <= QUOTE_CUT_MAX_BPS
+    }
+
+    fn read(b: &[u8]) -> Self {
+        Self {
+            max_buy_bps: u16::from_le_bytes([b[0], b[1]]),
+            max_sell_bps: u16::from_le_bytes([b[2], b[3]]),
+        }
+    }
+
+    fn write(&self, b: &mut [u8]) {
+        b[0..2].copy_from_slice(&self.max_buy_bps.to_le_bytes());
+        b[2..4].copy_from_slice(&self.max_sell_bps.to_le_bytes());
     }
 }
 
@@ -310,7 +373,11 @@ pub struct Launch {
     pub author_share_bps: u16,
     /// Creator fees paid to the config's author so far (quote).
     pub author_fees_paid: u64,
-    /// Reserved.
+    /// Reserved. `reserved[0..4]` are the custom hook's SOL cut caps from the config
+    /// ([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of
+    /// `creator_fees_accrued`), `reserved[12]` the bump of the hook's `["state", mint]` and
+    /// `reserved[13]` of the launchpad's `["quote-cut", hook]` signer; zeros for every launch made
+    /// before (`docs/quote-cut.md`).
     pub reserved: [u8; 22],
 }
 
@@ -342,5 +409,38 @@ impl Launch {
     /// Whether holder rewards are on.
     pub fn rewards_on(&self) -> bool {
         self.modules & modules::HOLDER_REWARDS != 0
+    }
+
+    /// The custom hook and its SOL cut, when the launch's config gave it one.
+    pub fn quote_cut(&self) -> Option<(Pubkey, QuoteCut)> {
+        let cut = QuoteCut::read(&self.reserved[0..4]);
+        match self.custom_hook {
+            Some(hook) if cut.on() => Some((hook, cut)),
+            _ => None,
+        }
+    }
+
+    /// The SOL the hook's cut has taken so far.
+    pub fn quote_cut_accrued(&self) -> u64 {
+        u64::from_le_bytes(self.reserved[4..12].try_into().expect("8 bytes"))
+    }
+
+    /// The bumps of the hook's state and of the launchpad's signer for the hook.
+    pub fn quote_cut_bumps(&self) -> (u8, u8) {
+        (self.reserved[12], self.reserved[13])
+    }
+
+    /// Records the SOL cut at launch: the caps and both bumps; nothing taken yet.
+    pub fn set_quote_cut(&mut self, cut: &QuoteCut, state_bump: u8, signer_bump: u8) {
+        cut.write(&mut self.reserved[0..4]);
+        self.reserved[4..12].copy_from_slice(&0u64.to_le_bytes());
+        self.reserved[12] = state_bump;
+        self.reserved[13] = signer_bump;
+    }
+
+    /// Counts `amount` more taken (saturating: a counter never blocks a trade).
+    pub fn add_quote_cut(&mut self, amount: u64) {
+        let total = self.quote_cut_accrued().saturating_add(amount);
+        self.reserved[4..12].copy_from_slice(&total.to_le_bytes());
     }
 }

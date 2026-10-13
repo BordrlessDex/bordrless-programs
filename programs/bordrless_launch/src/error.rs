@@ -100,4 +100,13 @@ pub enum LaunchError {
     HookTimelockInvalid,
     #[msg("the custom hook's timelock holds a proposal of new code: a coin is made on a timelocked hook only while nothing is pending (its author cancels it, or it lands first)")]
     HookTimelockPending,
+    // ---- The SOL cut (docs/quote-cut.md). Appended, so every code above keeps its number. ----
+    #[msg("a SOL cut needs the config's custom hook and at most 1,000 basis points on each side, buys above 0 (the hook is always asked on buys; it may answer 0)")]
+    InvalidQuoteCut,
+    #[msg("this coin's hook takes a SOL cut: pass the hook program, the trader's holding of the token, the hook's state and the launchpad's signer for the hook after the pool's four extras (the pool's registry lists them)")]
+    QuoteCutAccountsMissing,
+    #[msg("a SOL cut account is not the one this trade needs (the custom hook, the trader's holding of the token, the hook's writable [\"state\", mint], the launchpad's [\"quote-cut\", hook])")]
+    QuoteCutWrongAccount,
+    #[msg("the hook's quote_cut answered something other than its cut in basis points (a u16)")]
+    QuoteCutBadAnswer,
 }

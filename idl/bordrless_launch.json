@@ -13,8 +13,8 @@
     {
       "name": "after_swap",
       "docs": [
-        "Pool hook: a buy's burn; a sell's creator and holder fees, from the output the DEX hands",
-        "on."
+        "Pool hook: a buy's burn; a sell's creator and holder fees (and its custom hook's SOL cut),",
+        "from the output the DEX hands on."
       ],
       "discriminator": [
         235,
@@ -139,7 +139,8 @@
     {
       "name": "before_swap",
       "docs": [
-        "Pool hook: the anti-sniper LP fee; a buy's creator and holder fees, a sell's burn."
+        "Pool hook: the anti-sniper LP fee; a buy's creator and holder fees (and its custom hook's",
+        "SOL cut), a sell's burn."
       ],
       "discriminator": [
         227,
@@ -730,6 +731,89 @@
       ]
     },
     {
+      "name": "create_quote_cut_config",
+      "docs": [
+        "Anyone: makes a `LaunchConfig` whose custom hook also takes a SOL cut on every trade",
+        "(`docs/quote-cut.md`): the hook's `quote_cut` answers a rate, the pool hook takes at most",
+        "`cut`'s cap (at most 1,000 basis points a side) of the trade's SOL with the creator fee.",
+        "`author_share_bps` 0: as `create_config`; else as `create_listed_config`."
+      ],
+      "discriminator": [
+        34,
+        115,
+        221,
+        140,
+        249,
+        24,
+        4,
+        75
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "Whoever makes the config: pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "The launch config, for the bounds."
+          ],
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The new config: a keypair that signs."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hook_program",
+          "docs": [
+            "program's id for none); checked executable in the handler."
+          ],
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateConfigArgs"
+            }
+          }
+        },
+        {
+          "name": "author_share_bps",
+          "type": "u16"
+        },
+        {
+          "name": "cut",
+          "type": {
+            "defined": {
+              "name": "QuoteCut"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "graduate",
       "docs": [
         "Graduates a launch whose pool has raised the threshold. Permissionless. With a custom",
@@ -1121,6 +1205,45 @@
         89,
         20
       ]
+    },
+    {
+      "name": "LaunchQuoteCut",
+      "discriminator": [
+        141,
+        116,
+        188,
+        1,
+        80,
+        251,
+        54,
+        142
+      ]
+    },
+    {
+      "name": "QuoteCutConfigured",
+      "discriminator": [
+        22,
+        62,
+        98,
+        2,
+        250,
+        9,
+        30,
+        173
+      ]
+    },
+    {
+      "name": "QuoteCutTaken",
+      "discriminator": [
+        79,
+        134,
+        251,
+        235,
+        163,
+        122,
+        175,
+        109
+      ]
     }
   ],
   "errors": [
@@ -1343,6 +1466,36 @@
       "code": 6043,
       "name": "HookProgramDataMissing",
       "msg": "the custom hook's program data account is missing or wrong"
+    },
+    {
+      "code": 6044,
+      "name": "HookTimelockInvalid",
+      "msg": "the custom hook's upgrade authority is its timelock: pass its Timelock account (owned by hook_timelock, for this program, a delay of at least 3 days)"
+    },
+    {
+      "code": 6045,
+      "name": "HookTimelockPending",
+      "msg": "the custom hook's timelock holds a proposal of new code: a coin is made on a timelocked hook only while nothing is pending (its author cancels it, or it lands first)"
+    },
+    {
+      "code": 6046,
+      "name": "InvalidQuoteCut",
+      "msg": "a SOL cut needs the config's custom hook and at most 1,000 basis points on each side, buys above 0 (the hook is always asked on buys; it may answer 0)"
+    },
+    {
+      "code": 6047,
+      "name": "QuoteCutAccountsMissing",
+      "msg": "this coin's hook takes a SOL cut: pass the hook program, the trader's holding of the token, the hook's state and the launchpad's signer for the hook after the pool's four extras (the pool's registry lists them)"
+    },
+    {
+      "code": 6048,
+      "name": "QuoteCutWrongAccount",
+      "msg": "a SOL cut account is not the one this trade needs (the custom hook, the trader's holding of the token, the hook's writable [\\state\\, mint], the launchpad's [\\quote-cut\\, hook])"
+    },
+    {
+      "code": 6049,
+      "name": "QuoteCutBadAnswer",
+      "msg": "the hook's quote_cut answered something other than its cut in basis points (a u16)"
     }
   ],
   "types": [
@@ -2381,7 +2534,11 @@
           {
             "name": "reserved",
             "docs": [
-              "Reserved."
+              "Reserved. `reserved[0..4]` are the custom hook's SOL cut caps from the config",
+              "([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of",
+              "`creator_fees_accrued`), `reserved[12]` the bump of the hook's `[\"state\", mint]` and",
+              "`reserved[13]` of the launchpad's `[\"quote-cut\", hook]` signer; zeros for every launch made",
+              "before (`docs/quote-cut.md`)."
             ],
             "type": {
               "array": [
@@ -2482,7 +2639,10 @@
           {
             "name": "reserved",
             "docs": [
-              "Reserved."
+              "Reserved. `reserved[0]` is [`LaunchConfig::TIMELOCKED_HOOK`] when the custom hook's upgrade",
+              "authority was its own `hook_timelock` when the config was made (phase 3a); 0 for every other",
+              "config, and for every config made before. `reserved[1..5]` are the SOL cut's caps",
+              "([`LaunchConfig::quote_cut`], `docs/quote-cut.md`), 0 for every config made before."
             ],
             "type": {
               "array": [
@@ -2717,6 +2877,41 @@
           {
             "name": "slot",
             "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchQuoteCut",
+      "docs": [
+        "A launch made from such a config: its pool asks the hook on every trade."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "hook",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_buy_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_sell_bps",
+            "type": "u16"
           },
           {
             "name": "ts",
@@ -2992,6 +3187,111 @@
           },
           {
             "name": "Swap"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteCut",
+      "docs": [
+        "A custom hook's SOL cut (`docs/quote-cut.md`): on every trade the pool hook asks the hook's",
+        "`quote_cut` for a rate in basis points, takes at most these caps of the trade's SOL (a buy's",
+        "input, a sell's output) and adds it to the creator fee. Kept in reserved bytes, little-endian,",
+        "so every account made before reads zeros: off."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_buy_bps",
+            "docs": [
+              "The most the hook may take of a buy's SOL input, in basis points."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_sell_bps",
+            "docs": [
+              "The most the hook may take of a sell's SOL output, in basis points."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteCutConfigured",
+      "docs": [
+        "A `LaunchConfig` whose custom hook takes a SOL cut on every trade, decided by the hook's",
+        "`quote_cut` (`docs/quote-cut.md`), at most these caps per side."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "hook",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_buy_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_sell_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteCutTaken",
+      "docs": [
+        "A trade paid a hook's SOL cut (logged by the pool hook, not by self-CPI: the DEX's callback",
+        "has no event authority). It goes to the launch's quote holding with the creator fee."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "actor",
+            "type": "pubkey"
+          },
+          {
+            "name": "direction",
+            "docs": [
+              "0 a sell, 1 a buy."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "answered_bps",
+            "docs": [
+              "What the hook answered (before the cap) and the rate taken."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "bps",
+            "type": "u16"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Lamports of bridged SOL."
+            ],
+            "type": "u64"
           }
         ]
       }

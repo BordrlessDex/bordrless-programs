@@ -585,7 +585,7 @@ impl World {
         amount_in: u64,
     ) -> Instruction {
         let slice = self.launch_base_slice(mint, trader, recipient, direction == 1);
-        launch::swap_with_base_slice(
+        let ix = launch::swap_with_base_slice(
             &self.launch_keys(mint),
             *trader,
             *recipient,
@@ -593,7 +593,8 @@ impl World {
             amount_in,
             0,
             slice,
-        )
+        );
+        self.with_quote_cut(ix, mint, trader)
     }
 
     /// The largest buy `buyer` can make now on the launch of `mint` without going over max

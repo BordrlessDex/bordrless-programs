@@ -65,6 +65,31 @@ pub const QUOTE_HOLDING_INDEX: u8 = 6;
 pub const HOLDER_VAULT_INDEX: u8 = 7;
 /// Index of the kit config, read for the holder-fee threshold.
 pub const KIT_CONFIG_INDEX: u8 = 8;
+/// The most a custom hook's SOL cut may be on either side of a trade (`docs/quote-cut.md`): 10%.
+pub const QUOTE_CUT_MAX_BPS: u16 = 1_000;
+/// The launchpad's signer of a hook's `quote_cut`: `PDA(["quote-cut", hook], LAUNCH_ID)`, one per
+/// hook program, so a hook that passes on the signer it was given can only vouch for itself.
+pub const QUOTE_CUT_SIGNER_SEED: &[u8] = b"quote-cut";
+/// A custom hook's state account the launchpad passes to its `quote_cut`, writable:
+/// `PDA(["state", mint], hook)` (it need not exist).
+pub const HOOK_STATE_SEED: &[u8] = b"state";
+/// Anchor's discriminator of a hook's `quote_cut` instruction: `sha256("global:quote_cut")[..8]`.
+pub const QUOTE_CUT_DISCRIMINATOR: [u8; 8] = [250, 55, 215, 202, 76, 189, 220, 83];
+/// Index, in a pool callback's account list, of the first SOL-cut account (the custom hook
+/// program; then the trader's holding of the token, the hook's state and the launchpad's signer
+/// for the hook): after the prefix and the four extras.
+pub const QUOTE_CUT_EXTRAS_INDEX: usize = 9;
+/// Number of SOL-cut accounts.
+pub const QUOTE_CUT_EXTRAS: usize = 4;
+/// `hook_vault`: its slots (`PDA(["slot", mint, [i]], HOOK_VAULT_ID)`, `i` below
+/// [`HOOK_VAULT_MAX_SLOTS`]) sell and buy a hook's token cut on the token's own pool, and skip
+/// its SOL cut like the creator.
+pub const HOOK_VAULT_ID: Pubkey =
+    Pubkey::from_str_const("5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG");
+/// `hook_vault`'s slot seed.
+pub const HOOK_VAULT_SLOT_SEED: &[u8] = b"slot";
+/// `hook_vault`'s number of slots.
+pub const HOOK_VAULT_MAX_SLOTS: u8 = 3;
 /// `Launch.status`: on the curve.
 pub const STATUS_CURVE: u8 = 0;
 /// `Launch.status`: graduated.

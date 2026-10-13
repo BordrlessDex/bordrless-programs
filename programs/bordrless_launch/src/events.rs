@@ -134,3 +134,40 @@ pub struct CreatorFeesClaimed {
     pub slot: u64,
     pub ts: i64,
 }
+
+/// A `LaunchConfig` whose custom hook takes a SOL cut on every trade, decided by the hook's
+/// `quote_cut` (`docs/quote-cut.md`), at most these caps per side.
+#[event]
+pub struct QuoteCutConfigured {
+    pub config: Pubkey,
+    pub hook: Pubkey,
+    pub max_buy_bps: u16,
+    pub max_sell_bps: u16,
+    pub ts: i64,
+}
+
+/// A launch made from such a config: its pool asks the hook on every trade.
+#[event]
+pub struct LaunchQuoteCut {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub hook: Pubkey,
+    pub max_buy_bps: u16,
+    pub max_sell_bps: u16,
+    pub ts: i64,
+}
+
+/// A trade paid a hook's SOL cut (logged by the pool hook, not by self-CPI: the DEX's callback
+/// has no event authority). It goes to the launch's quote holding with the creator fee.
+#[event]
+pub struct QuoteCutTaken {
+    pub launch: Pubkey,
+    pub actor: Pubkey,
+    /// 0 a sell, 1 a buy.
+    pub direction: u8,
+    /// What the hook answered (before the cap) and the rate taken.
+    pub answered_bps: u16,
+    pub bps: u16,
+    /// Lamports of bridged SOL.
+    pub amount: u64,
+}
