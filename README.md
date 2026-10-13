@@ -31,8 +31,11 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `lottery_hook` | `HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr` | [Lottery coins](docs/games.md): the token hook that gives holders tickets for a companion's draws |
 | `hook_timelock` | `BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ` | [Phase 3a](docs/phase3a.md): a hook's or a strategy's upgrade authority behind a public delay of at least 3 days; its only exit is "immutable" |
 | `hook_vault` | `5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG` | [Phase 3a](docs/phase3a.md): where a hook's cuts go: slots that burn, sell for SOL to a wallet fixed before launch, or sell and buy-and-burn another token |
+| `bordrless_router` | `7M5GTuzhByzBbrJURzLtbBrFjcsC8aHu816qWTXAYD85` | [The router](docs/router.md): an app's integrator fee (at most 1%) on any DEX swap, 20% of it to Bordrless |
+| `loss_cover_hook` | `6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr` | [Loss cover](docs/loss-cover.md) (the site's Lossback): the hook that keeps each holding's entry |
+| `loss_cover_script` | `9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm` | Loss cover's companion script: names the holders under water and what each gets |
 
-Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded). Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded; script companions, payouts and Loss cover on 12 Oct 2026; on 13 Oct 2026 the launchpad's [SOL cut](docs/quote-cut.md), the companion's [payees and wallet payouts](docs/payees-and-wallet-payouts.md), and the router). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -41,14 +44,20 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
 | `bordrless_swap` | `5d63e257c01aff1bcf86ca554ce3230be7339bced1427954e08300b6b4828d12` |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
-| `bordrless_launch` | `cefe1ac7c4edda86f6f8473025b2ffecb21b1799c683e9e808183586942dcf74` |
+| `bordrless_launch` | `17604ad167bebed7e0a7569903babe66fd06a6405fcd7e8c2d21c018d2bea836` (commit `22932e5`) |
 | `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
-| `bordrless_companion` | `977a6459fef0ac5e2dd831404a00eb36a5b85ea6724c39cdfbfb34d96ed3c427` |
-| `lottery_hook` | `c5d5000804d10fb1adc7576ee995b2c1f27a9bc8d9d51ba7df270f70a9922a5d` |
+| `bordrless_companion` | `708a6083baf033f62c7e54f7259bb5217a85bda8f4132628770208921e300db8` (commit `212f6ba`) |
+| `lottery_hook` | `7eb0751aab14688fd5cb438fa815d2d3e6df38a314c979181a0c93955bb7f29c` (not yet a verified build: see below) |
 | `hook_timelock` | `30d849b2c54c2ba64668066e77923a6d99483d0cf5eb404cecfc78e50348d60d` |
 | `hook_vault` | `e5097780ead4976105a758de84404ee16b7ac04bcc8b210aca8a5f611cbcf7a0` |
+| `bordrless_router` | `f6718c167c31bdc18cb61e7c837ae09b845732c6e28bcda6699f91906358770a` (commit `212f6ba`) |
+
+`lottery_hook` (five-minute rounds, 12 Oct 2026), `loss_cover_hook`
+(`af392c58…`) and `loss_cover_script` (`dac53d50…`) run builds of this repository's source made
+with `cargo build-sbf` before it was public here; verified builds of them are still to be made and
+deployed so their hashes match.
 
 `half_life` on mainnet is the verified build of commit `e54cc4a`: later commits changed a struct it
 compiles from the launchpad (`Launch.author_share_bps`, taken from reserved bytes; same layout), so
