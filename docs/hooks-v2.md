@@ -869,6 +869,18 @@ Both emit `CreatorFeesClaimed` (the creator's part) and `AuthorFeesPaid { launch
 author, amount, paid_total, slot, ts }`. The share is of the creator fee only: Bordrless's share and
 the holders' are untouched. Tested in `programs/tests/tests/marketplace.rs`.
 
+**Partner configs and the partner fee (upgrade of 2026-10-13; `docs/partner-fee.md`).**
+`create_partner_config(args, author_share_bps, cut, partner, partner_share_bps)` makes a config as
+`create_config` does and, in the same instruction, its `PartnerFee` (`["partner", config]`): a
+partner wallet and its share of the creator fee, 1 to 10,000 basis points of it (with an author's
+share, at most 10,000 in all), fixed for ever, Meteora-style. Every launch made from it, whoever
+makes it, snapshots the share (`Launch.reserved[14..17]`, emitting `LaunchPartner`), and every claim
+pays the partner its part as well: `claim_creator_fees` and `claim_author_fees` take the
+`PartnerFee` and the partner's holding after any author accounts (`PartnerAccountsMissing`), and the
+new `distribute_fees` lets anyone pay a partner launch's fees out to every party's fixed holding
+(`PartnerFeesPaid`). A companion coin can't launch from a partner config (`PartnerOnCompanion`).
+Tested in `programs/tests/tests/partner_fee.rs` and the two audits' suites.
+
 ### 5.8 A creator's own token hook
 
 A `LaunchConfig` may name a hook program (`custom_hook`) with its token flags. The owner's
@@ -978,6 +990,10 @@ immutable (the default) or managed; it never hands the upgrade authority to the 
 | Max wallet | off, 1%, 2%, 3%, 5%, until graduation | 2% |
 | Creator wallet lock | off, 7, 30, 90 days | 30 days |
 | Early-buyer lock | off; first 30 s, 60 s or 5 min; locked until 15 min, 1 h or 24 h after launch | off |
+
+These are the site's choices. Since 2026-10-13 the launchpad's own maximum is 10%, for the creator
+fee alone and for a side's creator fee, holder fee and burn together (`max_creator_fee_bps`,
+`rule_bounds.max_rules_fee_bps`, 200 and 300 before); a config made with the SDK can use it.
 
 Presets on the launch form (2026-10-07: four remain; the default is "Plain"; the list is
 `bordrless_core::policy::presets`, which the TypeScript `RULE_PRESETS` is pinned to through the

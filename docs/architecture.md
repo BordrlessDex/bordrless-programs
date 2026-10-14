@@ -177,7 +177,8 @@ dollar figure at the SOL price of the moment the launch is prepared (bounds are 
 
 **Fees on a launch pool.** Protocol fee 0.25% of the SOL side (collected by the admin; the pool
 keeps that rate after graduation, while ordinary DEX pools pay 1%). LP fee 0.3%,
-staying in the pool for ever. Creator fee 0–2%, chosen at launch, taken by the hook in the quote
+staying in the pool for ever. Creator fee 0–2% (the site's choices; the launchpad allows up to 10%
+since 13 Oct 2026), chosen at launch, taken by the hook in the quote
 token (from the input on buys, from the output on sells) into the launch's own vault, claimable by
 the creator at any time. For the first 30 seconds the hook overrides the LP fee from 80% down to
 0.3%, linearly: a sniper's premium deepens the pool for everyone. The creator's own first buy in

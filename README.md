@@ -23,7 +23,7 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `bordrless_token` | `2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22` | The token standard: mints, holdings, hooks with return deltas |
 | `bordrless_swap` | `GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk` | The DEX: constant-product pools, v4-style hooks, virtual reserves |
 | `bordrless_bridge` | `CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7` | SPL / Token-2022 / SOL in and out of the standard, one for one |
-| `bordrless_launch` | `1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC` | The launchpad: launches, fee schedule and rules as a pool hook, graduation |
+| `bordrless_launch` | `1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC` | The launchpad: launches, fee schedule and rules as a pool hook, graduation, [partner configs](docs/partner-fee.md) |
 | `bordrless_kit` | `14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH` | The launch rules as a token hook: holder rewards, max wallet, wallet locks |
 | `tax_hook` | `8tjnVSreJGBRQFyDBf1SyyhBgLsdBxa2rHYh9sbxFyX7` | An example token hook: a programmable transfer fee with a wallet cap |
 | `half_life` | `53SpmtkdPWQ63mWoDeXk8P9tuwiT4ed2Wx4fwfy5NSF8` | [Half-Life](programs/half_life): an exit fee that halves every 6 hours held, burned |
@@ -35,7 +35,8 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `loss_cover_hook` | `6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr` | [Loss cover](docs/loss-cover.md) (the site's Lossback): the hook that keeps each holding's entry |
 | `loss_cover_script` | `9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm` | Loss cover's companion script: names the holders under water and what each gets |
 
-Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded; script companions, payouts and Loss cover on 12 Oct 2026; on 13 Oct 2026 the launchpad's [SOL cut](docs/quote-cut.md), the companion's [payees and wallet payouts](docs/payees-and-wallet-payouts.md), and the router). Each program embeds a `security.txt` that points back to
+Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded; script companions, payouts and Loss cover on 12 Oct 2026; on 13 Oct 2026 the launchpad's [SOL cut](docs/quote-cut.md), the companion's [payees and wallet payouts](docs/payees-and-wallet-payouts.md), and the router; that
+evening the launchpad's [partner fee](docs/partner-fee.md), with its largest creator fee raised to 10%). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -92,6 +93,9 @@ taken from the amount itself into a furnace anyone can burn. Launch with it from
 | `docs/games.md` | Lottery coins: the game ticket standard, the lottery hook, the companion's draws (ORAO VRF) |
 | `docs/phase3a.md` | Phase 3a: labels and timelocks, Studio attestations, strategies, the hook vault (design, owner decisions, as built) |
 | `docs/strategies.md` | Strategy games: writing a strategy, the bounds, the limits |
+| `docs/quote-cut.md` | A custom hook's SOL cut on every trade of its coin, through the launchpad |
+| `docs/partner-fee.md` | Partner configs: a wallet paid a fixed share of every launch's creator fee, Meteora-style |
+| `docs/payees-and-wallet-payouts.md`, `docs/router.md` | The companion's payees and wallet payouts; the router's integrator fee |
 | `idl/` | Anchor IDLs of the deployed programs |
 | `scripts/solana` | Toolchain install, build, test and deploy |
 
