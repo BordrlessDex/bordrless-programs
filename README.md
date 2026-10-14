@@ -36,16 +36,18 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `loss_cover_script` | `9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm` | Loss cover's companion script: names the holders under water and what each gets |
 
 Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded; script companions, payouts and Loss cover on 12 Oct 2026; on 13 Oct 2026 the launchpad's [SOL cut](docs/quote-cut.md), the companion's [payees and wallet payouts](docs/payees-and-wallet-payouts.md), and the router; that
-evening the launchpad's [partner fee](docs/partner-fee.md), with its largest creator fee raised to 10%). Each program embeds a `security.txt` that points back to
+evening the launchpad's [partner fee](docs/partner-fee.md), with its largest creator fee raised to 10%;
+on 14 Oct 2026 the DEX and the launchpad's curve fill, a buy past the end of a launch's curve taking
+what is left, `docs/hooks-v2.md` §3.1 and §5.4). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
 | Program | Executable hash (sha256, `solana-verify get-program-hash`) |
 | --- | --- |
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
-| `bordrless_swap` | `5d63e257c01aff1bcf86ca554ce3230be7339bced1427954e08300b6b4828d12` |
+| `bordrless_swap` | `98ae8d0642fcc2ce6c07464809c1dd115847afafa8587d18e27b76293a966f20` (commit `99b5ed6`) |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
-| `bordrless_launch` | `614760c7f4317b914136e63104ed8f9133bfc713921337d5235f5d82403a8537` (commit `9e644e7`) |
+| `bordrless_launch` | `ec65021648896627fcf7c0440bad844e33f1e77478f806f1ff6087f60c24083f` (commit `99b5ed6`) |
 | `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
