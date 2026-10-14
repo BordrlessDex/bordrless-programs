@@ -1198,6 +1198,11 @@
       "code": 6037,
       "name": "NotBridgedSol",
       "msg": "the pool's quote is not bridged SOL"
+    },
+    {
+      "code": 6038,
+      "name": "BadFill",
+      "msg": "the hook answered a fill that is zero, above the input, or not for a buy on a curve"
     }
   ],
   "types": [

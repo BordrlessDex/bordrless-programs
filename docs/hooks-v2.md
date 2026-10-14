@@ -350,6 +350,28 @@ Rules:
   reserve to `protocol_fees_quote`. After every swap the quote vault holds `quote_reserve +
   protocol_fees_quote` and the base vault `base_reserve`.
 - `min_amount_out` is checked against what the recipient's holding actually gained.
+- A fill (the upgrade of 2026-10-13, the product owner: "allow people to buy the migration cap and
+  refund the extra SOL"): `before_swap` may end its answer with nine bytes, a tag of 1 and a `u64`
+  (`bordrless_hook::answer_bytes`, read by `read_filled_answer` where the pool's flags let the hook
+  cut the input, `BEFORE_SWAP_RETURNS_DELTA`, else `UnsupportedHookReturn`; absent, the answer is
+  the plain one every hook has always returned, and a tail that is not exactly a fill is
+  `InvalidHookReturn`; a hook whose flags allow no answer has nothing read, as before). The DEX
+  takes it only for a buy on a launch pool's curve (`pool.curve` and the share model: a curve another
+  program opens as its hook never fills, since it could keep a buyer's whole input for the last
+  tokens), sent by the transaction itself (the DEX at the top of the stack: a program that buys
+  through the DEX, the router, a companion, the hook vault, Snowball, counts on its whole input
+  being spent, so its buys are never filled and fail past the end as they always have), never zero
+  or above the input (`BadFill`), and
+  then uses that much of the input instead of all of it: the hook's deltas and burn
+  are of that part (`DeltaTooLarge` is against it), that part less the cuts reaches the vault, and
+  the curve takes every token the pool has left rather than failing past its end
+  (`swap_out_filling`: the output is capped at the real reserve, so the rounding past the end stays
+  in the pool). The rest of the input never leaves the trader. `min_amount_out` is held to pro rata:
+  `delivered >= min_amount_out * used / amount_in`, the least the trader accepted for the whole
+  input, for the part used. `Swapped.amount_in` is the part used. The launchpad answers a fill when
+  a buy reaches the end of its curve (§5.4), so the curve sells out exactly (`base_reserve` 0) and
+  `graduate` can follow in the same transaction; `after_swap`, the token callbacks and a sell never
+  carry one.
 - `PoolHookArgs.recipient` is the owner of `trader_out`; `PoolHookArgs.protocol_fee_bps` is the
   pool's flat rate (0 under the share model).
 - `TokenAccounts` gains a burn helper that takes the hook program, its extra accounts and signer
@@ -794,6 +816,21 @@ collect nothing. The ordinary flat 1% is for pools anyone opens on the DEX:
   the holder fee only if someone is already eligible.
 - The hook keeps `creator_fees_accrued`, `holder_fees_accrued` and `burned_on_trades` on the
   `Launch`.
+- A buy past the end of the curve is filled (§3.1; 2026-10-13). `before_swap` first checks the
+  cheap bound (the whole input into the curve, fees aside, would not buy every token left: no
+  fill, the ordinary buy), then finds the fill by bisection on the exact fees
+  (`bordrless_core::launch_fill`): the smallest input at most `amount_in` whose buy puts enough into
+  the curve to take every token the pool has left, with the creator and holder fees above, the
+  SOL cut at the rate the custom hook answered (asked once, for the trade as requested), the LP
+  fee (the sniper schedule) and Bordrless's share (read from the pool). The cuts are taken of the
+  fill, counted and said as usual, and the answer ends with it (`set_answer`; `before_swap` returns
+  `()` to Anchor, which then sets no return data of its own). The DEX sells the last token, the
+  reserve meets the threshold and `graduate` can follow in the same transaction; a buy whose exact
+  input reaches the end is filled the same way (never more than it sent). After graduation, on a
+  sell, and for a swap another program sends the DEX (the launchpad answers a fill only with the DEX
+  at the top of the stack, this callback one below), nothing is filled: those buys are answered
+  exactly as before the fill. The cheap bound is checked before the pool is read, so a buy short of
+  the end costs about 900 compute units more than before the fill.
 
 ### 5.5 Graduation
 
@@ -1226,6 +1263,18 @@ Definitions:
   fee in quote on both sides), pinned to the Rust code with shared fixture vectors. `maxAmountIn`
   divides by `(1 - lp - protocol) * (1 - creator - holder)`; `graduates` uses the input after the
   creator and holder fees; `maxWalletLeft` uses the fixed cap.
+- A buy past the end of the curve (§3.1): `curveFillBuy` is the program's bisection
+  (`launch_fill`), pinned to it by the `fills` vectors, and `quoteLaunchSwap` with `fill` is the swap
+  of the fill. The quote (`swap/quote`) answers `amountUsed`, the part the swap uses, with
+  `amountOut`, the fees, `effectivePrice` and `tradeUsd` of that part and `graduates` true;
+  `minAmountOut` is for the whole `amountIn` at the fill's rate, which the program holds the part to
+  pro rata (a custom hook's SOL cut is not modelled: the chain's fill is then a little above the
+  quote's, within the input). `swap/prepare` wraps and sends the whole amount (the fill is the
+  chain's when it lands) and unwraps what was not used back to SOL in the same transaction
+  (`unwrap_sol_above`; nothing above is `ZeroAmount`, so the transaction fails only when the curve
+  grew to take the whole input in between). The trade panel says "Uses ≈ x SOL, what the curve has
+  left; the other y SOL stays in your wallet" and the button "Buy the rest of the curve and
+  graduate it".
 - `launch/prepare` validates the rules against the config and computes `devBuyMaxLamports` as the
   largest input whose delivered output (after the buy burn) stays within `max_wallet_amount` at the
   opening reserves, with the fees of the creator's own first buy: the normal LP fee, the protocol

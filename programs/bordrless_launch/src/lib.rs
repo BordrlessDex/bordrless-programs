@@ -160,11 +160,12 @@ pub mod bordrless_launch {
     }
 
     /// Pool hook: the anti-sniper LP fee; a buy's creator and holder fees (and its custom hook's
-    /// SOL cut), a sell's burn.
+    /// SOL cut), a sell's burn. A buy past the end of the curve is filled: the answer, set as the
+    /// return data (`bordrless_hook::set_answer`), ends with the part of the input the swap uses.
     pub fn before_swap<'info>(
         ctx: Context<'info, HookCallback<'info>>,
         args: PoolHookArgs,
-    ) -> Result<HookReturn> {
+    ) -> Result<()> {
         hooks::process_before_swap(ctx, args)
     }
 

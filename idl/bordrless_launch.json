@@ -140,7 +140,8 @@
       "name": "before_swap",
       "docs": [
         "Pool hook: the anti-sniper LP fee; a buy's creator and holder fees (and its custom hook's",
-        "SOL cut), a sell's burn."
+        "SOL cut), a sell's burn. A buy past the end of the curve is filled: the answer, set as the",
+        "return data (`bordrless_hook::set_answer`), ends with the part of the input the swap uses."
       ],
       "discriminator": [
         227,
@@ -205,12 +206,7 @@
             }
           }
         }
-      ],
-      "returns": {
-        "defined": {
-          "name": "HookReturn"
-        }
-      }
+      ]
     },
     {
       "name": "claim_author_fees",

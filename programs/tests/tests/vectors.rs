@@ -27,7 +27,8 @@ use bordrless_launch::constants::ceilings;
 use bordrless_launch::state::LaunchRules;
 use bordrless_program_tests::fixture::policy_rule_bounds;
 use bordrless_program_tests::launch::{
-    dev_buy_max, max_buy_within, presets, quote_launch_swap, rules, LaunchSwap, DAY, SOL, VQ,
+    dev_buy_max, launch_fill_quote, max_buy_within, presets, quote_launch_swap, rules, LaunchSwap,
+    DAY, SOL, VQ,
 };
 
 // ------------------------------------------------------------------------------------------ JSON
@@ -419,6 +420,77 @@ fn swap_cases() -> Vec<J> {
                             ]));
                         }
                     }
+                }
+            }
+        }
+    }
+    cases
+}
+
+/// Buys past the end of the curve (`curveFillBuy`, `quoteLaunchSwap` with the fill): the fill, the
+/// smallest input that sells the curve out, and the swap of it; null for a buy short of the end.
+fn fill_cases() -> Vec<J> {
+    // Pools a little short of graduation: the policy's curve with 5M tokens left, with one token
+    // left, and the small pool where rounding dominates.
+    let ending = Reserves {
+        base_reserve: 5_000_000_000_000,
+        quote_reserve: 55_875_000_000,
+        ..OPEN
+    };
+    let last = Reserves {
+        base_reserve: 1,
+        quote_reserve: 56_249_999_999,
+        ..OPEN
+    };
+    let small = Reserves {
+        base_reserve: 50_000,
+        quote_reserve: 0,
+        virtual_base: 50_000,
+        virtual_quote: 10_000,
+    };
+    let pools = [("ending", ending), ("last token", last), ("small", small)];
+    let amounts: [u64; 6] = [
+        1,
+        1_000_000,
+        100_000_000,
+        1_000_000_000,
+        100_000_000_000,
+        u64::MAX,
+    ];
+    let fee_sets: [(u16, u16); 2] = [
+        (policy::LP_FEE_BPS, policy::LAUNCH_PROTOCOL_SHARE_BPS),
+        (8_000, policy::LAUNCH_PROTOCOL_SHARE_BPS),
+    ];
+    let mut cases = Vec::new();
+    for (pool, r) in pools {
+        for (name, rates) in rate_sets() {
+            let (eligible, min_eligible) = if rates.holder_fee_buy_bps > 0 {
+                (50 * MIN_ELIGIBLE, MIN_ELIGIBLE)
+            } else {
+                (0, 0)
+            };
+            for (lp, share) in fee_sets {
+                for amount in amounts {
+                    let fill =
+                        launch_fill_quote(&r, amount, lp, share, &rates, eligible, min_eligible);
+                    if let Some((used, q)) = &fill {
+                        assert!(*used <= amount);
+                        assert_eq!(q.amount_out, Some(r.base_reserve), "{pool}, {name}");
+                    }
+                    cases.push(J::Obj(vec![
+                        ("name", s(&format!("{pool}, {name}"))),
+                        ("reserves", reserves(&r)),
+                        ("amountIn", big(amount)),
+                        ("lpFeeBps", num(lp)),
+                        ("protocolShareBps", num(share)),
+                        ("params", params(&rates, eligible, min_eligible)),
+                        (
+                            "expected",
+                            opt(fill.map(|(used, q)| {
+                                J::Obj(vec![("amountUsed", big(used)), ("swap", swap_json(&q))])
+                            })),
+                        ),
+                    ]));
                 }
             }
         }
@@ -954,9 +1026,11 @@ fn vectors() -> Vec<(&'static str, J)> {
                reference that the LiteSVM suites hold the programs to. Integers that can exceed \
                2^53 are decimal strings. Sections: presets (RULE_PRESETS), hookFees \
                (launchBeforeSwap / launchAfterSwap), burns (tradeBurn), swaps (quoteLaunchSwap; \
-               on a failure the fields are those computed up to it), maxWallet (maxWalletCap / \
-               maxWalletLeft), devBuyMax (devBuyMaxLamports), earlyLock (buyLockedUntil), rewards \
-               (rewardsClaimable / rewardTotals)."),
+               on a failure the fields are those computed up to it), fills (curveFillBuy: a buy \
+               past the end of the curve, the smallest input that sells it out and the swap of \
+               that, quoteLaunchSwap with the fill; null short of the end), maxWallet \
+               (maxWalletCap / maxWalletLeft), devBuyMax (devBuyMaxLamports), earlyLock \
+               (buyLockedUntil), rewards (rewardsClaimable / rewardTotals)."),
         ),
         (
             "generatedBy",
@@ -984,6 +1058,7 @@ fn vectors() -> Vec<(&'static str, J)> {
         ("hookFees", J::Arr(hook_fee_cases())),
         ("burns", J::Arr(burn_cases())),
         ("swaps", J::Arr(swap_cases())),
+        ("fills", J::Arr(fill_cases())),
         ("maxWallet", J::Arr(max_wallet_cases())),
         ("devBuyMax", J::Arr(dev_buy_cases())),
         ("earlyLock", J::Arr(early_lock_cases())),

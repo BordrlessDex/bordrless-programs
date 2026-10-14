@@ -15,12 +15,23 @@
 //! by the config, from the same SOL as the creator fee, into the same holding. The creator's
 //! trades to itself (a companion's, for a companion coin) and the token's hook-vault slots' skip
 //! it: it would pay the creator's side from the creator's side.
+//!
+//! A buy past the end of the curve takes what is left (§3.1's fill): `before_swap` finds the
+//! smallest input that sells the curve out ([`launch_fill`]: the fees above, the DEX's LP fee and
+//! share, and the SOL cut's rate, which the hook is asked once, for the trade as requested), takes
+//! its cuts of that input and ends its answer with it; the DEX uses that much, sells the last token
+//! and leaves the rest of the input with the trader, and `graduate` can follow in the same
+//! transaction. A buy short of the end is unchanged.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::solana_program::program::{get_return_data, invoke_signed};
-use bordrless_core::{launch_after_swap, launch_before_swap, sniper_lp_fee, HookCut};
-use bordrless_hook::{clear_return_data, Delta, HookReturn, PoolHookArgs};
+use bordrless_core::{
+    curve_out, launch_after_swap, launch_before_swap, launch_fill, quote_cut_fee, sniper_lp_fee,
+    HookCut, Reserves,
+};
+use bordrless_hook::{clear_return_data, set_answer, Delta, HookReturn, PoolHookArgs};
+use bordrless_swap::state::Pool;
 use bordrless_token::client as token_client;
 
 use crate::constants::*;
@@ -142,36 +153,27 @@ fn is_vault_slot(actor: &Pubkey, mint: &Pubkey) -> bool {
     })
 }
 
-/// `amount * bps / 10_000`, rounded down: a dust trade pays no SOL cut rather than failing on it
-/// (the DEX refuses a swap whose fees take its whole input).
-fn fee_of(amount: u64, bps: u16) -> u64 {
-    let product = u128::from(amount) * u128::from(bps);
-    u64::try_from(product / 10_000).unwrap_or(u64::MAX)
-}
-
-/// The custom hook's SOL cut of this trade (`docs/quote-cut.md`): 0 without one on this side, for
-/// the creator's trades to itself and for the token's hook-vault slots'; else the hook's `quote_cut`
-/// answer (a `u16` of basis points in its return data; none is 0), capped by the launch, of
-/// `amount` (a buy's input, a sell's output), rounded down, dropped when it and `taken` (the creator
-/// and holder fees) would not stay below `amount`. The trade fails when the accounts are missing
-/// or wrong, or the hook fails or answers anything else.
-fn quote_cut<'info>(
+/// The rate of the custom hook's SOL cut on this trade (`docs/quote-cut.md`): `(answered, bps)`,
+/// the hook's `quote_cut` answer (a `u16` of basis points in its return data; none is 0) and that
+/// answer capped by the launch; `(0, 0)` without a cut on this side, for the creator's trades to
+/// itself and for the token's hook-vault slots'. The trade fails when the accounts are missing or
+/// wrong, or the hook fails or answers anything else. The hook is asked once, for the trade as the
+/// DEX describes it (a filled buy's input is the whole input asked).
+fn quote_cut_bps<'info>(
     ctx: &Context<'info, HookCallback<'info>>,
     args: &PoolHookArgs,
     buy: bool,
-    amount: u64,
-    taken: u64,
-) -> Result<u64> {
+) -> Result<(u16, u16)> {
     let launch = &ctx.accounts.launch;
     let Some((hook, cut)) = launch.quote_cut() else {
-        return Ok(0);
+        return Ok((0, 0));
     };
     let max_bps = cut.max_bps(buy);
     // The creator trading for itself (a companion's buys, sells and scripts all trade creator to
     // creator): the cut would pay the creator's side from the creator's side. Not when it delivers
     // to someone else, or it could relay cut-free buys for anyone.
     if max_bps == 0 || (args.actor == launch.creator && args.recipient == launch.creator) {
-        return Ok(0);
+        return Ok((0, 0));
     }
     let extras = ctx.remaining_accounts;
     if extras.len() < QUOTE_CUT_EXTRAS {
@@ -179,7 +181,7 @@ fn quote_cut<'info>(
             is_vault_slot(&args.actor, &launch.mint),
             LaunchError::QuoteCutAccountsMissing
         );
-        return Ok(0);
+        return Ok((0, 0));
     }
     let (state_bump, signer_bump) = launch.quote_cut_bumps();
     let [program, holding, state, signer] = [&extras[0], &extras[1], &extras[2], &extras[3]];
@@ -243,15 +245,25 @@ fn quote_cut<'info>(
         }
         _ => 0,
     };
-    let bps = answered.min(max_bps);
-    let fee = fee_of(amount, bps);
-    let fee = match taken.checked_add(fee) {
-        Some(total) if total < amount => fee,
-        _ => 0,
-    };
+    Ok((answered, answered.min(max_bps)))
+}
+
+/// The custom hook's SOL cut of `amount` (a buy's input, a sell's output) at the rate
+/// [`quote_cut_bps`] answered (`answered`, capped to `bps`): rounded down, dropped when it and
+/// `taken` (the creator and holder fees) would not stay below `amount`
+/// (`bordrless_core::quote_cut_fee`); said in `QuoteCutTaken` when above zero.
+fn take_quote_cut(
+    launch: Pubkey,
+    args: &PoolHookArgs,
+    amount: u64,
+    taken: u64,
+    answered: u16,
+    bps: u16,
+) -> u64 {
+    let fee = quote_cut_fee(amount, bps, taken);
     if fee > 0 {
         emit!(QuoteCutTaken {
-            launch: launch.key(),
+            launch,
             actor: args.actor,
             direction: args.direction,
             answered_bps: answered,
@@ -259,7 +271,7 @@ fn quote_cut<'info>(
             amount: fee,
         });
     }
-    Ok(fee)
+    fee
 }
 
 /// `cut` with the hook's SOL cut `fee` added to the creator fee (same holding, one delta), counted.
@@ -271,12 +283,26 @@ fn with_quote_cut(launch: &mut Launch, mut cut: HookCut, fee: u64) -> HookCut {
     cut
 }
 
+/// Bordrless's share of the cuts on the launch's pool (§3.1), read from the pool as the DEX keeps
+/// it; a pool under the flat model (none the launchpad opens) shares nothing.
+fn share_bps_of(pool: &AccountInfo) -> Result<u16> {
+    let data = pool.try_borrow_data()?;
+    let p = Pool::try_deserialize(&mut &data[..])?;
+    Ok(if p.shares_cuts() {
+        p.protocol_share_bps
+    } else {
+        0
+    })
+}
+
 /// `before_swap`: the LP fee (the sniper schedule; the creator's own first buy into its own
-/// wallet inside the window pays the normal fee, once), then the cut from the input.
+/// wallet inside the window pays the normal fee, once), then the cut from the input; a buy past
+/// the end of the curve is filled (the module doc), its cuts of the part used, and the answer
+/// ends with that part.
 pub fn process_before_swap<'info>(
     ctx: Context<'info, HookCallback<'info>>,
     args: PoolHookArgs,
-) -> Result<HookReturn> {
+) -> Result<()> {
     require_keys_eq!(args.pool, ctx.accounts.launch.pool, LaunchError::WrongPool);
     let now = Clock::get()?.unix_timestamp;
     let buy = args.direction == 1;
@@ -304,22 +330,71 @@ pub fn process_before_swap<'info>(
             launch.lp_fee_bps,
         )
     };
-    let cut = launch_before_swap(buy, args.amount_in, &rates, eligible, min_eligible);
+    let on_curve = launch.status == STATUS_CURVE;
+    // A buy's SOL cut rate, asked once for the trade as requested.
+    let (answered, cut_bps) = if buy {
+        quote_cut_bps(&ctx, &args, true)?
+    } else {
+        (0, 0)
+    };
+    // A buy past the end of the curve: the smallest input that sells it out, on which every fee
+    // below is then taken; the DEX leaves the rest with the trader.
+    // Only for a swap the transaction sends the DEX itself (the DEX at the top, this callback one
+    // below): a program that buys through the DEX (the router, a companion, the hook vault)
+    // measures nothing past what it asked, so its buys are answered exactly as before the fill.
+    let direct = anchor_lang::solana_program::instruction::get_stack_height()
+        == anchor_lang::solana_program::instruction::TRANSACTION_LEVEL_STACK_HEIGHT + 1;
+    // `launch_fill`'s own first test, made here so a buy short of the end never reads the pool:
+    // the whole input into the curve, fees aside, short of every token left is no fill.
+    let reaches_end = args.base_reserve > 0
+        && curve_out(
+            args.amount_in,
+            args.quote_reserve,
+            args.virtual_quote,
+            args.base_reserve,
+            args.virtual_base,
+        )
+        .is_some_and(|out| out >= u128::from(args.base_reserve));
+    let fill = if buy && on_curve && direct && reaches_end {
+        let reserves = Reserves {
+            base_reserve: args.base_reserve,
+            quote_reserve: args.quote_reserve,
+            virtual_base: args.virtual_base,
+            virtual_quote: args.virtual_quote,
+        };
+        launch_fill(
+            &reserves,
+            args.amount_in,
+            lp_fee,
+            share_bps_of(&ctx.accounts.pool)?,
+            &rates,
+            eligible,
+            min_eligible,
+            cut_bps,
+        )
+    } else {
+        None
+    };
+    let amount_in = fill.unwrap_or(args.amount_in);
+    let cut = launch_before_swap(buy, amount_in, &rates, eligible, min_eligible);
     // A buy's SOL cut, from the input with the creator fee.
     let fee = if buy {
-        quote_cut(
-            &ctx,
+        take_quote_cut(
+            ctx.accounts.launch.key(),
             &args,
-            true,
-            args.amount_in,
+            amount_in,
             cut.creator_fee.saturating_add(cut.holder_fee),
-        )?
+            answered,
+            cut_bps,
+        )
     } else {
         0
     };
     let launch = &mut ctx.accounts.launch;
     let cut = with_quote_cut(launch, cut, fee);
-    Ok(answer(launch, &cut, Some(lp_fee)))
+    let ret = answer(launch, &cut, Some(lp_fee));
+    set_answer(&ret, fill);
+    Ok(())
 }
 
 /// `after_swap`: the cut from the output the DEX hands on (a buy: the curve's output; a sell: the
@@ -342,13 +417,15 @@ pub fn process_after_swap<'info>(
     let fee = if buy {
         0
     } else {
-        quote_cut(
-            &ctx,
+        let (answered, bps) = quote_cut_bps(&ctx, &args, false)?;
+        take_quote_cut(
+            ctx.accounts.launch.key(),
             &args,
-            false,
             args.amount_out,
             cut.creator_fee.saturating_add(cut.holder_fee),
-        )?
+            answered,
+            bps,
+        )
     };
     let launch = &mut ctx.accounts.launch;
     let cut = with_quote_cut(launch, cut, fee);

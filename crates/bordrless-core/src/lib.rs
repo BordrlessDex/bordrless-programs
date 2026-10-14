@@ -1277,3 +1277,344 @@ mod tests {
         assert_eq!(PAID_TO_HOLD.holder_fee_buy_bps, 0);
     }
 }
+
+// The curve fill (2026-10-13, `docs/hooks-v2.md` §3.1), declared last so no line above moves (panic
+// locations are part of every program's code, and this crate is in most of them).
+
+/// The constant-product output of `amount_in` (after fees) against effective reserves
+/// `reserve_in + virtual_in` and `reserve_out + virtual_out`, rounded down, before any check
+/// against the real `reserve_out`: past the end of a curve it is more than the pool holds. `None`
+/// on overflow.
+pub fn curve_out(
+    amount_in: u64,
+    reserve_in: u64,
+    virtual_in: u64,
+    reserve_out: u64,
+    virtual_out: u64,
+) -> Option<u128> {
+    let x = u128::from(reserve_in).checked_add(u128::from(virtual_in))?;
+    let y = u128::from(reserve_out).checked_add(u128::from(virtual_out))?;
+    let dx = u128::from(amount_in);
+    mul_div_floor(dx, y, x.checked_add(dx)?)
+}
+
+/// [`swap_out`] for a buy that fills the end of a curve: an output past the real `reserve_out` is
+/// the reserve itself, every token the pool has left (the hook that answered the fill sized the
+/// input for it; what rounding puts past the end stays in the pool). `None` if nothing comes out,
+/// or on overflow.
+pub fn swap_out_filling(
+    amount_in: u64,
+    reserve_in: u64,
+    virtual_in: u64,
+    reserve_out: u64,
+    virtual_out: u64,
+) -> Option<u64> {
+    if amount_in == 0 {
+        return None;
+    }
+    let out = curve_out(amount_in, reserve_in, virtual_in, reserve_out, virtual_out)?;
+    let out = u64::try_from(out.min(u128::from(reserve_out))).ok()?;
+    if out == 0 {
+        return None;
+    }
+    Some(out)
+}
+
+/// [`swap_amounts`], with `fill`: a buy whose pool hook answered a fill takes every token the
+/// curve has left instead of failing past its end ([`swap_out_filling`]); everything else, and
+/// every swap without a fill, is [`swap_amounts`] itself.
+pub fn swap_amounts_with(
+    buy: bool,
+    received: u64,
+    lp_fee_bps: u16,
+    protocol_fee_bps: u16,
+    reserves: &Reserves,
+    fill: bool,
+) -> Result<SwapAmounts, SwapFailure> {
+    let plain = swap_amounts(buy, received, lp_fee_bps, protocol_fee_bps, reserves);
+    if !fill || !buy || plain != Err(SwapFailure::InsufficientLiquidity) {
+        return plain;
+    }
+    // Past the end: the same fees, the curve's output capped at the reserve.
+    let lp_fee = fee_amount(received, lp_fee_bps).ok_or(SwapFailure::FeesExceedInput)?;
+    let protocol_in = fee_amount(received, protocol_fee_bps).ok_or(SwapFailure::FeesExceedInput)?;
+    let net_in = received
+        .checked_sub(lp_fee)
+        .and_then(|rest| rest.checked_sub(protocol_in))
+        .filter(|net| *net > 0)
+        .ok_or(SwapFailure::FeesExceedInput)?;
+    let r = reserves;
+    let out_gross = swap_out_filling(
+        net_in,
+        r.quote_reserve,
+        r.virtual_quote,
+        r.base_reserve,
+        r.virtual_base,
+    )
+    .ok_or(SwapFailure::InsufficientLiquidity)?;
+    Ok(SwapAmounts {
+        lp_fee,
+        protocol_fee: protocol_in,
+        net_in,
+        out_gross,
+        amount_out: out_gross,
+        to_reserve_in: received - protocol_in,
+    })
+}
+
+/// [`swap_amounts_shared`], with `fill`: a buy whose pool hook answered a fill takes every token
+/// the curve has left instead of failing past its end ([`swap_out_filling`]); everything else,
+/// and every swap without a fill, is [`swap_amounts_shared`] itself.
+pub fn swap_amounts_shared_with(
+    buy: bool,
+    received: u64,
+    lp_fee_bps: u16,
+    share_bps: u16,
+    cuts_in: u64,
+    reserves: &Reserves,
+    fill: bool,
+) -> Result<SwapAmounts, SwapFailure> {
+    let plain = swap_amounts_shared(buy, received, lp_fee_bps, share_bps, cuts_in, reserves);
+    if !fill || !buy || plain != Err(SwapFailure::InsufficientLiquidity) {
+        return plain;
+    }
+    // Past the end: the same fees, the curve's output capped at the reserve.
+    let lp_fee = fee_amount(received, lp_fee_bps).ok_or(SwapFailure::FeesExceedInput)?;
+    let share = protocol_share(cuts_in, share_bps).ok_or(SwapFailure::FeesExceedInput)?;
+    let net_in = received
+        .checked_sub(lp_fee)
+        .and_then(|rest| rest.checked_sub(share))
+        .filter(|net| *net > 0)
+        .ok_or(SwapFailure::FeesExceedInput)?;
+    let r = reserves;
+    let out_gross = swap_out_filling(
+        net_in,
+        r.quote_reserve,
+        r.virtual_quote,
+        r.base_reserve,
+        r.virtual_base,
+    )
+    .ok_or(SwapFailure::InsufficientLiquidity)?;
+    Ok(SwapAmounts {
+        lp_fee: 0,
+        protocol_fee: lp_fee + share,
+        net_in,
+        out_gross,
+        amount_out: out_gross,
+        to_reserve_in: net_in,
+    })
+}
+
+/// A custom hook's SOL cut of `amount` at `bps` (`docs/quote-cut.md`): rounded down (a dust trade
+/// pays no cut rather than failing on it), and dropped when it and `taken` (the creator and holder
+/// fees) would not stay below `amount`.
+pub fn quote_cut_fee(amount: u64, bps: u16, taken: u64) -> u64 {
+    let fee = u64::try_from(u128::from(amount) * u128::from(bps) / u128::from(BPS))
+        .unwrap_or(u64::MAX);
+    match taken.checked_add(fee) {
+        Some(total) if total < amount => fee,
+        _ => 0,
+    }
+}
+
+/// What a buy of `amount_in` on a launch pool puts into the curve under the share model (§3.1,
+/// §5.4): the input less the hook's creator and holder fees and its custom hook's SOL cut at
+/// `quote_cut_bps` (what reaches the vault), less the LP fee on that and Bordrless's share of the
+/// cuts. `None` when the fees take it all.
+#[allow(clippy::too_many_arguments)]
+pub fn launch_buy_net_in(
+    amount_in: u64,
+    lp_fee_bps: u16,
+    share_bps: u16,
+    rates: &LaunchFeeRates,
+    eligible: u64,
+    min_eligible: u64,
+    quote_cut_bps: u16,
+) -> Option<u64> {
+    let cut = launch_before_swap(true, amount_in, rates, eligible, min_eligible);
+    let taken = cut.creator_fee.checked_add(cut.holder_fee)?;
+    let cuts = taken.checked_add(quote_cut_fee(amount_in, quote_cut_bps, taken))?;
+    let received = amount_in.checked_sub(cuts)?;
+    let lp_fee = fee_amount(received, lp_fee_bps)?;
+    let share = protocol_share(cuts, share_bps)?;
+    received
+        .checked_sub(lp_fee)?
+        .checked_sub(share)
+        .filter(|net| *net > 0)
+}
+
+/// The fill of a buy of `amount_in` on a launch pool at `reserves` (`docs/hooks-v2.md` §3.1,
+/// §5.4): the smallest input, at most `amount_in`, whose buy reaches the end of the curve (what
+/// it puts into the curve, [`launch_buy_net_in`], buys every token the pool has left); `None` when
+/// `amount_in` itself does not reach it, the ordinary buy. The launchpad's `before_swap` answers
+/// it, the DEX takes that much of the input and sells the curve out exactly, and the rest of the
+/// input never leaves the trader. Found by bisection on the exact fees, as the TypeScript mirror
+/// finds it (`curveFillBuy`).
+#[allow(clippy::too_many_arguments)]
+pub fn launch_fill(
+    reserves: &Reserves,
+    amount_in: u64,
+    lp_fee_bps: u16,
+    share_bps: u16,
+    rates: &LaunchFeeRates,
+    eligible: u64,
+    min_eligible: u64,
+    quote_cut_bps: u16,
+) -> Option<u64> {
+    let r = reserves;
+    let left = u128::from(r.base_reserve);
+    if left == 0 {
+        return None;
+    }
+    let out = |net_in: u64| {
+        curve_out(
+            net_in,
+            r.quote_reserve,
+            r.virtual_quote,
+            r.base_reserve,
+            r.virtual_base,
+        )
+    };
+    // The whole input into the curve, fees aside, buys the most it can: short of the end, no fill.
+    if out(amount_in)? < left {
+        return None;
+    }
+    let reaches = |a: u64| {
+        launch_buy_net_in(
+            a,
+            lp_fee_bps,
+            share_bps,
+            rates,
+            eligible,
+            min_eligible,
+            quote_cut_bps,
+        )
+        .and_then(out)
+        .is_some_and(|o| o >= left)
+    };
+    if !reaches(amount_in) {
+        return None;
+    }
+    let (mut lo, mut hi) = (0u64, amount_in);
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if reaches(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+
+    /// The policy's curve a few SOL in: 750M tokens on the curve, graduating at 56.25 SOL.
+    fn near_the_end() -> Reserves {
+        Reserves {
+            base_reserve: 5_000_000_000_000,
+            quote_reserve: 55_875_000_000,
+            virtual_base: 375_000_000_000_000,
+            virtual_quote: 28_125_000_000,
+        }
+    }
+
+    #[test]
+    fn a_buy_past_the_end_of_the_curve_fills_it() {
+        let r = near_the_end();
+        let left = r.base_reserve;
+        let rates = LaunchFeeRates {
+            creator_fee_bps: 100,
+            holder_fee_buy_bps: 100,
+            ..Default::default()
+        };
+        let (lp, share) = (30, 2_500);
+        let fill = |amount: u64, cut: u16| launch_fill(&r, amount, lp, share, &rates, 1, 1, cut);
+        let net = |a: u64| launch_buy_net_in(a, lp, share, &rates, 1, 1, 0).unwrap();
+        let out = |n: u64| curve_out(n, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base).unwrap();
+        // A buy short of the end is not filled; one past it is, with the smallest input that
+        // sells the curve out.
+        assert_eq!(fill(100_000_000, 0), None);
+        let f = fill(100_000_000_000, 0).expect("a fill");
+        assert!(f < 100_000_000_000);
+        assert!(out(net(f)) >= u128::from(left), "the fill reaches the end");
+        assert!(out(net(f - 1)) < u128::from(left), "a lamport less does not");
+        // Asked exactly the fill, or a little more: the same fill; a lamport under it: no fill.
+        assert_eq!(fill(f, 0), Some(f));
+        assert_eq!(fill(f + 12_345, 0), Some(f));
+        assert_eq!(fill(f - 1, 0), None);
+        assert_eq!(fill(u64::MAX, 0), Some(f));
+        // A SOL cut on top needs more input for the same tokens.
+        let with_cut = fill(100_000_000_000, 200).expect("a fill");
+        assert!(with_cut > f);
+        // The DEX then takes every token left, and no more: the fill's net input past the end
+        // (its rounding) stays in the pool; without the fill the same buy is refused.
+        let received = f - quote_cut_fee(f, 0, 0) - launch_before_swap(true, f, &rates, 1, 1).creator_fee - launch_before_swap(true, f, &rates, 1, 1).holder_fee;
+        let cuts = f - received;
+        let a = swap_amounts_shared_with(true, received, lp, share, cuts, &r, true).unwrap();
+        assert_eq!((a.out_gross, a.amount_out, a.net_in), (left, left, net(f)));
+        // Without the fill the same buy lands only when its curve output is the reserve exactly
+        // (the fill is the smallest input reaching the end, which the rounding can land on).
+        match swap_amounts_shared(true, received, lp, share, cuts, &r) {
+            Ok(plain) => assert_eq!((plain.out_gross, out(net(f))), (left, u128::from(left))),
+            Err(e) => assert_eq!(e, SwapFailure::InsufficientLiquidity),
+        }
+        // A lamport more into the curve than the end needs is past it: refused plain, filled capped.
+        let past = net(f) + 1;
+        assert_eq!(
+            swap_amounts_shared_with(true, past, 0, 0, 0, &r, true).map(|a| a.out_gross),
+            Ok(left)
+        );
+        // Nothing to fill on an empty curve, or a pool with nothing left.
+        assert_eq!(
+            launch_fill(&Reserves { base_reserve: 0, ..r }, u64::MAX, lp, share, &rates, 1, 1, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn the_filling_curve_output_is_capped_at_the_reserve() {
+        let r = near_the_end();
+        let past = 10 * r.quote_reserve;
+        assert_eq!(
+            swap_out(past, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base),
+            None
+        );
+        assert_eq!(
+            swap_out_filling(past, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base),
+            Some(r.base_reserve)
+        );
+        assert!(
+            curve_out(past, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base).unwrap()
+                > u128::from(r.base_reserve)
+        );
+        // Within the curve both agree, and nothing in is nothing out.
+        let small = 1_000_000;
+        assert_eq!(
+            swap_out(small, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base),
+            swap_out_filling(small, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base)
+        );
+        assert_eq!(
+            swap_out_filling(0, r.quote_reserve, r.virtual_quote, r.base_reserve, r.virtual_base),
+            None
+        );
+        // The flat model fills the same way.
+        let flat = swap_amounts_with(true, past, 30, 100, &r, true).unwrap();
+        assert_eq!(flat.out_gross, r.base_reserve);
+        assert_eq!(
+            swap_amounts(true, past, 30, 100, &r),
+            Err(SwapFailure::InsufficientLiquidity)
+        );
+    }
+
+    #[test]
+    fn a_quote_cut_rounds_down_and_stays_below_the_amount() {
+        assert_eq!(quote_cut_fee(1_000_000_000, 200, 0), 20_000_000);
+        assert_eq!(quote_cut_fee(49, 200, 0), 0);
+        assert_eq!(quote_cut_fee(100, 1_000, 90), 0);
+        assert_eq!(quote_cut_fee(100, 1_000, 89), 10);
+        assert_eq!(quote_cut_fee(u64::MAX, 1, 0), u64::MAX / 10_000);
+    }
+}

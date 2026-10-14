@@ -1148,3 +1148,215 @@ mod tests {
 
 // Phase 3a, declared last so no line above moves (panic locations are part of every hook's code).
 pub mod authority;
+
+// The curve fill (2026-10-13), declared last so no line above moves (panic locations are part of
+// every hook's code). A pool's `before_swap` may end its answer with a fill, the part of the input
+// the swap uses instead of all of it, for a buy that reaches the end of a curve: nine bytes after
+// the answer, absent when there is none, so every other caller reads an answer as it always has.
+pub use fill::{
+    answer_bytes, filled_answer_from, read_filled_answer, set_answer, FilledAnswer, FILL_TAIL_LEN,
+};
+
+mod fill {
+    use anchor_lang::prelude::*;
+    use anchor_lang::solana_program::program::{get_return_data, set_return_data};
+
+    use super::{Allowed, AnswerError, HookReturn};
+
+    /// Bytes of a fill after an answer: a tag of 1, then the fill as a little-endian `u64`.
+    pub const FILL_TAIL_LEN: usize = 9;
+
+    /// The return data of `answer`, with `fill` after it when there is one: what a pool hook's
+    /// `before_swap` sets when a buy reaches the end of its curve ([`set_answer`]). Without a fill
+    /// the bytes are the answer alone, as every hook has always returned it.
+    pub fn answer_bytes(answer: &HookReturn, fill: Option<u64>) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(64);
+        // Serializing into a Vec cannot fail.
+        let _ = answer.serialize(&mut bytes);
+        if let Some(fill) = fill {
+            bytes.push(1);
+            bytes.extend_from_slice(&fill.to_le_bytes());
+        }
+        bytes
+    }
+
+    /// Sets `answer` (and `fill`, when there is one) as this callback's return data. A callback
+    /// that answers this way returns `()` to Anchor, which then sets no return data of its own.
+    pub fn set_answer(answer: &HookReturn, fill: Option<u64>) {
+        set_return_data(&answer_bytes(answer, fill));
+    }
+
+    /// A checked answer, what it takes in total, and the fill after it when there is one.
+    pub type FilledAnswer = (HookReturn, u64, Option<u64>);
+
+    /// [`read_answer`](super::read_answer) for a pool's `before_swap`, which may end its answer
+    /// with a fill: the fill is read as well (`None` without one). A fill when `fill_allowed` is
+    /// not set (the DEX allows one with `BEFORE_SWAP_RETURNS_DELTA`, the flag that lets the hook
+    /// cut the input) is [`AnswerError::Unsupported`]; bytes after the answer that are not exactly
+    /// a fill are [`AnswerError::Malformed`]. As for a plain answer, nothing is read when
+    /// `allowed` allows nothing.
+    pub fn read_filled_answer(
+        hook_program: &Pubkey,
+        allowed: Allowed,
+        fill_allowed: bool,
+    ) -> core::result::Result<Option<FilledAnswer>, AnswerError> {
+        if !allowed.any() {
+            return Ok(None);
+        }
+        filled_answer_from(get_return_data(), hook_program, allowed, fill_allowed)
+    }
+
+    /// The length of the plain answer at the start of `data`, from its Borsh layout: the deltas'
+    /// count and nine bytes each, the burn, and the three options (a tag, then the value when the
+    /// tag is 1); `None` when the bytes do not say.
+    fn answer_len(data: &[u8]) -> Option<usize> {
+        let count = u32::from_le_bytes(data.get(0..4)?.try_into().ok()?) as usize;
+        let mut n = 4usize.checked_add(count.checked_mul(9)?)?.checked_add(8)?;
+        for width in [2usize, 64, 64] {
+            n = n.checked_add(1 + match *data.get(n)? {
+                0 => 0,
+                1 => width,
+                _ => return None,
+            })?;
+        }
+        Some(n)
+    }
+
+    /// [`read_filled_answer`] on given return data.
+    pub fn filled_answer_from(
+        return_data: Option<(Pubkey, Vec<u8>)>,
+        hook_program: &Pubkey,
+        allowed: Allowed,
+        fill_allowed: bool,
+    ) -> core::result::Result<Option<FilledAnswer>, AnswerError> {
+        if !allowed.any() {
+            return Ok(None);
+        }
+        match return_data {
+            Some((program, data)) if program == *hook_program && !data.is_empty() => {
+                let n = answer_len(&data)
+                    .filter(|n| *n <= data.len())
+                    .ok_or(AnswerError::Malformed)?;
+                let answer =
+                    HookReturn::try_from_slice(&data[..n]).map_err(|_| AnswerError::Malformed)?;
+                let fill = match &data[n..] {
+                    [] => None,
+                    [1, le @ ..] if le.len() == FILL_TAIL_LEN - 1 => {
+                        let mut raw = [0u8; 8];
+                        raw.copy_from_slice(le);
+                        Some(u64::from_le_bytes(raw))
+                    }
+                    _ => return Err(AnswerError::Malformed),
+                };
+                if fill.is_some() && !fill_allowed {
+                    return Err(AnswerError::Unsupported);
+                }
+                let taken = answer.check(allowed)?;
+                Ok(Some((answer, taken, fill)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{answer_from, pool_flags, Delta, Phase, PoolOp};
+        use super::*;
+
+        #[test]
+        fn a_before_swap_answer_may_end_with_a_fill() {
+            let hook = Pubkey::new_unique();
+            let answer = HookReturn {
+                deltas: vec![Delta {
+                    amount: 7,
+                    account: 5,
+                }],
+                lp_fee_bps: Some(30),
+                ..Default::default()
+            };
+            // Without a fill the bytes are the answer alone, as every hook has always returned
+            // it; with one, nine bytes follow.
+            let plain = answer_bytes(&answer, None);
+            let mut expected = Vec::new();
+            answer.serialize(&mut expected).unwrap();
+            assert_eq!(plain, expected);
+            let filled = answer_bytes(&answer, Some(1_234_567));
+            assert_eq!(filled.len(), plain.len() + FILL_TAIL_LEN);
+            assert_eq!(&filled[plain.len()..], &[1, 0x87, 0xd6, 0x12, 0, 0, 0, 0, 0]);
+            let allowed = Allowed::pool(PoolOp::Swap, Phase::Before, pool_flags::ALL);
+            assert_eq!(
+                filled_answer_from(Some((hook, plain.clone())), &hook, allowed, true),
+                Ok(Some((answer.clone(), 7, None)))
+            );
+            assert_eq!(
+                filled_answer_from(Some((hook, filled.clone())), &hook, allowed, true),
+                Ok(Some((answer.clone(), 7, Some(1_234_567))))
+            );
+            // The plain reader sees bytes left over; a caller that allows no fill refuses one,
+            // and one that allows nothing at all reads nothing.
+            assert_eq!(
+                answer_from(Some((hook, filled.clone())), &hook, allowed),
+                Err(AnswerError::Malformed)
+            );
+            assert_eq!(
+                filled_answer_from(Some((hook, filled.clone())), &hook, allowed, false),
+                Err(AnswerError::Unsupported)
+            );
+            assert_eq!(
+                filled_answer_from(Some((hook, vec![1, 2, 3])), &hook, Allowed::NONE, true),
+                Ok(None)
+            );
+            // Bytes after the answer that are not exactly a fill are malformed.
+            let mut longer = filled.clone();
+            longer.push(0);
+            for tail in [vec![0], vec![1, 2, 3], vec![2; FILL_TAIL_LEN]] {
+                let mut bad = plain.clone();
+                bad.extend(tail);
+                assert_eq!(
+                    filled_answer_from(Some((hook, bad)), &hook, allowed, true),
+                    Err(AnswerError::Malformed)
+                );
+            }
+            assert_eq!(
+                filled_answer_from(
+                    Some((hook, filled[..filled.len() - 1].to_vec())),
+                    &hook,
+                    allowed,
+                    true
+                ),
+                Err(AnswerError::Malformed)
+            );
+            assert_eq!(
+                filled_answer_from(Some((hook, longer)), &hook, allowed, true),
+                Err(AnswerError::Malformed)
+            );
+            // A filled answer is still checked, and another program's is no answer.
+            assert_eq!(
+                filled_answer_from(
+                    Some((hook, filled.clone())),
+                    &hook,
+                    Allowed {
+                        deltas: false,
+                        ..allowed
+                    },
+                    true
+                ),
+                Err(AnswerError::Unsupported)
+            );
+            assert_eq!(
+                filled_answer_from(Some((Pubkey::new_unique(), filled)), &hook, allowed, true),
+                Ok(None)
+            );
+            assert_eq!(
+                filled_answer_from(Some((hook, vec![])), &hook, allowed, true),
+                Ok(None)
+            );
+            // An empty answer with a fill: nothing taken, the fill read.
+            let bare = answer_bytes(&HookReturn::default(), Some(5));
+            assert_eq!(
+                filled_answer_from(Some((hook, bare)), &hook, allowed, true),
+                Ok(Some((HookReturn::default(), 0, Some(5))))
+            );
+        }
+    }
+}

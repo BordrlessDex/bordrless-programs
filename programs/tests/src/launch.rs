@@ -14,8 +14,8 @@
 use anchor_lang::prelude::Pubkey;
 use anchor_lang::solana_program::instruction::Instruction;
 use bordrless_core::{
-    fee_amount, launch_after_swap, launch_before_swap, max_wallet_cap, policy, protocol_share,
-    sniper_lp_fee, CurveParams, LaunchFeeRates, Reserves,
+    fee_amount, launch_after_swap, launch_before_swap, launch_fill, max_wallet_cap, policy,
+    protocol_share, sniper_lp_fee, CurveParams, LaunchFeeRates, Reserves,
 };
 use bordrless_launch::client as launch;
 use bordrless_launch::state::{Launch, LaunchRules};
@@ -199,6 +199,72 @@ pub fn quote_launch_swap(
     eligible: u64,
     min_eligible: u64,
 ) -> LaunchSwap {
+    quote_launch_swap_with(
+        r,
+        buy,
+        amount_in,
+        lp_fee_bps,
+        protocol_share_bps,
+        rates,
+        eligible,
+        min_eligible,
+        false,
+    )
+}
+
+/// The fill of a buy of `amount_in` (§3.1; `bordrless_core::launch_fill`, as the launchpad's
+/// `before_swap` answers it) and the swap of that fill as the DEX then runs it: the fees of the
+/// fill, every token the pool has left delivered (less the buy burn). `None` for a buy short of
+/// the end of the curve. Mirrors `curveFillBuy` in `packages/shared`.
+#[allow(clippy::too_many_arguments)]
+pub fn launch_fill_quote(
+    r: &Reserves,
+    amount_in: u64,
+    lp_fee_bps: u16,
+    protocol_share_bps: u16,
+    rates: &LaunchFeeRates,
+    eligible: u64,
+    min_eligible: u64,
+) -> Option<(u64, LaunchSwap)> {
+    let fill = launch_fill(
+        r,
+        amount_in,
+        lp_fee_bps,
+        protocol_share_bps,
+        rates,
+        eligible,
+        min_eligible,
+        0,
+    )?;
+    let q = quote_launch_swap_with(
+        r,
+        true,
+        fill,
+        lp_fee_bps,
+        protocol_share_bps,
+        rates,
+        eligible,
+        min_eligible,
+        true,
+    );
+    assert_eq!(q.failure, None, "a fill lands");
+    Some((fill, q))
+}
+
+/// [`quote_launch_swap`], with `fill`: a buy past the end of the curve takes every token the pool
+/// has left instead of failing (`swap_out_filling`), as the DEX runs a filled buy.
+#[allow(clippy::too_many_arguments)]
+pub fn quote_launch_swap_with(
+    r: &Reserves,
+    buy: bool,
+    amount_in: u64,
+    lp_fee_bps: u16,
+    protocol_share_bps: u16,
+    rates: &LaunchFeeRates,
+    eligible: u64,
+    min_eligible: u64,
+    fill: bool,
+) -> LaunchSwap {
     let before = launch_before_swap(buy, amount_in, rates, eligible, min_eligible);
     let received = amount_in - before.creator_fee - before.holder_fee - before.burn;
     let eligible_at_fees = if buy {
@@ -248,10 +314,10 @@ pub fn quote_launch_swap(
         return failed("no_output", input_protocol_fee);
     }
     let real = if buy { r.base_reserve } else { r.quote_reserve };
-    if out > u128::from(real) {
+    if out > u128::from(real) && !(fill && buy) {
         return failed("insufficient_liquidity", input_protocol_fee);
     }
-    let out = out as u64;
+    let out = out.min(u128::from(real)) as u64;
     if buy {
         let after = launch_after_swap(true, out, rates, eligible, min_eligible);
         return LaunchSwap {
@@ -567,6 +633,31 @@ impl World {
             buy,
             amount_in,
             self.launch_lp_fee(mint, trader, trader, buy),
+            p.protocol_share_bps,
+            &l.rules.fee_rates(l.creator_fee_bps),
+            eligible,
+            min_eligible,
+        )
+    }
+
+    /// The fill of a buy of `amount_in` by `trader` on the launch of `mint` now, and the swap of
+    /// it ([`launch_fill_quote`]); `None` for a buy short of the end of the curve.
+    pub fn launch_fill_quote(
+        &self,
+        mint: &Pubkey,
+        trader: &Pubkey,
+        amount_in: u64,
+    ) -> Option<(u64, LaunchSwap)> {
+        let l = self.launch(mint);
+        let p = self.launch_pool(mint);
+        if !p.curve {
+            return None;
+        }
+        let (eligible, min_eligible) = self.eligibility(mint);
+        launch_fill_quote(
+            &reserves_of(&p),
+            amount_in,
+            self.launch_lp_fee(mint, trader, trader, true),
             p.protocol_share_bps,
             &l.rules.fee_rates(l.creator_fee_bps),
             eligible,

@@ -81,6 +81,8 @@ pub enum SwapError {
     BadHookSigner,
     #[msg("the pool's quote is not bridged SOL")]
     NotBridgedSol,
+    #[msg("the hook answered a fill that is zero, above the input, or not for a buy on a curve")]
+    BadFill,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.

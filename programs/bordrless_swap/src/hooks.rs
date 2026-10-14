@@ -3,8 +3,8 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed};
 use bordrless_hook::{
-    clear_return_data, hook_signer_at, read_answer, Allowed, Answer, HookReturn, PoolHookArgs,
-    HOOK_AUTHORITY_SEED, POOL_PREFIX_ACCOUNTS,
+    clear_return_data, hook_signer_at, read_answer, read_filled_answer, Allowed, Answer,
+    FilledAnswer, HookReturn, PoolHookArgs, HOOK_AUTHORITY_SEED, POOL_PREFIX_ACCOUNTS,
 };
 
 use crate::error::{answer_error, SwapError};
@@ -100,6 +100,26 @@ impl<'a, 'info> PoolHookCall<'a, 'info> {
         args: &PoolHookArgs,
         allowed: Allowed,
     ) -> Result<Option<Answer>> {
+        self.call(discriminator, args)?;
+        read_answer(self.hook_program.key, allowed).map_err(answer_error)
+    }
+
+    /// [`Self::invoke`] for `before_swap`, whose answer may end with a fill (§3.1) when
+    /// `fill_allowed` (the pool's `BEFORE_SWAP_RETURNS_DELTA`): the answer, what it takes, and the
+    /// fill when there is one.
+    pub fn invoke_filled(
+        &self,
+        discriminator: [u8; 8],
+        args: &PoolHookArgs,
+        allowed: Allowed,
+        fill_allowed: bool,
+    ) -> Result<Option<FilledAnswer>> {
+        self.call(discriminator, args)?;
+        read_filled_answer(self.hook_program.key, allowed, fill_allowed).map_err(answer_error)
+    }
+
+    /// The CPI of one callback, its return data cleared first.
+    fn call(&self, discriminator: [u8; 8], args: &PoolHookArgs) -> Result<()> {
         let mut data = Vec::with_capacity(8 + 256);
         data.extend_from_slice(&discriminator);
         args.serialize(&mut data)?;
@@ -137,7 +157,7 @@ impl<'a, 'info> PoolHookCall<'a, 'info> {
                 &[self.bump],
             ]],
         )?;
-        read_answer(self.hook_program.key, allowed).map_err(answer_error)
+        Ok(())
     }
 
     /// The extra account a return names (an index over prefix then extras), checked to be a

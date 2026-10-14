@@ -27,9 +27,22 @@
 //! Amounts are measured, never assumed: `received` is what the input vault gained, and
 //! `min_amount_out` is checked against what the recipient's holding gained, so a token whose own
 //! hook takes a cut still prices and settles correctly.
+//!
+//! A fill: a buy on a curve whose `before_swap` answer ends with one (`bordrless_hook`'s
+//! `read_filled_answer`; a hook may fill when its pool's flags let it cut the input,
+//! `BEFORE_SWAP_RETURNS_DELTA`) uses that much of its input instead of all of it, the hook's cuts
+//! being of that part, and takes every token the curve has left rather than failing past its end
+//! (`swap_out_filling`); the rest of the input never leaves the trader, and `min_amount_out` is
+//! held to pro rata (the least the trader accepted for the whole input, for the part used). A fill
+//! of zero, above the input, for a sell or on a pool that is not a curve is `BadFill`. The
+//! launchpad answers one when a buy reaches the end of its curve, which then sells out and can
+//! graduate in the same transaction.
 
 use anchor_lang::prelude::*;
-use bordrless_core::{output_share, protocol_share, swap_amounts, swap_amounts_shared, Reserves};
+use bordrless_core::{
+    mul_div_floor, output_share, protocol_share, swap_amounts_shared_with, swap_amounts_with,
+    Reserves,
+};
 use bordrless_hook::{
     discriminators, pool_flags, Allowed, Phase, PoolHookArgs, PoolOp, MAX_HOOK_DATA,
 };
@@ -108,12 +121,14 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     let clock = Clock::get()?;
     let SwapArgs {
         direction,
-        amount_in,
+        amount_in: requested,
         min_amount_out,
         in_hook_accounts,
         out_hook_accounts,
         hook_data,
     } = args;
+    // What the swap uses: the whole input, or the part a fill names.
+    let mut amount_in = requested;
     require!(!ctx.accounts.config.paused, SwapError::Paused);
     require!(amount_in > 0, SwapError::ZeroAmount);
     require!(direction <= 1, SwapError::InvalidDirection);
@@ -205,19 +220,43 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
         hook_data,
     };
 
-    // 1. Before: the hook may set the LP fee and cut the input (deltas and a burn), as the pool's
-    //    flags allow; the answer is checked before anything moves.
+    // 1. Before: the hook may set the LP fee, cut the input (deltas and a burn), as the pool's
+    //    flags allow, and fill a buy on a curve (the part of the input the swap uses, its cuts of
+    //    that part); the answer is checked before anything moves.
     let mut lp_fee_bps = pool.lp_fee_bps;
     let mut cut_in = Cut::none();
+    let mut filled = false;
     if let Some(call) = &call {
         if pool.runs(pool_flags::BEFORE_SWAP) {
             let allowed = Allowed::pool(PoolOp::Swap, Phase::Before, flags);
-            if let Some((ret, taken)) =
-                call.invoke(discriminators::BEFORE_SWAP, &hook_args, allowed)?
-            {
+            // A hook that may cut the input (`BEFORE_SWAP_RETURNS_DELTA`) may fill a buy.
+            if let Some((ret, taken, fill)) = call.invoke_filled(
+                discriminators::BEFORE_SWAP,
+                &hook_args,
+                allowed,
+                allowed.deltas,
+            )? {
                 if let Some(fee) = ret.lp_fee_bps {
                     require!(fee <= MAX_LP_FEE_BPS, SwapError::FeeTooHigh);
                     lp_fee_bps = fee;
+                }
+                if let Some(fill) = fill {
+                    // Only a buy the transaction sends the DEX itself (a program that buys through
+                    // the DEX counts on its whole input being spent), on a launch pool's curve (a
+                    // curve another program opens as its hook may not fill: it could keep a buyer's
+                    // whole input for the last tokens).
+                    let direct = anchor_lang::solana_program::instruction::get_stack_height()
+                        == anchor_lang::solana_program::instruction::TRANSACTION_LEVEL_STACK_HEIGHT;
+                    require!(
+                        buy && pool.curve
+                            && pool.shares_cuts()
+                            && direct
+                            && fill > 0
+                            && fill <= requested,
+                        SwapError::BadFill
+                    );
+                    amount_in = fill;
+                    filled = true;
                 }
                 cut_in = call.cut(&ret, taken, amount_in, &in_mint, &forbidden)?;
             }
@@ -277,9 +316,18 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     let shared = pool.shares_cuts();
     let share_bps = pool.protocol_share_bps;
     let amounts = if shared {
-        swap_amounts_shared(buy, received, lp_fee_bps, share_bps, cuts_in, &reserves)
+        swap_amounts_shared_with(
+            buy, received, lp_fee_bps, share_bps, cuts_in, &reserves, filled,
+        )
     } else {
-        swap_amounts(buy, received, lp_fee_bps, pool.protocol_fee_bps, &reserves)
+        swap_amounts_with(
+            buy,
+            received,
+            lp_fee_bps,
+            pool.protocol_fee_bps,
+            &reserves,
+            filled,
+        )
     }
     .map_err(swap_failure)?;
 
@@ -410,7 +458,20 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     let delivered = balance(&trader_out)?
         .checked_sub(trader_out_before)
         .ok_or(SwapError::MathOverflow)?;
-    require!(delivered >= min_amount_out, SwapError::Slippage);
+    // A fill holds the minimum to pro rata: what the trader accepted for the whole input, for the
+    // part the swap used.
+    let min_out = if amount_in < requested {
+        mul_div_floor(
+            u128::from(min_amount_out),
+            u128::from(amount_in),
+            u128::from(requested),
+        )
+        .and_then(|m| u64::try_from(m).ok())
+        .ok_or(SwapError::MathOverflow)?
+    } else {
+        min_amount_out
+    };
+    require!(delivered >= min_out, SwapError::Slippage);
     // What the hooks took from the output and someone received (measured, in the output token).
     let cuts_out = amounts
         .amount_out
