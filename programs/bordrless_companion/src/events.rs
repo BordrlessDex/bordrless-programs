@@ -683,7 +683,7 @@ pub struct ScriptStepped {
 
 // ---- Payouts (Loss cover, 2026-10-12) ----------------------------------------------------------------
 
-/// `create_script_v2`: the bounds the script's payouts keep within (`PayoutTerms`).
+/// `create_script_v2` or `set_payout_terms`: the bounds the script's payouts keep within (`PayoutTerms`).
 #[event]
 pub struct PayoutTermsSet {
     pub companion: Pubkey,

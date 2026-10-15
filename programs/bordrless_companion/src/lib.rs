@@ -323,6 +323,13 @@ pub mod bordrless_companion {
         instructions::payout::process_allow_wallet_payouts(ctx)
     }
 
+    /// The launch's beneficiary (its launcher) or the script approver, before or after the launch:
+    /// replaces a script's payout terms within `create_script_v2`'s bounds; the window restarts
+    /// (2026-10-15). The terms name no recipient: they only bound how fast the pot pays holders.
+    pub fn set_payout_terms(ctx: Context<SetPayoutTerms>, payout: PayoutTermsArgs) -> Result<()> {
+        instructions::payout::process_set_payout_terms(ctx, payout)
+    }
+
     /// The upgrade authority, with the DEX paused, the companion's launch native: turns the
     /// companion native (its SOL to its creator address's lamports). Idempotent.
     pub fn migrate_companion_to_native<'info>(

@@ -1608,3 +1608,21 @@ pub fn allow_wallet_payouts(mint: Pubkey) -> Instruction {
         data: crate::instruction::AllowWalletPayouts {}.data(),
     }
 }
+
+/// `set_payout_terms`: `authority` (the launch's beneficiary or the script approver) replaces the
+/// payout terms of `mint`'s script.
+pub fn set_payout_terms(authority: Pubkey, mint: Pubkey, payout: PayoutTermsArgs) -> Instruction {
+    let accounts = crate::accounts::SetPayoutTerms {
+        authority,
+        companion: companion_address(&mint),
+        terms: payout_terms_address(&mint),
+        event_authority: event_authority(),
+        program: crate::ID,
+    }
+    .to_account_metas(None);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SetPayoutTerms { payout }.data(),
+    }
+}

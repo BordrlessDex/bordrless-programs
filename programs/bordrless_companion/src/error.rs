@@ -210,4 +210,7 @@ pub enum CompanionError {
     LaunchNotNative,
     #[msg("this script is not native-ready: it can't launch while native launches are on")]
     ScriptNotNativeReady,
+    // ---- Payout terms set after the launch (2026-10-15). Appended. ----
+    #[msg("only the launch's beneficiary (its launcher) or the script approver sets a script's payout terms")]
+    NotTermsAuthority,
 }

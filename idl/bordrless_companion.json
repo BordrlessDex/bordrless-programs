@@ -4407,6 +4407,106 @@
       ]
     },
     {
+      "name": "set_payout_terms",
+      "docs": [
+        "The launch's beneficiary (its launcher) or the script approver, before or after the launch:",
+        "replaces a script's payout terms within `create_script_v2`'s bounds; the window restarts",
+        "(2026-10-15). The terms name no recipient: they only bound how fast the pot pays holders."
+      ],
+      "discriminator": [
+        87,
+        25,
+        244,
+        221,
+        249,
+        32,
+        15,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The launch's beneficiary (`Companion.beneficiary`, the wallet that launched it: not the",
+            "companion's creator PDA) or the script approver (`SCRIPT_APPROVER`)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116,
+                  45,
+                  116,
+                  101,
+                  114,
+                  109,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout",
+          "type": {
+            "defined": {
+              "name": "PayoutTermsArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "settle",
       "docs": [
         "Anyone: closes the oldest jackpot round that is over, paying its last qualifying buyer if",
@@ -6136,6 +6236,11 @@
       "code": 6093,
       "name": "ScriptNotNativeReady",
       "msg": "this script is not native-ready: it can't launch while native launches are on"
+    },
+    {
+      "code": 6094,
+      "name": "NotTermsAuthority",
+      "msg": "only the launch's beneficiary (its launcher) or the script approver sets a script's payout terms"
     }
   ],
   "types": [
@@ -9282,7 +9387,8 @@
       "docs": [
         "The bounds a script companion's payouts keep within (Loss cover, 2026-10-12),",
         "`PDA([\"payout-terms\", mint])`, 128 bytes, made by `create_script_v2` with the script. A script",
-        "made with `create_script` has none, and its answers pay nobody (`PayoutsOff`). The counters are",
+        "made with `create_script` has none, and its answers pay nobody (`PayoutsOff`). The beneficiary or",
+        "the script approver may replace the bounds (`set_payout_terms`). The counters are",
         "the companion's: a step writes them after it paid."
       ],
       "type": {
@@ -9317,7 +9423,8 @@
           {
             "name": "window_bps",
             "docs": [
-              "The most a window pays, of the pot as it stood at the window's first step (1 to 10,000)."
+              "The most a window pays (1 to 10,000), of the pot as if the window had paid nothing: the",
+              "pot at the step plus `window_paid`, at least `window_pot` (`payout::window_base`)."
             ],
             "type": "u16"
           },
@@ -9397,7 +9504,7 @@
           {
             "name": "window_bps",
             "docs": [
-              "The most a window pays, of the pot as it stood at the window's first step."
+              "The most a window pays, of the pot as if the window had paid nothing (`window_base`)."
             ],
             "type": "u16"
           },
@@ -9414,7 +9521,7 @@
     {
       "name": "PayoutTermsSet",
       "docs": [
-        "`create_script_v2`: the bounds the script's payouts keep within (`PayoutTerms`)."
+        "`create_script_v2` or `set_payout_terms`: the bounds the script's payouts keep within (`PayoutTerms`)."
       ],
       "type": {
         "kind": "struct",

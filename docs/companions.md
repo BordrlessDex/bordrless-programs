@@ -321,13 +321,29 @@ program: every earlier instruction, account and error code is unchanged.
   `create_script_v2(args, payout { step_bps, holding_bps, window_bps, window_secs })` beside the
   script, the payer paying their rent (`BadPayoutTerms` out of bounds: each share 1 to 10,000,
   the window 10 seconds to a day; `PayoutTermsSet`). A script made with `create_script` has none:
-  its first answer with an entry fails (`PayoutsOff`). The mint must have a custom hook with
+  its first answer with an entry fails (`PayoutsOff`).
+  `set_payout_terms(payout)` (2026-10-15), accounts `[authority (signer), companion, terms
+  (writable), event_authority, program]`, replaces the terms at any time, before or after the
+  launch, within the same bounds (`BadPayoutTerms`), signed by the launch's beneficiary
+  (`Companion.beneficiary`, the wallet that launched it, not the companion's creator PDA) or the
+  script approver (`SCRIPT_APPROVER`); anyone else `NotTermsAuthority`. The window restarts
+  (`window_start`, `window_pot`, `window_paid` zeroed: the next step opens a window at the pot as
+  it stands, under the new terms); `paid_total`, `payouts`, `last_paid_at` and the wallet-payouts
+  flag are kept; `PayoutTermsSet`. The terms name no recipient: they only bound how fast the pot
+  pays holders (or allowed wallets), so a looser set only speeds what the approved script already
+  pays; who is paid is still the script's answer under the checks below, and the launcher is never
+  a holding payout's recipient. The mint must have a custom hook with
   `WRITES_HOOK_DATA` (`PayoutsNeedHook`): a kit token or a hook without hook data can carry no
   record, so it can't be paid.
 - **The checks, in order**, after the step's own (the pot spent and nothing else, the dev bag, the
   lamports, custody), every one before any payment: the budget, `min(step_bps of the pot at the
-  step's start, window_bps of the pot at the window's first step less what the window paid, the
-  pot after the script less the bounty)`, the holding cap `holding_bps` of it; then each entry: the
+  step's start, window_bps of the window's base less what the window paid, the pot after the
+  script less the bounty)`; the window's base (2026-10-15) is the pot after the script plus what
+  the window has paid (the pot as if the window had paid nothing), never less than the pot at the
+  window's first step (`window_pot`). Paying moves lamports from the pot to `window_paid` one for
+  one, so payouts never shrink the cap and fees arriving mid-window are payable in that window;
+  the cap is never below the frozen one it replaced, so a script that computes the old one still
+  answers within it; the pot less the bounty bounds every step whatever the window, the holding cap `holding_bps` of it; then each entry: the
   index, a holding of the mint, named once, within the cap and the budget (`PayoutOverBound`), its
   owner eligible (never the launch, its pool, the creator address, the companion, the script, its
   state, the terms, the hook, the default key or an address off the curve: `PayoutTarget`), not

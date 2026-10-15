@@ -1114,7 +1114,8 @@ impl Script {
 
 /// The bounds a script companion's payouts keep within (Loss cover, 2026-10-12),
 /// `PDA(["payout-terms", mint])`, 128 bytes, made by `create_script_v2` with the script. A script
-/// made with `create_script` has none, and its answers pay nobody (`PayoutsOff`). The counters are
+/// made with `create_script` has none, and its answers pay nobody (`PayoutsOff`). The beneficiary or
+/// the script approver may replace the bounds (`set_payout_terms`). The counters are
 /// the companion's: a step writes them after it paid.
 #[account]
 #[derive(InitSpace)]
@@ -1126,7 +1127,8 @@ pub struct PayoutTerms {
     pub step_bps: u16,
     /// The most one holding gets of a step's budget (1 to 10,000).
     pub holding_bps: u16,
-    /// The most a window pays, of the pot as it stood at the window's first step (1 to 10,000).
+    /// The most a window pays (1 to 10,000), of the pot as if the window had paid nothing: the
+    /// pot at the step plus `window_paid`, at least `window_pot` (`payout::window_base`).
     pub window_bps: u16,
     /// The window: `floor(now / window_secs)` (10 seconds to a day: a round, or a day).
     pub window_secs: u32,

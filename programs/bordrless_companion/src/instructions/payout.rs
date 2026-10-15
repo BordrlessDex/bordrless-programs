@@ -56,7 +56,7 @@ pub struct PayoutTermsArgs {
     pub step_bps: u16,
     /// The most one holding gets of a step's budget.
     pub holding_bps: u16,
-    /// The most a window pays, of the pot as it stood at the window's first step.
+    /// The most a window pays, of the pot as if the window had paid nothing (`window_base`).
     pub window_bps: u16,
     /// The window: `floor(now / window_secs)`.
     pub window_secs: u32,
@@ -154,9 +154,16 @@ pub fn bounty_for(entries: Option<usize>) -> u64 {
 }
 
 /// The most a step may pay in all: `step_bps` of the pot at the step's start, what the window
-/// may still pay (`window_bps` of the pot at its first step, less what it paid), and the pot
-/// after the script ran less the bounty. The holding cap is `holding_bps` of it. A script
-/// computes the same from the same numbers, since an answer is refused, never clamped.
+/// may still pay, and the pot after the script ran less the bounty. The holding cap is
+/// `holding_bps` of it. A script computes the same from the same numbers, since an answer is
+/// refused, never clamped.
+///
+/// The window's share (2026-10-15) is `window_bps` of [`window_base`]: the live pot as if the
+/// window had paid nothing (`pot_after_script + window_paid`), never less than the pot at the
+/// window's first step (`window_pot`), less what the window paid. Paying moves lamports from the
+/// pot to `window_paid` one for one, so payouts never shrink the window's cap; fees arriving
+/// mid-window grow it. Never less than the old cap, so a script that computes the frozen one
+/// answers within this one. Whatever the window's share, the pot less the bounty bounds the step.
 pub fn step_budget(
     pot_before: u64,
     pot_after_script: u64,
@@ -167,8 +174,21 @@ pub fn step_budget(
     window_bps: u16,
 ) -> u64 {
     bps_of(pot_before, u64::from(step_bps))
-        .min(bps_of(window_pot, u64::from(window_bps)).saturating_sub(window_paid))
+        .min(
+            bps_of(
+                window_base(pot_after_script, window_pot, window_paid),
+                u64::from(window_bps),
+            )
+            .saturating_sub(window_paid),
+        )
         .min(pot_after_script.saturating_sub(bounty))
+}
+
+/// The pot a window's share is measured against: the pot now (after the script ran) with what the
+/// window has paid added back, i.e. the pot as if the window had paid nothing; at least the pot at
+/// the window's first step, so a window's cap never falls below the frozen one it replaced.
+pub fn window_base(pot_after_script: u64, window_pot: u64, window_paid: u64) -> u64 {
+    pot_after_script.saturating_add(window_paid).max(window_pot)
 }
 
 /// Whether SOL can be paid to `account` (as `pay_strategy`'s `payable`): not executable, not a
@@ -220,6 +240,58 @@ fn budget_of(p: &StepPayouts, t: &mut PayoutTerms) -> (u64, u64) {
         t.window_bps,
     );
     (budget, bps_of(budget, u64::from(t.holding_bps)))
+}
+
+/// Accounts of `set_payout_terms`.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct SetPayoutTerms<'info> {
+    /// The launch's beneficiary (`Companion.beneficiary`, the wallet that launched it: not the
+    /// companion's creator PDA) or the script approver (`SCRIPT_APPROVER`).
+    pub authority: Signer<'info>,
+    #[account(seeds = [COMPANION_SEED, companion.mint.as_ref()], bump = companion.bump)]
+    pub companion: Box<Account<'info, Companion>>,
+    #[account(mut, seeds = [PAYOUT_TERMS_SEED, companion.mint.as_ref()], bump = terms.bump)]
+    pub terms: Box<Account<'info, PayoutTerms>>,
+}
+
+/// `set_payout_terms` (2026-10-15): replaces a script's payout terms, before or after the launch,
+/// within `create_script_v2`'s bounds (`BadPayoutTerms`), signed by the launch's beneficiary or the
+/// script approver (`NotTermsAuthority`). The terms only bound how fast the script pays from the
+/// pot: they name no recipient, and the wallet-payouts flag, the counters of what was paid and the
+/// mint are kept. The window restarts: its counters clear, and the next step opens a new window at
+/// the pot as it stands, under the new terms. `PayoutTermsSet`.
+pub fn process_set_payout_terms(
+    ctx: Context<SetPayoutTerms>,
+    payout: PayoutTermsArgs,
+) -> Result<()> {
+    let signer = ctx.accounts.authority.key();
+    require!(
+        signer == ctx.accounts.companion.beneficiary || signer == SCRIPT_APPROVER,
+        CompanionError::NotTermsAuthority
+    );
+    require!(payout.valid(), CompanionError::BadPayoutTerms);
+    let mint = ctx.accounts.companion.mint;
+    let t = &mut ctx.accounts.terms;
+    require!(t.mint == mint, CompanionError::PayoutsOff);
+    t.step_bps = payout.step_bps;
+    t.holding_bps = payout.holding_bps;
+    t.window_bps = payout.window_bps;
+    t.window_secs = payout.window_secs;
+    t.window_start = 0;
+    t.window_pot = 0;
+    t.window_paid = 0;
+    let terms = t.key();
+    emit_cpi!(crate::events::PayoutTermsSet {
+        companion: ctx.accounts.companion.key(),
+        mint,
+        terms,
+        step_bps: payout.step_bps,
+        holding_bps: payout.holding_bps,
+        window_bps: payout.window_bps,
+        window_secs: payout.window_secs,
+    });
+    Ok(())
 }
 
 /// Accounts of `allow_wallet_payouts`.
@@ -836,14 +908,21 @@ mod tests {
         // Every cap at 100%: the pot after the script, less the bounty, and never more than the
         // window held at its start.
         assert_eq!(step_budget(1_000, 1_000, 20, 1_000, 0, 10_000, 10_000), 980);
-        assert_eq!(step_budget(1_000, 1_000, 20, 600, 100, 10_000, 10_000), 500);
-        // The step's share of the pot before, the window's of its own pot less what it paid.
+        // The pot at the window's start is a floor: a pot that fell below it (bounties, the
+        // script's spending) keeps the frozen cap, never less than before.
+        assert_eq!(step_budget(1_000, 1_000, 0, 4_000, 100, 10_000, 2_500), 900);
+        // The step's share of the pot before.
         assert_eq!(step_budget(1_000, 5_000, 0, 5_000, 0, 1_000, 10_000), 100);
-        assert_eq!(step_budget(1_000, 1_000, 0, 1_000, 950, 10_000, 10_000), 50);
+        // The window's share of the pot as if it had paid nothing, less what it paid: 25% of
+        // (750 + 250) - 250 = 0; then fees of 1,000 arrive: 25% of 2,000 - 250 = 250.
+        assert_eq!(step_budget(750, 750, 0, 1_000, 250, 10_000, 2_500), 0);
+        assert_eq!(step_budget(1_750, 1_750, 0, 1_000, 250, 10_000, 2_500), 250);
+        // Never more than the pot less the bounty, whatever the window paid.
         assert_eq!(
             step_budget(1_000, 1_000, 0, 1_000, 2_000, 10_000, 10_000),
-            0
+            1_000
         );
+        assert_eq!(step_budget(1_000, 1_000, 20, 600, 100, 10_000, 10_000), 980);
         // A pot below the bounty: nothing.
         assert_eq!(step_budget(10, 10, 20, 10, 0, 10_000, 10_000), 0);
         let terms = PayoutTermsArgs {
@@ -877,6 +956,38 @@ mod tests {
         ] {
             assert!(!bad.valid(), "{bad:?}");
         }
+    }
+
+    /// A window's payouts, step after step, against the pot as it stands: paying never shrinks
+    /// the window's cap, fees grow it, the window never pays more than its share of the pot as if
+    /// it had paid nothing, and no step more than the pot.
+    #[test]
+    fn the_window_is_measured_against_the_live_pot() {
+        // Tenure's terms: 10% a step, 25% a day; a 25 SOL pot, 0.5 SOL of fees a round.
+        let (step_bps, window_bps) = (1_000u16, 2_500u16);
+        let sol = 1_000_000_000u64;
+        let mut pot = 25 * sol;
+        let window_pot = pot;
+        let mut paid = 0u64;
+        let mut fees = 0u64;
+        for _ in 0..288 {
+            pot += sol / 2;
+            fees += sol / 2;
+            let budget = step_budget(pot, pot, 0, window_pot, paid, step_bps, window_bps);
+            assert!(budget <= pot);
+            pot -= budget;
+            paid += budget;
+            // Within 25% of the window's pot plus its fees (no bounty here).
+            assert!(paid <= bps_of(window_pot + fees, u64::from(window_bps)));
+        }
+        // The window kept paying its fees as they came: a quarter of all it held.
+        assert_eq!(paid, bps_of(window_pot + fees, u64::from(window_bps)));
+        // The frozen cap would have stopped at a quarter of the first pot.
+        assert!(paid > bps_of(window_pot, u64::from(window_bps)) * 5);
+        // window_base: the pot plus what was paid, the start's pot a floor.
+        assert_eq!(window_base(10, 100, 5), 100);
+        assert_eq!(window_base(100, 10, 5), 105);
+        assert_eq!(window_base(u64::MAX, 0, 5), u64::MAX);
     }
 
     #[test]
