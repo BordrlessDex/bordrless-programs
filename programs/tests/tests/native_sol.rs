@@ -1182,3 +1182,52 @@ fn a_migrated_launch_pool_trades_and_graduates() {
     m.send(&[ix], &trader).ok();
     m.inv(&pool, 0);
 }
+
+/// The old `swap` on a native pool whose hook names lamport destinations (as a native launch's
+/// hook does): on a buy the trader's bridged SOL for the cut joins the buffer and the pool pays the
+/// destination lamports; on a sell the pool pays it lamports; both conserve every lamport.
+#[test]
+fn the_old_swap_pays_lamport_cuts_on_a_native_pool() {
+    let mut m = M::new();
+    let pool = m.pool();
+    m.migrate(&pool, 0).ok();
+    let t = m.trader.pubkey();
+    let c = 7_000_000;
+    m.answer(pool, callback::BEFORE_SWAP, &cut(&[(c, WALLET)], 0));
+    let (wl, pl, b0, tq) = (
+        m.lamports(&m.wallet),
+        m.lamports(&pool),
+        m.state(&pool).buffer_quote(),
+        m.bal(&m.sol, &t),
+    );
+    let tx = m.v1(&pool, 1, 2 * SOL);
+    tx.ok();
+    let ev: Swapped = tx.event();
+    assert_eq!(m.bal(&m.sol, &t), tq - 2 * SOL);
+    assert_eq!(m.lamports(&m.wallet), wl + c);
+    assert_eq!(m.lamports(&pool), pl - c);
+    assert_eq!(m.state(&pool).buffer_quote(), b0 + ev.received_in + c);
+    m.inv(&pool, 0);
+
+    m.silence(pool);
+    m.answer(pool, callback::AFTER_SWAP, &cut(&[(c, WALLET)], 0));
+    let (wl, pl, b0) = (
+        m.lamports(&m.wallet),
+        m.lamports(&pool),
+        m.state(&pool).buffer_quote(),
+    );
+    let tq = m.bal(&m.sol, &t);
+    let tx = m.v1(&pool, 0, m.bal(&m.a, &t) / 20);
+    tx.ok();
+    let ev: Swapped = tx.event();
+    assert_eq!(m.lamports(&m.wallet), wl + c);
+    assert_eq!(m.lamports(&pool), pl - c);
+    assert_eq!(m.bal(&m.sol, &t), tq + ev.delivered_out);
+    assert_eq!(m.state(&pool).buffer_quote(), b0 - ev.delivered_out);
+    m.inv(&pool, 0);
+
+    // A cut too small for an account that does not exist is refused clearly here too.
+    m.answer(pool, callback::AFTER_SWAP, &cut(&[(1_000, EMPTY)], 0));
+    m.v1(&pool, 0, m.bal(&m.a, &t) / 20)
+        .expect_code(code(SwapError::RecipientBelowRent));
+}

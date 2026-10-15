@@ -340,6 +340,13 @@ pub fn run_swap<'info>(
     let native_out = native.is_some() && !buy;
     // The old `swap` on a native pool: the quote side goes through the buffer.
     let buffered = native.is_none() && pool_acc.quote_native();
+    // On a native pool the quote side's cuts may name any account (paid lamports) or a holding of
+    // bridged SOL (paid in bridged SOL), whichever swap trades it.
+    let nq_in = buy && pool_acc.quote_native();
+    let nq_out = !buy && pool_acc.quote_native();
+    // Lamport cuts of the old swap on a native pool, paid from the pool's lamports once every CPI
+    // has run (the runtime must see no direct move at a CPI that passes only one side of it).
+    let mut pending: Vec<(&AccountInfo<'info>, u64)> = Vec::new();
     let quote_side = c.quote_vault.clone().unwrap_or_else(|| pool_info.clone());
 
     // The sides.
@@ -396,7 +403,7 @@ pub fn run_swap<'info>(
         *trader_in.key,
         *trader_out.key,
     ];
-    if native.is_some() {
+    if pool_acc.quote_native() {
         forbidden.extend([pool_key, pool_acc.quote_vault, *c.trader.key]);
     }
 
@@ -472,7 +479,7 @@ pub fn run_swap<'info>(
                     amount_in = fill;
                     filled = true;
                 }
-                if native_in {
+                if nq_in {
                     ncut_in = call.native_cut(&ret, taken, amount_in, &forbidden)?;
                 } else {
                     cut_in = call.cut(&ret, taken, amount_in, &in_mint, &forbidden)?;
@@ -480,7 +487,7 @@ pub fn run_swap<'info>(
             }
         }
     }
-    let (cut_in_taken, cut_in_burn) = if native_in {
+    let (cut_in_taken, cut_in_burn) = if nq_in {
         (ncut_in.taken, 0)
     } else {
         (cut_in.taken, cut_in.burn)
@@ -490,6 +497,7 @@ pub fn run_swap<'info>(
     //    to the vault, measured there. A native buy: each delta from the trader's wallet (as
     //    lamports, or wrapped into a holding of bridged SOL), then the rest to the pool.
     let trader = c.trader.clone();
+    let mut buffer_extra = 0u64;
     let received = if let (true, Some(leg)) = (native_in, native.as_ref()) {
         for (to, amount, wrapped) in &ncut_in.deltas {
             if *wrapped {
@@ -512,6 +520,20 @@ pub fn run_swap<'info>(
             .ok_or(SwapError::MathOverflow)?
     } else {
         let in_side = TokenSide::of(in_extras, in_hook.is_some());
+        // The old swap's buy on a native pool: a cut to a holding of bridged SOL is paid in it; a
+        // cut to any other account is paid lamports by the pool, which takes the trader's bridged
+        // SOL into its buffer instead.
+        for (to, amount, wrapped) in &ncut_in.deltas {
+            let dest = if *wrapped { *to } else { &vault_in };
+            token.transfer(&trader, &trader_in, dest, &in_mint, &in_side, *amount, &[])?;
+            if !*wrapped {
+                check_credit_rent(to, *amount)?;
+                pending.push((*to, *amount));
+                buffer_extra = buffer_extra
+                    .checked_add(*amount)
+                    .ok_or(SwapError::MathOverflow)?;
+            }
+        }
         for (holding, amount) in &cut_in.deltas {
             token.transfer(
                 &trader,
@@ -602,7 +624,12 @@ pub fn run_swap<'info>(
                 .ok_or(SwapError::MathOverflow)?;
             // The old swap on a native pool: the bridged SOL joined the buffer.
             if buffered {
-                buffer_in(pool, received)?;
+                buffer_in(
+                    pool,
+                    received
+                        .checked_add(buffer_extra)
+                        .ok_or(SwapError::MathOverflow)?,
+                )?;
             }
         } else {
             pool.base_reserve = pool
@@ -650,7 +677,7 @@ pub fn run_swap<'info>(
             if let Some((ret, taken)) =
                 call.invoke(discriminators::AFTER_SWAP, &hook_args, allowed)?
             {
-                if native_out {
+                if nq_out {
                     ncut_out = call.native_cut(&ret, taken, amounts.amount_out, &forbidden)?;
                 } else {
                     cut_out = call.cut(&ret, taken, amounts.amount_out, &out_mint, &forbidden)?;
@@ -658,7 +685,7 @@ pub fn run_swap<'info>(
             }
         }
     }
-    let (cut_out_taken, cut_out_burn) = if native_out {
+    let (cut_out_taken, cut_out_burn) = if nq_out {
         (ncut_out.taken, 0)
     } else {
         (cut_out.taken, cut_out.burn)
@@ -702,8 +729,9 @@ pub fn run_swap<'info>(
             .ok_or(SwapError::MathOverflow)?
     } else {
         // The old swap's sell on a native pool is paid from the buffer, which must cover it.
+        let lamport_cuts: u64 = ncut_out.deltas.iter().filter(|d| !d.2).map(|d| d.1).sum();
         let buffer_before = if buffered && !buy {
-            let leaving = cut_out_taken
+            let leaving = (cut_out_taken - lamport_cuts)
                 .checked_add(to_deliver)
                 .ok_or(SwapError::MathOverflow)?;
             require!(pool_acc.buffer_quote() >= leaving, SwapError::BufferShort);
@@ -712,6 +740,24 @@ pub fn run_swap<'info>(
             None
         };
         let out_side = TokenSide::of(out_extras, out_hook.is_some());
+        // The old swap's sell on a native pool: a cut to a holding of bridged SOL leaves the
+        // buffer; a cut to any other account is paid lamports by the pool.
+        for (to, amount, wrapped) in &ncut_out.deltas {
+            if *wrapped {
+                token.transfer(
+                    &pool_info,
+                    &vault_out,
+                    to,
+                    &out_mint,
+                    &out_side,
+                    *amount,
+                    &[&pool_seeds],
+                )?;
+            } else {
+                check_credit_rent(to, *amount)?;
+                pending.push((*to, *amount));
+            }
+        }
         for (holding, amount) in &cut_out.deltas {
             token.transfer(
                 &pool_info,
@@ -803,17 +849,17 @@ pub fn run_swap<'info>(
         .protocol_fee
         .checked_add(protocol_out)
         .ok_or(SwapError::MathOverflow)?;
+    // The old swap's lamport cuts on a native pool, now that every CPI has run.
+    for (to, amount) in &pending {
+        move_lamports(&pool_info, to, *amount)?;
+    }
     // A native pool's books against its lamports and buffer.
     check_native(&pool_info, pool_acc, c.quote_vault.as_ref())?;
 
     let pool: &Pool = pool_acc;
     let (deltas_in, deltas_out) = (
-        if native_in {
-            ncut_in.paid()
-        } else {
-            cut_in.paid()
-        },
-        if native_out {
+        if nq_in { ncut_in.paid() } else { cut_in.paid() },
+        if nq_out {
             ncut_out.paid()
         } else {
             cut_out.paid()
