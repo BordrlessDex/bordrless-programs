@@ -325,3 +325,9 @@ pub fn buffer_out(pool: &mut Pool, amount: u64) -> Result<()> {
     pool.set_buffer_quote(b);
     Ok(())
 }
+
+/// Whether the running instruction is one the transaction sends directly (not a CPI).
+pub fn top_level() -> bool {
+    anchor_lang::solana_program::instruction::get_stack_height()
+        == anchor_lang::solana_program::instruction::TRANSACTION_LEVEL_STACK_HEIGHT
+}

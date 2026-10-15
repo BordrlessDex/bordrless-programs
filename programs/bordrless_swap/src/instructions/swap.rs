@@ -60,8 +60,8 @@ use crate::events::*;
 use crate::hooks::{split_extras, Cut, NativeCut, PoolHookCall};
 use crate::instructions::pool::PoolSeeds;
 use crate::native::{
-    buffer_in, buffer_out, check_credit_rent, check_native, move_lamports, transfer_from_wallet,
-    BridgeSol,
+    buffer_in, buffer_out, check_credit_rent, check_native, move_lamports, top_level,
+    transfer_from_wallet, BridgeSol,
 };
 use crate::state::*;
 use crate::token::{balance, read_holding, TokenAccounts, TokenSide};
@@ -762,7 +762,13 @@ pub fn run_swap<'info>(
             let from_buffer = to_deliver.min(buffer - wrapped_cuts);
             to_trader = to_deliver - from_buffer;
             if to_trader > 0 {
-                require!(c.trader.is_writable, SwapError::BufferShort);
+                // Only at the top level, and only to the delivery holding's owner (re-audit R-1):
+                // a program calling the old swap counts the delivery as bridged SOL alone, and a
+                // delegate is not the one owed it. Those keep failing safe, as before.
+                require!(
+                    c.trader.is_writable && *c.trader.key == recipient && top_level(),
+                    SwapError::BufferShort
+                );
                 check_credit_rent(&c.trader, to_trader)?;
             }
             Some(balance(&vault_out)?)

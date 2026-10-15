@@ -194,7 +194,7 @@ pub fn is_companion_creator(creator: &Pubkey, mint: &Pubkey) -> bool {
 /// builtin programs and the sysvars). Such a key can never be credited lamports, so a partner config
 /// naming one would lock every native claim of its launches (audit N-7): `create_partner_config`
 /// refuses them.
-pub const RESERVED_ACCOUNT_KEYS: [Pubkey; 30] = [
+pub const RESERVED_ACCOUNT_KEYS: [Pubkey; 31] = [
     Pubkey::from_str_const("AddressLookupTab1e1111111111111111111111111"),
     Pubkey::from_str_const("BPFLoader1111111111111111111111111111111111"),
     Pubkey::from_str_const("BPFLoader2111111111111111111111111111111111"),
@@ -213,6 +213,7 @@ pub const RESERVED_ACCOUNT_KEYS: [Pubkey; 30] = [
     Pubkey::from_str_const("Vote111111111111111111111111111111111111111"),
     Pubkey::from_str_const("ZkE1Gama1Proof11111111111111111111111111111"),
     Pubkey::from_str_const("ZkTokenProof1111111111111111111111111111111"),
+    Pubkey::from_str_const("Sysvar1111111111111111111111111111111111111"),
     Pubkey::from_str_const("SysvarC1ock11111111111111111111111111111111"),
     Pubkey::from_str_const("SysvarEpochRewards1111111111111111111111111"),
     Pubkey::from_str_const("SysvarEpochSchedu1e111111111111111111111111"),

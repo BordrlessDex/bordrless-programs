@@ -440,7 +440,13 @@ pub fn process_remove_liquidity<'info>(
         buffer_out(&mut ctx.accounts.pool, held)?;
         let rest = quote_out - held;
         if rest > 0 {
-            require!(provider.is_writable, SwapError::BufferShort);
+            // Only at the top level, and only to the quote holding's owner (re-audit R-1).
+            require!(
+                provider.is_writable
+                    && read_holding(&ctx.accounts.provider_quote)?.owner == *provider.key
+                    && crate::native::top_level(),
+                SwapError::BufferShort
+            );
         }
         (held, rest)
     } else {
