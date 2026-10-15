@@ -139,7 +139,7 @@ fn launch_fees(w: &World, mint: &Pubkey) -> (u64, u64) {
 /// lamport, so anyone can permanently block `revert_launch_to_bridged` for every native coin whose
 /// kit has no holder rewards (11 of the 66 kit configs in the cloned-mainnet dump).
 #[test]
-fn finding_kit_donation_blocks_launch_revert_without_holder_rewards() {
+fn fixed_kit_donation_no_longer_blocks_launch_revert_without_holder_rewards() {
     let mut w = World::new();
     let creator = w.wallet_with_sol(20 * SOL);
     let no_rewards = bordrless_program_tests::launch::rules(0, 0, 0, 0, 200, 86_400, 0, 0);
@@ -174,8 +174,12 @@ fn finding_kit_donation_blocks_launch_revert_without_holder_rewards() {
         &mut w,
         &[launch::revert_launch_to_bridged(ad, mint, sol, modules)],
     );
-    tx.expect_code(u32::from(KitError::MissingRewardVault));
-    assert!(w.launch(&mint).is_native());
+    // Fixed (N-1): the revert skips the move without holder rewards; the donation stays on the
+    // config, uncounted.
+    tx.ok();
+    assert!(!w.launch(&mint).is_native());
+    let kit: KitConfig = w.env.read(&kit_key);
+    assert!(!kit.is_native());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1196,7 +1200,7 @@ fn kit_world() -> (World, Pubkey, Keypair, Keypair) {
 /// that will hold a share `s` of the eligible supply recovers about `s` of its own holder fee from
 /// the other holders by buying through the old swap.
 #[test]
-fn finding_old_path_buyer_shares_its_own_holder_fee() {
+fn fixed_old_path_buyer_no_longer_shares_its_own_holder_fee() {
     let claim = |old_path: bool| -> u64 {
         let (mut w, mint, payer, b) = kit_world();
         if old_path {
@@ -1224,7 +1228,8 @@ fn finding_old_path_buyer_shares_its_own_holder_fee() {
         v2, 0,
         "through swap_v2 the buyer earns nothing from its own fee"
     );
-    assert!(old > 0, "through the old swap it does: {old}");
+    // Fixed (N-2): the old path pays the holder fee before the output transfer, as swap_v2 does.
+    assert_eq!(old, 0, "through the old swap neither: {old}");
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -563,6 +563,24 @@ pub fn run_swap<'info>(
             .ok_or(SwapError::MathOverflow)?
     };
     require!(received > 0, SwapError::NothingReceived);
+    // The old swap's buy on a native pool: a lamport cut whose account the output token's hook is
+    // also passed (a native kit's config: the holder fee) is paid now, before the output transfer
+    // runs that hook, as `swap_v2` pays it, so the buyer is settled before the fee lands and never
+    // shares in it (audit N-2). Every later CPI (the `after_swap` call, which gets the pool and all
+    // its extras, and the output transfers, which get the pool and the output hook's extras)
+    // passes both sides of the move, as the runtime requires. Other cuts still wait to the end.
+    if buffered && buy {
+        let mut i = 0;
+        while i < pending.len() {
+            let (to, amount) = pending[i];
+            if out_extras.iter().any(|x| x.key == to.key && x.is_writable) {
+                move_lamports(&pool_info, to, amount)?;
+                pending.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
     // What the hooks took from the input and someone received: the pool hook's deltas and any
     // cut the input mint's own hook took from those transfers (measured, in the input token).
     let cuts_in = amount_in
