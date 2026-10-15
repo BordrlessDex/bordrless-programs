@@ -432,24 +432,30 @@ fn differential_classic_withdraw_buyback_share_release_are_unchanged() {
         mint2.pubkey(),
         create_args(ALL_TO_BENEFICIARY),
     )];
-    both(
-        &mut w,
-        &mut live,
-        &ixs,
-        &launcher,
-        &[&mint2],
-        &[companion::companion_address(&mint2.pubkey())],
-        "create",
+    // `create` makes the account 8 bytes longer since `quote_cut_claimed` (2026-10-15): the same
+    // 300 bytes, then the field's 8 zeros (the launcher paying their rent).
+    let a = w.env.send_paid_by(&ixs, &launcher, &[&mint2]);
+    let b = live.env.send_paid_by(&ixs, &launcher, &[&mint2]);
+    a.ok();
+    b.ok();
+    let c2 = companion::companion_address(&mint2.pubkey());
+    let (new_c, live_c) = (w.env.account(&c2).unwrap(), live.env.account(&c2).unwrap());
+    assert_eq!(live_c.data.len(), 300);
+    assert_eq!(new_c.data.len(), Companion::LEN);
+    assert_eq!(new_c.data[..300], live_c.data[..]);
+    assert_eq!(new_c.data[300..], [0u8; 8]);
+    assert_eq!(
+        new_c.lamports - live_c.lamports,
+        w.env.rent(Companion::LEN) - w.env.rent(300)
     );
     let mut refund = companion::withdraw(launcher.pubkey(), mint2.pubkey(), launcher.pubkey());
     refund
         .accounts
         .push(AccountMeta::new_readonly(mint2.pubkey(), true));
-    let watch2 = [
-        companion::companion_address(&mint2.pubkey()),
-        companion::creator_address(&mint2.pubkey()),
-        launcher.pubkey(),
-    ];
+    // The companion and the launcher (who paid its 8 more bytes' rent) differ by `create` alone:
+    // compared apart.
+    let launcher_gap = live.env.lamports(&launcher.pubkey()) - w.env.lamports(&launcher.pubkey());
+    let watch2 = [companion::creator_address(&mint2.pubkey())];
     both(
         &mut w,
         &mut live,
@@ -458,6 +464,13 @@ fn differential_classic_withdraw_buyback_share_release_are_unchanged() {
         &[&mint2],
         &watch2,
         "refund v1",
+    );
+    let (new_c, live_c) = (w.env.account(&c2).unwrap(), live.env.account(&c2).unwrap());
+    assert_eq!(new_c.data[..300], live_c.data[..]);
+    assert_eq!(new_c.lamports - live_c.lamports, launcher_gap);
+    assert_eq!(
+        live.env.lamports(&launcher.pubkey()) - w.env.lamports(&launcher.pubkey()),
+        launcher_gap
     );
     // set_payees does not exist on the live program.
     let mint3 = Keypair::new();

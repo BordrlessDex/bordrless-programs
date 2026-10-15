@@ -456,7 +456,28 @@ pub struct Step<'info> {
 /// (`FeesClaimed.claimed` and `claimed_total` count what was split). Its remaining accounts also
 /// hold its `Script` (writable: the author's running total) and, when the author is to be paid,
 /// the author's wallet (writable).
+///
+/// The hook's SOL cut (2026-10-15): a launch whose custom hook takes a SOL cut pays it into the
+/// same vault as the creator fee (`Launch::quote_cut_accrued` counts it). Of each claim, the cut
+/// no claim has taken yet (`accrued - Companion.quote_cut_claimed`, at most the whole claim; any
+/// rest waits for the next claim) is the hook's: after the author's share and the bounty (both of
+/// the whole claim) its part of what is left, `floor(rest * hook / claim)`, goes whole to the pot's
+/// bucket (`FeesClaimed.from_hook`), and only the rest is split by the shares. A companion made
+/// before is grown by 8 bytes on its first claim since, the cranker paying their rent, and counts
+/// every cut taken before as claimed ([`Companion::grow_for_quote_cut`]).
 pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
+    // The hook's SOL cut so far. The launchpad's claim below moves the vault, never this counter.
+    let accrued = ctx.accounts.launch.quote_cut_accrued();
+    {
+        // A companion made before `quote_cut_claimed`: grown, and counted as having taken all the
+        // cut so far (the cranker pays the 8 bytes' rent).
+        let info = ctx.accounts.companion.to_account_info();
+        let payer = ctx.accounts.cranker.to_account_info();
+        let system = ctx.accounts.system_program.to_account_info();
+        ctx.accounts
+            .companion
+            .grow_for_quote_cut(&info, &payer, &system, accrued)?;
+    }
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
@@ -485,6 +506,10 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     let set_aside = c.set_aside().ok_or(CompanionError::MathOverflow)?;
     let got = holding.saturating_sub(set_aside);
     require!(got > 0, CompanionError::NothingToDo);
+    // The hook's part of this claim: the cut the launch took that no claim has taken yet, up to
+    // the whole claim (the rest of it waits for the next one).
+    let hook_gross = got.min(accrued.saturating_sub(c.quote_cut_claimed.amount));
+    let claimed_gross = got;
     // A script's author: their share of what this claim took from the launch, first. No author (the
     // default key: an approval naming nobody, or an immutable script, which has none), the launch's
     // beneficiary, or an author no transfer can pay (a program, or one of the runtime's reserved
@@ -518,6 +543,12 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     }
     let bounty = bps_of(got, u64::from(c.bounty_bps));
     let rest = got - bounty;
+    // The author's share and the bounty came from the whole claim, so the hook's part of what is
+    // left is its share of the claim: `rest * hook_gross / claimed_gross` (rounded down; the
+    // rounding stays with the split). `base` is the rest, split by the shares as ever.
+    let from_hook = hook_part(rest, hook_gross, claimed_gross)?;
+    let base = rest - from_hook;
+    let rest = base;
     let to_holders = bps_of(rest, u64::from(c.split.holders_bps));
     let to_beneficiary = bps_of(rest, u64::from(c.split.beneficiary_bps));
     // The rounding goes to the pot when there is one, else to buybacks when there are any, else to
@@ -535,6 +566,24 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     } else {
         (0, rest - to_holders, 0)
     };
+    // The hook's part, whole, to the pot's bucket: the pot (a game's, a Snowball's or a script's),
+    // else the buyback, else the holders. A split of the beneficiary alone has no other bucket
+    // anything could ever spend from (no buyback limits, no reward pool): there it goes to the
+    // beneficiary, as the whole claim did before (`FeesClaimed.from_hook` still tells it apart).
+    let (mut to_buyback, mut to_holders, mut to_beneficiary, mut to_pot) =
+        (to_buyback, to_holders, to_beneficiary, to_pot);
+    let bucket = if c.is_game() || c.has_own_pot() {
+        &mut to_pot
+    } else if c.split.buyback_bps > 0 {
+        &mut to_buyback
+    } else if c.split.holders_bps > 0 {
+        &mut to_holders
+    } else {
+        &mut to_beneficiary
+    };
+    *bucket = bucket
+        .checked_add(from_hook)
+        .ok_or(CompanionError::MathOverflow)?;
     pay_sol(
         &all,
         &seeds,
@@ -543,6 +592,11 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         bounty,
     )?;
     let c = &mut ctx.accounts.companion;
+    c.quote_cut_claimed.amount = c
+        .quote_cut_claimed
+        .amount
+        .checked_add(hook_gross)
+        .ok_or(CompanionError::MathOverflow)?;
     // What the buyback held before this claim credited it.
     let held = c.pending_buyback;
     c.pending_buyback = c
@@ -566,7 +620,8 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         to_buyback,
         to_holders,
         to_beneficiary,
-        cranker: ctx.accounts.cranker.key()
+        cranker: ctx.accounts.cranker.key(),
+        from_hook,
     });
     if let Some(terms) = terms {
         let now = Clock::get()?.unix_timestamp;
@@ -605,6 +660,20 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         });
     }
     Ok(())
+}
+
+/// The hook's part of `rest`, what is left of a claim of `claimed` after the author's share and
+/// the bounty, when `hook` of the claim was the hook's cut: `floor(rest * hook / claimed)`, so at
+/// most `rest` (`hook <= claimed`) and exactly `rest` when the whole claim was the cut.
+pub(crate) fn hook_part(rest: u64, hook: u64, claimed: u64) -> Result<u64> {
+    if hook == 0 || claimed == 0 {
+        return Ok(0);
+    }
+    require!(
+        hook <= claimed && rest <= claimed,
+        CompanionError::MathOverflow
+    );
+    Ok((u128::from(rest) * u128::from(hook) / u128::from(claimed)) as u64)
 }
 
 /// What a game hook's status says, from its `PDA(["hook-status", hook])` among `available`: the

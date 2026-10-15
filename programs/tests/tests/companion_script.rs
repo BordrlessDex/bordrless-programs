@@ -17,6 +17,7 @@
 
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::{AccountDeserialize, AccountSerialize};
 use bordrless_companion::client as companion;
 use bordrless_companion::constants::*;
 use bordrless_companion::error::CompanionError;
@@ -958,6 +959,83 @@ fn the_author_earns_half_of_what_each_claim_takes() {
     let paid: AuthorPaid = tx.event();
     assert_eq!(paid.amount, fees / 2);
     assert_eq!(script_of(&w, &mint).author_paid, half + fees / 2);
+}
+
+/// The hook's SOL cut in a claim (2026-10-15, `Companion.quote_cut_claimed`): the author's share
+/// and the bounty come from the whole claim, the cut's part of the rest goes whole to the pot, and
+/// only the rest is split, so a launcher at 50% takes half of the creator fee only. PumpTek's
+/// proportions: 45.42 of a 106.96 claim the cut. The cut is simulated by raising the launch's
+/// counter (the launchpad keeps the cut's SOL in the vault with the fee).
+#[test]
+fn the_hook_cut_goes_to_the_pot_after_the_authors_share_and_the_bounty() {
+    let (mut w, author) = script_world();
+    approve_by(&mut w, APPROVAL_KIND_SCRIPT, author.pubkey()).ok();
+    let launcher = w.wallet_with_sol(10 * SOL);
+    let mut args = terms(se::state_bytes(se::MODE_NOTHING, 0));
+    args.split.beneficiary_bps = 5_000;
+    args.pot_bps = 5_000;
+    let (mint, tx) = make(&mut w, &launcher, args);
+    tx.ok();
+    launch_it(&mut w, &launcher, &mint).ok();
+    let mint = mint.pubkey();
+    w.env.warp(31);
+    trade(&mut w, &mint, 4, 2 * SOL);
+    let fees = w.env.holding(&w.sol, &launch::launch_address(&mint));
+    let cut = fees * 4_542 / 10_696;
+    let key = launch::launch_address(&mint);
+    let mut account = w.env.account(&key).unwrap();
+    let mut l = bordrless_launch::state::Launch::try_deserialize(&mut &account.data[..]).unwrap();
+    l.add_quote_cut(cut);
+    let mut data = Vec::new();
+    l.try_serialize(&mut data).unwrap();
+    account.data[..data.len()].copy_from_slice(&data);
+    w.env.put(key, account);
+
+    let cranker = w.wallet_with_sol(SOL);
+    let tx = w.env.send_paid_by(
+        &[companion::claim_fees_script(
+            cranker.pubkey(),
+            mint,
+            Some(author.pubkey()),
+        )],
+        &cranker,
+        &[],
+    );
+    tx.ok();
+    let paid: AuthorPaid = tx.event();
+    let claimed: FeesClaimed = tx.event();
+    let funded: PotFunded = tx.event();
+    let to_author = fees * u64::from(AUTHOR_SHARE_BPS) / 10_000;
+    assert_eq!(paid.amount, to_author);
+    let got = fees - to_author;
+    assert_eq!(claimed.claimed, got);
+    assert_eq!(claimed.bounty, got * 50 / 10_000);
+    let rest = got - claimed.bounty;
+    let from_hook = (u128::from(rest) * u128::from(cut) / u128::from(fees)) as u64;
+    let base = rest - from_hook;
+    assert_eq!(claimed.from_hook, from_hook);
+    assert_eq!(claimed.to_beneficiary, base / 2);
+    assert_eq!(funded.to_pot, base - base / 2 + from_hook);
+    // Every lamport claimed lands in exactly one place.
+    assert_eq!(
+        paid.amount
+            + claimed.bounty
+            + claimed.to_beneficiary
+            + claimed.to_buyback
+            + claimed.to_holders
+            + funded.to_pot,
+        fees
+    );
+    let c = companion_of(&w, &mint);
+    assert_eq!(c.quote_cut_claimed.amount, cut);
+    assert_eq!(
+        (c.pending_pot, c.pending_beneficiary),
+        (funded.to_pot, claimed.to_beneficiary)
+    );
+    assert_eq!(
+        w.env.holding(&w.sol, &companion::creator_address(&mint)),
+        c.set_aside().unwrap()
+    );
 }
 
 /// A launcher who wrote the script they launch with is its beneficiary already: no extra share,

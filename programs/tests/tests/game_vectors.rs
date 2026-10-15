@@ -517,6 +517,10 @@ fn sample_companion() -> Companion {
         game_kind: GameKind::Lottery,
         pot_locked: 0,
         mode: MODE_CLASSIC,
+        quote_cut_claimed: bordrless_companion::state::QuoteCutClaimed {
+            amount: 45_420_000_000,
+            stored: true,
+        },
     }
 }
 

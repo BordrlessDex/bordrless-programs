@@ -793,8 +793,8 @@ fn a_lottery_end_to_end_with_orao() {
             .unwrap()
             .data
             .len(),
-        300,
-        "owner decision (a): the Companion keeps its size"
+        308,
+        "owner decision (a): the Companion keeps its size (300, and `quote_cut_claimed`'s 8 since 2026-10-15)"
     );
     // §1.3: the mint's hook is fixed at launch.
     let m: Mint = l.w.env.read(&mint);
@@ -2723,11 +2723,12 @@ fn a_v1_companion_keeps_its_layout_and_runs_no_game() {
     w.env.send_paid_by(&[ix], &launcher, &[&mint]).ok();
     let key = companion::companion_address(&mint.pubkey());
     let acc = w.env.account(&key).unwrap();
-    assert_eq!(acc.data.len(), 300, "the Companion's size is v1's");
+    // v1's 300 bytes, then `quote_cut_claimed`'s 8 (2026-10-15, the only growth since).
+    assert_eq!(acc.data.len(), 308, "the Companion's size is v1's and 8");
     assert_eq!(
         &acc.data[300 - 64..],
-        &[0u8; 64][..],
-        "what was `reserved` is zeros"
+        &[0u8; 64 + 8][..],
+        "what was `reserved` is zeros, and so is the new field"
     );
     let c: Companion = w.env.read(&key);
     assert_eq!(
