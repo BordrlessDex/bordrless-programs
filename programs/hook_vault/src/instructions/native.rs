@@ -79,6 +79,27 @@ pub fn process_set_vault_native<'info>(
             all.iter().any(|a| *a.key == holding) && all.iter().any(|a| *a.key == owner),
             VaultError::MissingAccount
         );
+        // A native slot's SOL is its owner's lamports above rent(0): an owner below it (never
+        // funded) is topped up by the admin first, so the unwrap counts exactly `pending_sol`
+        // (audit N-10).
+        if native {
+            let owner_info = find(&all, &owner)?;
+            let short = Rent::get()?
+                .minimum_balance(0)
+                .saturating_sub(owner_info.lamports());
+            if short > 0 {
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        anchor_lang::system_program::ID,
+                        anchor_lang::system_program::Transfer {
+                            from: ctx.accounts.admin.to_account_info(),
+                            to: owner_info.clone(),
+                        },
+                    ),
+                    short,
+                )?;
+            }
+        }
         let ix = if native {
             bordrless_bridge::client::unwrap_sol(owner, slot.pending_sol)
         } else {

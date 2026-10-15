@@ -1777,6 +1777,29 @@ fn a_vault_migrated_mid_life_sells_and_pays_in_lamports() {
     w.execute(&cranker, &m, 0).ok();
 }
 
+/// Audit N-10: a slot owner below rent(0) when its vault migrates (never funded) is topped up to
+/// rent(0) by the admin first, so the migration doesn't fail and the owner's lamports above rent(0)
+/// are exactly the pending SOL.
+#[test]
+fn a_vault_migration_funds_an_unfunded_slot_owner_to_rent() {
+    let mut w = World::new();
+    let to = Keypair::new().pubkey();
+    let c = w.vault_coin(vault_args(vec![sell_for_sol(to)]), &[], true);
+    let m = c.mint;
+    w.churn(&m, 1, SOL / 50);
+    w.env.warp(61);
+    let cranker = w.wallet_with_sol(SOL);
+    let pending = w.execute(&cranker, &m, 0).event::<SlotSold>().pending_sol;
+    assert!(pending > 0);
+    let owner = slot_owner(&m, 0);
+    // The owner as if never funded.
+    w.env.fund(owner, 0);
+    w.migrate_launch_native(&m).ok();
+    set_vault_native(&mut w, &m, true).ok();
+    assert!(w.vault(&m).is_native());
+    assert_eq!(w.env.lamports(&owner), w.env.rent(0) + pending);
+}
+
 /// A buy-burn slot of a native vault: on a bridged pool it wraps its lamports first, on a native one
 /// it buys through `swap_v2`; each spends exactly the pending SOL it says.
 #[test]

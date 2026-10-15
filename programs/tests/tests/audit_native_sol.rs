@@ -1147,7 +1147,7 @@ fn finding_an_old_unlaunched_companion_cannot_launch_once_launches_are_native() 
 /// (nothing ever fills a fresh native pool's buffer at target 0): the coin's hook cut piles up in
 /// the slot unsold.
 #[test]
-fn finding_a_new_vault_coin_on_native_launches_cannot_sell() {
+fn fixed_a_new_vault_coin_on_native_launches_sells() {
     use bordrless_program_tests::vault::{sell_for_sol, vault_args};
     let mut w = World::new();
     let ad = admin(&w).pubkey();
@@ -1156,7 +1156,8 @@ fn finding_a_new_vault_coin_on_native_launches_cannot_sell() {
     let c = w.vault_coin(vault_args(vec![sell_for_sol(to)]), &[], true);
     let m = c.mint;
     assert!(w.launch(&m).is_native());
-    assert!(!w.vault(&m).is_native(), "the vault starts bridged");
+    // Fixed (N-3): `open_vault` makes the vault of a coin launched native native too.
+    assert!(w.vault(&m).is_native(), "the vault opens native");
     // Trade the coin through swap_v2 (the old buy can't, on a fresh native pool).
     let payer = w.env.funded(10 * SOL);
     for _ in 0..3 {
@@ -1175,8 +1176,9 @@ fn finding_a_new_vault_coin_on_native_launches_cannot_sell() {
         "the slot holds the hook's cut"
     );
     let cranker = w.wallet_with_sol(SOL);
-    w.execute(&cranker, &m, 0)
-        .expect_code(code(SwapError::BufferShort));
+    let before = w.env.holding(&m, &owner);
+    w.execute(&cranker, &m, 0).ok();
+    assert!(w.env.holding(&m, &owner) < before, "the slot sold its cut");
 }
 
 // ---------------------------------------------------------------------------------------------
