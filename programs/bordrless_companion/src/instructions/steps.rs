@@ -532,19 +532,21 @@ pub struct Step<'info> {
 /// ([`Companion::restart_stranded_wait`]). A Snowball's or a script's pot has no hook: its part is
 /// credited whole ([`Companion::has_own_pot`]).
 ///
-/// A script companion's claim (2026-10-12) first pays the script's author (`Script.author`, copied
-/// from the script's approval) `AUTHOR_SHARE_BPS` of what this claim took from the launch, as SOL
-/// to their wallet, unless the author is the launch's beneficiary (who gets no extra share), none,
-/// or an account no transfer can pay (a program, a reserved key); the rest is split as above
-/// (`FeesClaimed.claimed` and `claimed_total` count what was split). Its remaining accounts also
+/// A script companion's claim (2026-10-12; 2026-10-16: out of the launcher's part alone) pays the
+/// script's author (`Script.author`, copied from the script's approval) `AUTHOR_SHARE_BPS` of the
+/// launcher's part of the creator fee this claim took from the launch, as SOL to their wallet: out
+/// of that part, never the pot's, the buyback's or the holders', never the hook's SOL cut; not when
+/// the author is the launch's beneficiary (who gets no extra share), none, or an account no transfer
+/// can pay (a program, a reserved key) (`FeesClaimed.claimed` and `claimed_total` count the claim
+/// less the author's share). Its remaining accounts also
 /// hold its `Script` (writable: the author's running total) and, when the author is to be paid,
 /// the author's wallet (writable).
 ///
 /// The hook's SOL cut (2026-10-15): a launch whose custom hook takes a SOL cut pays it into the
 /// same vault as the creator fee (`Launch::quote_cut_accrued` counts it). Of each claim, the cut
 /// no claim has taken yet (`accrued - Companion.quote_cut_claimed`, at most the whole claim; any
-/// rest waits for the next claim) is the hook's: after the author's share and the bounty (both of
-/// the whole claim) its part of what is left, `floor(rest * hook / claim)`, goes whole to the pot's
+/// rest waits for the next claim) is the hook's: after the bounty (of the whole claim) its part of
+/// what is left, `floor(rest * hook / claim)`, goes whole to the pot's
 /// bucket (`FeesClaimed.from_hook`), and only the rest is split by the shares. A companion made
 /// before is grown by 8 bytes on its first claim since, the cranker paying their rent, and counts
 /// every cut taken before as claimed ([`Companion::grow_for_quote_cut`]).
@@ -595,11 +597,14 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     // the whole claim (the rest of it waits for the next one).
     let hook_gross = got.min(accrued.saturating_sub(c.quote_cut_claimed.amount));
     let claimed_gross = got;
-    // A script's author: their share of what this claim took from the launch, first. No author (the
-    // default key: an approval naming nobody, or an immutable script, which has none), the launch's
-    // beneficiary, or an author no transfer can pay (a program, or one of the runtime's reserved
-    // keys, which no transaction can write) is paid nothing, so no claim is ever stuck on it: the
-    // whole claim is split as ever.
+    // A script's author (2026-10-16, the owner: "it should only come from the creator fee; the
+    // companion fee is only for the pot"): `AUTHOR_SHARE_BPS` of the launcher's part of the creator
+    // fee this claim took from the launch, taken out of that part alone: never of the pot's, the
+    // buyback's or the holders' parts, never of the hook's SOL cut (which goes whole to the pot),
+    // never of SOL that reached the holding any other way. No author (the default key: an approval
+    // naming nobody, or an immutable script, which has none), the launch's beneficiary, or an
+    // author no transfer can pay (a program, or one of the runtime's reserved keys, which no
+    // transaction can write) is paid nothing, so no claim is ever stuck on it.
     let wallet = match &script {
         Some((_, s)) if s.author != Pubkey::default() && s.author != c.beneficiary => {
             let wallet = find(&all, &s.author)?;
@@ -607,30 +612,22 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         }
         _ => None,
     };
+    // The creator fee this claim took from the launch: what it took, less the hook's cut in it.
+    let fee_taken = holding
+        .saturating_sub(before)
+        .saturating_sub(hook_gross);
     let to_author = match wallet {
-        Some(_) => bps_of(holding.saturating_sub(before), u64::from(AUTHOR_SHARE_BPS)),
+        Some(_) => bps_of(
+            bps_of(fee_taken, u64::from(c.split.beneficiary_bps)),
+            u64::from(AUTHOR_SHARE_BPS),
+        ),
         None => 0,
     };
-    let got = got
-        .checked_sub(to_author)
-        .ok_or(CompanionError::MathOverflow)?;
-    if let (Some((info, mut s)), Some(wallet)) = (script.filter(|_| to_author > 0), wallet) {
-        pay_sol(&all, &seeds, creator, &wallet, to_author)?;
-        s.author_paid = s.author_paid.saturating_add(to_author);
-        let mut data = info.try_borrow_mut_data()?;
-        let mut writer: &mut [u8] = &mut data;
-        s.try_serialize(&mut writer)?;
-        emit_cpi!(AuthorPaid {
-            companion: c.key(),
-            author: s.author,
-            amount: to_author,
-        });
-    }
     let bounty = bps_of(got, u64::from(c.bounty_bps));
     let rest = got - bounty;
-    // The author's share and the bounty came from the whole claim, so the hook's part of what is
-    // left is its share of the claim: `rest * hook_gross / claimed_gross` (rounded down; the
-    // rounding stays with the split). `base` is the rest, split by the shares as ever.
+    // The bounty came from the whole claim, so the hook's part of what is left is its share of the
+    // claim: `rest * hook_gross / claimed_gross` (rounded down; the rounding stays with the split).
+    // `base` is the rest, split by the shares as ever.
     let from_hook = hook_part(rest, hook_gross, claimed_gross)?;
     let base = rest - from_hook;
     let rest = base;
@@ -655,6 +652,29 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     // else the buyback, else the holders. A split of the beneficiary alone has no other bucket
     // anything could ever spend from (no buyback limits, no reward pool): there it goes to the
     // beneficiary, as the whole claim did before (`FeesClaimed.from_hook` still tells it apart).
+    // The author's share, out of the launcher's part alone (before the hook's part is added to any
+    // bucket, so never of the cut): at most half of the launcher's part of the fee taken, so within
+    // what the launcher's part holds.
+    // Capped at the launcher's part, so a claim is never stuck on it (the fee taken is measured
+    // from the creator address's balance, the split from what is above its set-aside).
+    let to_author = to_author.min(to_beneficiary);
+    let to_beneficiary = to_beneficiary - to_author;
+    if let (Some((info, mut s)), Some(wallet)) = (script.filter(|_| to_author > 0), wallet) {
+        pay_sol(&all, &seeds, creator, &wallet, to_author)?;
+        s.author_paid = s.author_paid.saturating_add(to_author);
+        let mut data = info.try_borrow_mut_data()?;
+        let mut writer: &mut [u8] = &mut data;
+        s.try_serialize(&mut writer)?;
+        emit_cpi!(AuthorPaid {
+            companion: c.key(),
+            author: s.author,
+            amount: to_author,
+        });
+    }
+    // What the claim kept to split (`FeesClaimed.claimed`, `claimed_total`): all of it but the author's share.
+    let got = got
+        .checked_sub(to_author)
+        .ok_or(CompanionError::MathOverflow)?;
     let (mut to_buyback, mut to_holders, mut to_beneficiary, mut to_pot) =
         (to_buyback, to_holders, to_beneficiary, to_pot);
     let bucket = if c.is_game() || c.has_own_pot() {
@@ -747,8 +767,7 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     Ok(())
 }
 
-/// The hook's part of `rest`, what is left of a claim of `claimed` after the author's share and
-/// the bounty, when `hook` of the claim was the hook's cut: `floor(rest * hook / claimed)`, so at
+/// The hook's part of `rest`, what is left of a claim of `claimed` after the bounty, when `hook` of the claim was the hook's cut: `floor(rest * hook / claimed)`, so at
 /// most `rest` (`hook <= claimed`) and exactly `rest` when the whole claim was the cut.
 pub(crate) fn hook_part(rest: u64, hook: u64, claimed: u64) -> Result<u64> {
     if hook == 0 || claimed == 0 {

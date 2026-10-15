@@ -1050,8 +1050,8 @@ pub struct Approval {
     /// code (the loader refuses a second deploy, upgrade or extension in one slot), so a check needs
     /// no hash; once it moved (an upgrade, or anyone's `ExtendProgram`) the code is hashed again.
     pub programdata_slot: u64,
-    /// Who wrote the program: a script's author earns `AUTHOR_SHARE_BPS` of the creator fees of
-    /// every script companion made with it afterwards (`create_script` copies it into the `Script`).
+    /// Who wrote the program: a script's author earns `AUTHOR_SHARE_BPS` of the launcher's part of
+    /// the creator fees of every script companion made with it afterwards (`create_script` copies it into the `Script`).
     /// The default key: no author. (From what was `reserved`.)
     pub author: Pubkey,
     pub reserved: [u8; 24],
@@ -1086,7 +1086,8 @@ pub struct Script {
     pub steps: u64,
     pub created_at: i64,
     /// The script's author, copied from its approval at `create_script`: paid `AUTHOR_SHARE_BPS` of
-    /// what every fee claim takes from the launch, unless they are the launch's beneficiary. The
+    /// the launcher's part of the creator fee every claim takes from the launch (out of that part;
+    /// 2026-10-16), unless they are the launch's beneficiary. The
     /// default key: no author (an approval naming nobody, or an immutable script, which needs no
     /// approval). (From what was `reserved`.)
     pub author: Pubkey,

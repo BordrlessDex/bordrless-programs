@@ -20,11 +20,11 @@
 //! - **No signature reaches a script but the creator address's.** Every remaining account is
 //!   forwarded with `is_signer = false`, in both calls; the payer is never passed. A builder's code
 //!   never gets a launcher's (or a sender's) signature, so it can never move their SOL or tokens.
-//! - `claim_fees` first pays the script's author (copied from the approval into the `Script`; an
-//!   immutable script has none)
-//!   `AUTHOR_SHARE_BPS` of what the claim took from the launch, as SOL, unless the author is the
-//!   launch's beneficiary; then it splits the rest as ever, crediting the pot's part to
-//!   `pending_pot` as for a Snowball.
+//! - `claim_fees` splits the claim as ever, crediting the pot's part to `pending_pot` as for a
+//!   Snowball, and pays the script's author (copied from the approval into the `Script`; an
+//!   immutable script has none) `AUTHOR_SHARE_BPS` of the launcher's part of the creator fee the
+//!   claim took from the launch, out of that part (2026-10-16: never the pot's, never the hook's
+//!   cut), as SOL, unless the author is the launch's beneficiary.
 //! - `script_step` (anyone, paid `SCRIPT_BOUNTY` from the pot), from a minute after the launch and
 //!   once an `interval`, while the script's approval holds for the code it runs (an immutable
 //!   script needs none):

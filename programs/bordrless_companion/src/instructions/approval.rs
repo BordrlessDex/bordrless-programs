@@ -13,7 +13,8 @@
 //!   (`HOOK_UPGRADE_AUTHORITIES`, as the launchpad and strategies take), or behind a valid hook
 //!   timelock (`ProgramNotBounded` otherwise). `code_hash` must be the program's executable hash
 //!   (`solana-verify`'s), recomputed here from its ProgramData. `author` is who wrote it (a script's
-//!   author earns `AUTHOR_SHARE_BPS` of the creator fees of the companions made with it).
+//!   author earns `AUTHOR_SHARE_BPS` of the launcher's part of the creator fees of the companions
+//!   made with it).
 //!   `PDA(["approval", program])` is made or rewritten, and is no longer revoked.
 //! - `revoke_approval(program)`: either of them marks it revoked.
 //! - [`approval_of`]: what every check of an approval asks: the approval exists, is not revoked, is

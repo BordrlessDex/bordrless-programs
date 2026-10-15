@@ -884,26 +884,30 @@ fn the_author_earns_half_of_what_each_claim_takes() {
         tx.size
     );
     let paid: AuthorPaid = tx.event();
-    let half = fees * u64::from(AUTHOR_SHARE_BPS) / 10_000;
+    // The author's share comes out of the launcher's part of the creator fee alone (2026-10-16):
+    // half of the launcher's 30%, never of the pot's 70%.
+    let half = fees * 3_000 / 10_000 * u64::from(AUTHOR_SHARE_BPS) / 10_000;
     assert_eq!(
         (paid.companion, paid.author, paid.amount),
         (companion::companion_address(&mint), author.pubkey(), half)
     );
     assert_eq!(w.env.lamports(&author.pubkey()), before + half);
     assert_eq!(script_of(&w, &mint).author_paid, half);
-    // The rest, split as ever: the bounty, then 30% to the launcher and 70% to the pot.
+    // The bounty of the whole claim, then 30% to the launcher (less the author's share) and 70% to the pot, whole.
     let claimed: FeesClaimed = tx.event();
     let funded: PotFunded = tx.event();
-    let rest = fees - half;
-    assert_eq!(claimed.claimed, rest);
-    assert_eq!(claimed.bounty, rest * 50 / 10_000);
-    let split = rest - claimed.bounty;
-    assert_eq!(claimed.to_beneficiary, split * 3_000 / 10_000);
-    assert_eq!(funded.to_pot, split - claimed.to_beneficiary);
+    assert_eq!(claimed.claimed, fees - half);
+    assert_eq!(claimed.bounty, fees * 50 / 10_000);
+    let split = fees - claimed.bounty;
+    let launcher = split * 3_000 / 10_000;
+    assert_eq!(claimed.to_beneficiary, launcher - half);
+    assert_eq!(funded.to_pot, split - launcher);
+    // Every lamport claimed lands in exactly one place.
+    assert_eq!(paid.amount + claimed.bounty + claimed.to_beneficiary + funded.to_pot, fees);
     let c = companion_of(&w, &mint);
     assert_eq!(
         (c.pending_pot, c.pending_beneficiary, c.claimed_total),
-        (funded.to_pot, claimed.to_beneficiary, rest)
+        (funded.to_pot, claimed.to_beneficiary, fees - half)
     );
     assert_eq!(w.env.holding(&w.sol, &creator), c.set_aside().unwrap());
 
@@ -943,9 +947,10 @@ fn the_author_earns_half_of_what_each_claim_takes() {
     assert_eq!(script_of(&w, &mint).author_paid, half);
     assert_eq!(w.env.lamports(&author.pubkey()), before + half);
 
-    // The next fees: half again.
+    // The next fees: half of the launcher's part again.
     trade(&mut w, &mint, 1, SOL);
     let fees = w.env.holding(&w.sol, &launch::launch_address(&mint));
+    let next = fees * 3_000 / 10_000 * u64::from(AUTHOR_SHARE_BPS) / 10_000;
     let tx = w.env.send_paid_by(
         &[companion::claim_fees_script(
             cranker.pubkey(),
@@ -957,13 +962,14 @@ fn the_author_earns_half_of_what_each_claim_takes() {
     );
     tx.ok();
     let paid: AuthorPaid = tx.event();
-    assert_eq!(paid.amount, fees / 2);
-    assert_eq!(script_of(&w, &mint).author_paid, half + fees / 2);
+    assert_eq!(paid.amount, next);
+    assert_eq!(script_of(&w, &mint).author_paid, half + next);
 }
 
-/// The hook's SOL cut in a claim (2026-10-15, `Companion.quote_cut_claimed`): the author's share
-/// and the bounty come from the whole claim, the cut's part of the rest goes whole to the pot, and
-/// only the rest is split, so a launcher at 50% takes half of the creator fee only. PumpTek's
+/// The hook's SOL cut in a claim (2026-10-15, `Companion.quote_cut_claimed`): the bounty comes from
+/// the whole claim, the cut's part of the rest goes whole to the pot, and only the rest is split, so
+/// a launcher at 50% takes half of the creator fee only; the author's share (2026-10-16) is half of
+/// the launcher's part of the creator fee, out of that part, never of the cut. PumpTek's
 /// proportions: 45.42 of a 106.96 claim the cut. The cut is simulated by raising the launch's
 /// counter (the launchpad keeps the cut's SOL in the vault with the fee).
 #[test]
@@ -1005,16 +1011,15 @@ fn the_hook_cut_goes_to_the_pot_after_the_authors_share_and_the_bounty() {
     let paid: AuthorPaid = tx.event();
     let claimed: FeesClaimed = tx.event();
     let funded: PotFunded = tx.event();
-    let to_author = fees * u64::from(AUTHOR_SHARE_BPS) / 10_000;
+    let to_author = (fees - cut) * 5_000 / 10_000 * u64::from(AUTHOR_SHARE_BPS) / 10_000;
     assert_eq!(paid.amount, to_author);
-    let got = fees - to_author;
-    assert_eq!(claimed.claimed, got);
-    assert_eq!(claimed.bounty, got * 50 / 10_000);
-    let rest = got - claimed.bounty;
+    assert_eq!(claimed.claimed, fees - to_author);
+    assert_eq!(claimed.bounty, fees * 50 / 10_000);
+    let rest = fees - claimed.bounty;
     let from_hook = (u128::from(rest) * u128::from(cut) / u128::from(fees)) as u64;
     let base = rest - from_hook;
     assert_eq!(claimed.from_hook, from_hook);
-    assert_eq!(claimed.to_beneficiary, base / 2);
+    assert_eq!(claimed.to_beneficiary, base / 2 - to_author);
     assert_eq!(funded.to_pot, base - base / 2 + from_hook);
     // Every lamport claimed lands in exactly one place.
     assert_eq!(

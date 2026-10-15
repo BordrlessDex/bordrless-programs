@@ -653,8 +653,9 @@ pub struct ScriptCreated {
     pub author: Pubkey,
 }
 
-/// A script companion's fee claim paid the script's author their share (`AUTHOR_SHARE_BPS` of what
-/// the claim took from the launch), as SOL, before the split.
+/// A script companion's fee claim paid the script's author their share (`AUTHOR_SHARE_BPS` of the
+/// launcher's part of the creator fee the claim took from the launch, out of that part; 2026-10-16),
+/// as SOL.
 #[event]
 pub struct AuthorPaid {
     pub companion: Pubkey,
