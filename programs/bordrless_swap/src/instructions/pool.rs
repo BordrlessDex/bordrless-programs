@@ -855,6 +855,8 @@ pub fn process_migrate_pool_to_native(ctx: Context<QuoteForm>, buffer_target: u6
         ctx.accounts.config.admin,
         SwapError::NotAdmin
     );
+    // Only while the DEX is paused: no swap sees a pool half converted.
+    require!(ctx.accounts.config.paused, SwapError::NotPaused);
     if ctx.accounts.pool.quote_native() {
         return Ok(());
     }
@@ -897,6 +899,8 @@ pub fn process_revert_pool_to_bridged(ctx: Context<QuoteForm>) -> Result<()> {
         ctx.accounts.config.admin,
         SwapError::NotAdmin
     );
+    // Only while the DEX is paused: no swap sees a pool half converted.
+    require!(ctx.accounts.config.paused, SwapError::NotPaused);
     if !ctx.accounts.pool.quote_native() {
         return Ok(());
     }

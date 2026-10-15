@@ -195,22 +195,40 @@ impl M {
         self.w.env.send_paid_by(ixs, &payer, &[signer])
     }
 
+    /// The DEX's `set_config` with `paused`, everything else as it stands.
+    fn pause_ix(&self, paused: bool) -> Instruction {
+        let c: bordrless_swap::state::Config = self.w.env.read(&swap::config_address());
+        swap::set_config(
+            c.admin,
+            bordrless_swap::instructions::ConfigArgs {
+                admin: c.admin,
+                protocol_fee_bps: c.protocol_fee_bps,
+                fee_collector: c.fee_collector,
+                treasury: c.treasury,
+                pool_creation_fee_lamports: c.pool_creation_fee_lamports,
+                paused,
+                launch_protocol_share_bps: c.launch_protocol_share_bps,
+            },
+        )
+    }
+
+    /// `ix` signed by the admin inside a pause: pause, `ix`, unpause, in one transaction.
+    fn paused(&mut self, ix: Instruction) -> Tx {
+        let admin = self.admin();
+        let ixs = [self.pause_ix(true), ix, self.pause_ix(false)];
+        self.send(&ixs, &admin)
+    }
+
     fn migrate(&mut self, pool: &Pubkey, target: u64) -> Tx {
         let admin = self.admin();
-        let tx = self.send(
-            &[swap::migrate_pool_to_native(admin.pubkey(), *pool, target)],
-            &admin,
-        );
+        let tx = self.paused(swap::migrate_pool_to_native(admin.pubkey(), *pool, target));
         self.w.env.warp(1);
         tx
     }
 
     fn revert(&mut self, pool: &Pubkey) -> Tx {
         let admin = self.admin();
-        let tx = self.send(
-            &[swap::revert_pool_to_bridged(admin.pubkey(), *pool)],
-            &admin,
-        );
+        let tx = self.paused(swap::revert_pool_to_bridged(admin.pubkey(), *pool));
         self.w.env.warp(1);
         tx
     }
@@ -369,6 +387,14 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
     m.set_target(&pool, SOL)
         .expect_code(code(SwapError::NotNativePool));
 
+    // Not while the DEX trades.
+    let admin = m.admin();
+    m.send(
+        &[swap::migrate_pool_to_native(admin.pubkey(), pool, 0)],
+        &admin,
+    )
+    .expect_code(code(SwapError::NotPaused));
+
     // Migrate keeping 2 SOL as the buffer.
     let tx = m.migrate(&pool, 2 * SOL);
     tx.ok();
@@ -432,17 +458,23 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
     // them, ends where it started.
     let p = m.state(&pool);
     let lamports_quote = p.lamports_quote().unwrap();
-    let admin = m.admin().pubkey();
-    let admin_lamports = m.lamports(&admin);
+    let admin_key = m.admin().pubkey();
+    let admin_lamports = m.lamports(&admin_key);
     let supply = m.sol_supply();
     let tx = m.revert(&pool);
     tx.ok();
     let ev: PoolQuoteFormChanged = tx.event();
     assert_eq!((ev.kind, ev.native, ev.wrapped), (1, false, lamports_quote));
-    assert_eq!(m.lamports(&admin), admin_lamports);
+    assert_eq!(m.lamports(&admin_key), admin_lamports);
     assert_eq!(m.sol_supply(), supply + lamports_quote);
     assert!(!m.state(&pool).quote_native());
     m.inv(&pool, SOL);
+    // Not while the DEX trades.
+    m.send(
+        &[swap::revert_pool_to_bridged(admin.pubkey(), pool)],
+        &admin,
+    )
+    .expect_code(code(SwapError::NotPaused));
     // Again: nothing changes.
     m.revert(&pool).ok();
     m.inv(&pool, SOL);

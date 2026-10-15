@@ -99,6 +99,8 @@ pub enum SwapError {
     NativeBurn,
     #[msg("the account cannot pay or receive SOL here")]
     WrongNativeAccount,
+    #[msg("the DEX must be paused for this")]
+    NotPaused,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.
