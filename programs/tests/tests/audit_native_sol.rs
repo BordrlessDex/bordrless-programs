@@ -238,39 +238,48 @@ fn partner_launch(w: &mut World, partner: Pubkey) -> (Pubkey, Keypair, Pubkey) {
 /// reverts the launch to bridged (which needs the DEX paused). The bridged claims paid the
 /// partner's holding of bridged SOL, which exists for any owner key.
 #[test]
-fn finding_partner_key_that_cannot_take_lamports_locks_native_claims() {
-    // A sysvar: the runtime demotes it to read-only in every transaction, so `pay_sol` refuses it.
-    let partner = Pubkey::from_str_const("SysvarC1ock11111111111111111111111111111111");
+fn fixed_a_partner_key_that_cannot_take_lamports_is_refused() {
+    // Fixed (N-7): `create_partner_config` refuses the runtime's reserved keys (a sysvar here),
+    // which no transaction can make writable.
     let mut w = World::new();
+    let author = w.wallet_with_sol(5 * SOL);
+    for partner in [
+        Pubkey::from_str_const("SysvarC1ock11111111111111111111111111111111"),
+        Pubkey::from_str_const("11111111111111111111111111111111"),
+    ] {
+        let config = Keypair::new();
+        let ix = launch::create_partner_config(
+            author.pubkey(),
+            config.pubkey(),
+            CreateConfigArgs {
+                rules: LaunchRules::NONE,
+                creator_fee_bps: 200,
+                custom_hook: None,
+                custom_hook_flags: 0,
+                label: "Partnered".to_string(),
+            },
+            0,
+            QuoteCut::default(),
+            partner,
+            3_000,
+        );
+        w.env
+            .send_paid_by(&[ix], &author, &[&config])
+            .expect_code(u32::from(LaunchError::InvalidPartner));
+    }
+    // An ordinary key still works, and its claims pay it lamports.
+    let partner = w.wallet_with_sol(SOL).pubkey();
     let (mint, creator, cfg) = partner_launch(&mut w, partner);
     let payer = w.env.funded(SOL);
-    let (fees, _) = launch_fees(&w, &mint);
-    let tx = send(
+    let before = w.env.lamports(&partner);
+    send(
         &mut w,
         &payer,
         launch::claim_creator_fees_sol(creator.pubkey(), mint, None, Some((cfg, partner))),
         &creator,
-    );
-    tx.expect_code(u32::from(LaunchError::PartnerAccountsMissing));
-    let anyone = w.env.funded(SOL);
-    let tx = w.env.send_paid_by(
-        &[launch::distribute_fees_sol(
-            mint,
-            cfg,
-            creator.pubkey(),
-            partner,
-            None,
-        )],
-        &anyone,
-        &[],
-    );
-    // Anchor's `mut` constraint on `partner_wallet` (ConstraintMut).
-    tx.expect_code(2000);
-    assert_eq!(
-        launch_fees(&w, &mint).0,
-        fees,
-        "the creator's fees stay locked"
-    );
+    )
+    .ok();
+    assert!(w.env.lamports(&partner) > before);
 }
 
 // ---------------------------------------------------------------------------------------------

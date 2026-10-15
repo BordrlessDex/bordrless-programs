@@ -189,3 +189,40 @@ pub fn is_companion_creator(creator: &Pubkey, mint: &Pubkey) -> bool {
     )
     .0 == *creator
 }
+
+/// Keys a transaction always demotes to read-only (the runtime's reserved account keys: the
+/// builtin programs and the sysvars). Such a key can never be credited lamports, so a partner config
+/// naming one would lock every native claim of its launches (audit N-7): `create_partner_config`
+/// refuses them.
+pub const RESERVED_ACCOUNT_KEYS: [Pubkey; 30] = [
+    Pubkey::from_str_const("AddressLookupTab1e1111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoader1111111111111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoader2111111111111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111"),
+    Pubkey::from_str_const("LoaderV411111111111111111111111111111111111"),
+    Pubkey::from_str_const("ComputeBudget111111111111111111111111111111"),
+    Pubkey::from_str_const("Config1111111111111111111111111111111111111"),
+    Pubkey::from_str_const("Ed25519SigVerify111111111111111111111111111"),
+    Pubkey::from_str_const("Feature111111111111111111111111111111111111"),
+    Pubkey::from_str_const("NativeLoader1111111111111111111111111111111"),
+    Pubkey::from_str_const("KeccakSecp256k11111111111111111111111111111"),
+    Pubkey::from_str_const("Secp256r1SigVerify1111111111111111111111111"),
+    Pubkey::from_str_const("Stake11111111111111111111111111111111111111"),
+    Pubkey::from_str_const("StakeConfig11111111111111111111111111111111"),
+    Pubkey::from_str_const("11111111111111111111111111111111"),
+    Pubkey::from_str_const("Vote111111111111111111111111111111111111111"),
+    Pubkey::from_str_const("ZkE1Gama1Proof11111111111111111111111111111"),
+    Pubkey::from_str_const("ZkTokenProof1111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarC1ock11111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarEpochRewards1111111111111111111111111"),
+    Pubkey::from_str_const("SysvarEpochSchedu1e111111111111111111111111"),
+    Pubkey::from_str_const("SysvarFees111111111111111111111111111111111"),
+    Pubkey::from_str_const("Sysvar1nstructions1111111111111111111111111"),
+    Pubkey::from_str_const("SysvarLastRestartS1ot1111111111111111111111"),
+    Pubkey::from_str_const("SysvarRecentB1ockHashes11111111111111111111"),
+    Pubkey::from_str_const("SysvarRent111111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarRewards111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarS1otHashes111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarS1otHistory11111111111111111111111111"),
+    Pubkey::from_str_const("SysvarStakeHistory1111111111111111111111111"),
+];
