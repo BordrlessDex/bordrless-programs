@@ -96,8 +96,7 @@ pub struct LaunchForm<'info> {
     /// CHECK: `launch.kit_config`.
     #[account(mut)]
     pub kit_config: Option<UncheckedAccount<'info>>,
-    /// CHECK: `launch.holder_vault` with holder rewards, else the kit's id.
-    #[account(mut)]
+    /// CHECK: `launch.holder_vault` with holder rewards, else the kit's id, read-only (no `mut`, as in `graduate`).
     pub reward_vault: Option<UncheckedAccount<'info>>,
     /// CHECK: the launch's kit-caller PDA.
     pub kit_caller: Option<UncheckedAccount<'info>>,

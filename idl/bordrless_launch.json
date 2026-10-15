@@ -1542,7 +1542,6 @@
         },
         {
           "name": "reward_vault",
-          "writable": true,
           "optional": true
         },
         {
@@ -1677,7 +1676,6 @@
         },
         {
           "name": "reward_vault",
-          "writable": true,
           "optional": true
         },
         {

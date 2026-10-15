@@ -530,6 +530,37 @@ fn a_migrated_launch_reverts() {
     tx.expect_code(u32::from(LaunchError::NotNativeLaunch));
 }
 
+/// A kit with no holder rewards (a max wallet and a creator lock: modules 6, as live coins have):
+/// the kit's id stands in for its reward vault, read-only, and the launch migrates and reverts
+/// (found by the cloned-mainnet rehearsal: the slot was declared writable, so every such coin's
+/// migration failed with `ConstraintMut`).
+#[test]
+fn a_kit_without_holder_rewards_migrates_and_reverts() {
+    let mut w = World::new();
+    let creator = w.wallet_with_sol(20 * SOL);
+    let no_rewards = bordrless_program_tests::launch::rules(0, 0, 0, 0, 200, 86_400, 0, 0);
+    let (mint, tx) = w.create_launch_with(&creator, "NRW", 100, VQ, no_rewards);
+    tx.ok();
+    let modules = w.launch(&mint).modules;
+    assert_ne!(modules, 0);
+    assert_eq!(modules & bordrless_kit::modules::HOLDER_REWARDS, 0);
+    w.env.warp(31);
+    let a = w.wallet_with_sol(30 * SOL);
+    w.holdings(&a, mint, &[a.pubkey(), creator.pubkey()]);
+    w.buy(&a, &mint, SOL / 10).ok();
+    let (_, fees) = launch_fees(&w, &mint);
+    let tx = migrate(&mut w, &mint);
+    tx.ok();
+    assert!(w.launch(&mint).is_native());
+    let kit: KitConfig = w.env.read(&launch::kit_config_address(&mint));
+    assert!(kit.is_native());
+    assert_eq!(launch_fees(&w, &mint), (fees, 0));
+    pool_inv(&w, &pool_of(&w, &mint));
+    revert(&mut w, &mint).ok();
+    assert!(!w.launch(&mint).is_native());
+    assert_eq!(launch_fees(&w, &mint), (0, fees));
+}
+
 /// New launches are native once the admin turns it on: the pool, the launch and the kit, from
 /// creation; trades, claims (with rent for a fresh wallet) and graduation, end to end.
 #[test]
