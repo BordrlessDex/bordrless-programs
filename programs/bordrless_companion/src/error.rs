@@ -208,4 +208,6 @@ pub enum CompanionError {
     DexNotPaused,
     #[msg("the companion's launch is not native yet: migrate the launch (and its pool) first")]
     LaunchNotNative,
+    #[msg("this script is not native-ready: it can't launch while native launches are on")]
+    ScriptNotNativeReady,
 }

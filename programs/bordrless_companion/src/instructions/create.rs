@@ -184,7 +184,13 @@ pub fn process_launch<'info>(
             CompanionError::BeneficiaryNotAWallet
         );
     }
-    let remaining = ctx.remaining_accounts;
+    // The client appends the companion's script address after `create_launch`'s accounts; it is
+    // read here (audit H-1) and never forwarded (the launchpad refuses accounts it doesn't expect).
+    let script_key = Pubkey::find_program_address(&[SCRIPT_SEED, c.mint.as_ref()], &crate::ID).0;
+    let (remaining, script_info) = match ctx.remaining_accounts.split_last() {
+        Some((last, rest)) if *last.key == script_key => (rest, Some(last)),
+        _ => (ctx.remaining_accounts, None),
+    };
     require!(remaining.len() > LAUNCH_AT, CompanionError::MissingAccount);
     require_keys_eq!(
         *remaining[CREATOR_AT].key,
@@ -240,7 +246,17 @@ pub fn process_launch<'info>(
     )
     .ok_or(CompanionError::NoQuote)?;
     let now = Clock::get()?.unix_timestamp;
-    // A launch made native (native launches on): the companion is native from here.
+    // A launch made native (native launches on): the companion is native from here. A script
+    // that is not native-ready (it trades the classic swap with bridged SOL) would fail every
+    // step, so such a launch is refused while native launches are on (audit H-1, I-5).
+    if launch.is_native() && c.is_script() {
+        let info = script_info.ok_or(CompanionError::MissingAccount)?;
+        let script = Account::<Script>::try_from(info)?;
+        require!(
+            !NOT_NATIVE_READY_SCRIPTS.contains(&script.program),
+            CompanionError::ScriptNotNativeReady
+        );
+    }
     if launch.is_native() {
         let system = remaining
             .iter()

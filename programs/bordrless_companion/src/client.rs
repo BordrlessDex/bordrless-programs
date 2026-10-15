@@ -248,6 +248,21 @@ pub fn launch(
     build(named, inner, crate::instruction::Launch { args }.data())
 }
 
+/// [`launch`] of a script companion: its script's address appended last, which the companion
+/// reads (a script that is not native-ready can't launch native) and never forwards. A script
+/// companion's launch while native launches are on needs it.
+pub fn launch_script(
+    launcher: Pubkey,
+    mint: Pubkey,
+    create_launch: &Instruction,
+    args: CreateLaunchArgs,
+) -> Instruction {
+    let mut ix = launch(launcher, mint, create_launch, args);
+    ix.accounts
+        .push(AccountMeta::new_readonly(script_address(&mint), false));
+    ix
+}
+
 fn step(cranker: Pubkey, mint: Pubkey) -> Vec<AccountMeta> {
     vec![
         AccountMeta::new(cranker, true),

@@ -198,7 +198,7 @@ fn launch_it(w: &mut World, launcher: &Keypair, mint: &Keypair) -> Tx {
         None,
         None,
     );
-    let ix = companion::launch(launcher.pubkey(), mint.pubkey(), &inner, launch_args);
+    let ix = companion::launch_script(launcher.pubkey(), mint.pubkey(), &inner, launch_args);
     w.env.send_paid_by(&[ix], launcher, &[mint])
 }
 
@@ -1935,4 +1935,59 @@ fn a_script_with_no_state_and_a_state_funded_beforehand() {
     );
     assert!(a.data.iter().all(|b| *b == 0));
     assert_eq!(script_of(&w, &mint.pubkey()).state_len, 128);
+}
+
+/// Audit H-1/I-5: while native launches are on, a script companion launches native only with a
+/// native-ready script; one running a script on `NOT_NATIVE_READY_SCRIPTS` is refused
+/// (`ScriptNotNativeReady`), and the launch needs the script's address (the client passes it).
+/// With native launches off it launches bridged as before.
+#[test]
+fn a_script_that_is_not_native_ready_cannot_launch_native() {
+    let (mut w, _) = script_world();
+    approve(&mut w, APPROVAL_KIND_SCRIPT).ok();
+    let admin = w.admin();
+    let ad = admin.pubkey();
+    w.as_admin(launch::set_native_launches(ad, true)).ok();
+    let launcher = w.wallet_with_sol(5 * SOL);
+    // A native-ready script launches native.
+    let (ok_mint, tx) = make(&mut w, &launcher, terms(vec![]));
+    tx.ok();
+    launch_it(&mut w, &launcher, &ok_mint).ok();
+    assert!(w.launch(&ok_mint.pubkey()).is_native());
+    assert!(companion_of(&w, &ok_mint.pubkey()).is_native());
+    // The same companion with a held script (its Script account rewritten to name one).
+    let (mint, tx) = make(&mut w, &launcher, terms(vec![]));
+    tx.ok();
+    let key = companion::script_address(&mint.pubkey());
+    let mut s = script_of(&w, &mint.pubkey());
+    s.program = NOT_NATIVE_READY_SCRIPTS[0];
+    let mut account = w.env.account(&key).expect("the script");
+    let mut data = vec![];
+    s.try_serialize(&mut data).unwrap();
+    account.data[..data.len()].copy_from_slice(&data);
+    w.env.put(key, account);
+    let tx = launch_it(&mut w, &launcher, &mint);
+    refused(&tx, CompanionError::ScriptNotNativeReady);
+    // Without the script's address the launch is refused too.
+    let creator = companion::creator_address(&mint.pubkey());
+    let launch_args = World::launch_args("SCRP", CREATOR_FEE, VQ, LaunchRules::NONE);
+    let inner = launch::create_launch_with(
+        creator,
+        mint.pubkey(),
+        w.env.treasury.pubkey(),
+        w.sol,
+        policy::LP_FEE_BPS,
+        launch_args.clone(),
+        None,
+        None,
+    );
+    let ix = companion::launch(launcher.pubkey(), mint.pubkey(), &inner, launch_args);
+    refused(
+        &w.env.send_paid_by(&[ix], &launcher, &[&mint]),
+        CompanionError::MissingAccount,
+    );
+    // Native launches off: it launches bridged.
+    w.as_admin(launch::set_native_launches(ad, false)).ok();
+    launch_it(&mut w, &launcher, &mint).ok();
+    assert!(!w.launch(&mint.pubkey()).is_native());
 }

@@ -397,6 +397,16 @@ pub const MAX_PAYOUT_WINDOW_SECS: u32 = 86_400;
 /// `sha256("global:record_payout")`.
 pub const RECORD_PAYOUT_DISCRIMINATOR: [u8; 8] = [0xe3, 0xa4, 0xd5, 0x36, 0x45, 0xac, 0x1f, 0xd8];
 
+/// Workshop scripts that are not native-ready: they trade the classic swap with the creator's
+/// bridged SOL and check the pool's quote vault holds its books, so on a native coin every step
+/// fails. A companion running one can't launch while native launches are on
+/// (`ScriptNotNativeReady`, audit H-1/I-5); the 13 coins already launched with one stay bridged
+/// but for their pool. Taken off this list (a program upgrade) when the author ships a native build.
+pub const NOT_NATIVE_READY_SCRIPTS: [Pubkey; 2] = [
+    Pubkey::from_str_const("HxsFA5ox5pYVBDN1QSUtnUzvAuJtAQZRG8YYMuJzR2Mp"),
+    Pubkey::from_str_const("DMQE7DHM2sjLXAYmqmnFvxCdkmEFctB2fZQY21ToZQuZ"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
