@@ -803,8 +803,10 @@ pub fn swap_with_base_slice(
 
 /// A `swap_v2` on a native launch pool (`bordrless_swap::native`), as [`swap_with_base_slice`]:
 /// a buy pays SOL from `trader`'s wallet and delivers the token to `recipient`'s holding; a sell
-/// delivers SOL to `recipient`'s wallet. The bridge's accounts go along, so a cut to an old-style
-/// holding of bridged SOL (a launch not yet native on a native pool) is wrapped.
+/// delivers SOL to `recipient`'s wallet. No bridge accounts: a native launch's cuts are lamports,
+/// and passing them would write-lock the bridge's global SOL accounts on every trade (audit O-1).
+/// For a launch not yet native on a native pool (its cuts wrapped into bridged-SOL holdings), use
+/// [`swap_v2_with_bridge`] with `with_bridge`.
 #[allow(clippy::too_many_arguments)]
 pub fn swap_v2_with_base_slice(
     keys: &LaunchKeys,
@@ -823,7 +825,7 @@ pub fn swap_v2_with_base_slice(
         amount_in,
         min_amount_out,
         base_slice,
-        true,
+        false,
     )
 }
 
