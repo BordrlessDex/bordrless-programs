@@ -48,6 +48,17 @@ pub const BRIDGED_SOL_MINT: anchor_lang::prelude::Pubkey =
     anchor_lang::prelude::Pubkey::from_str_const("A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i");
 /// The bridge's `unwrap_sol` instruction discriminator.
 pub const UNWRAP_SOL_DISCRIMINATOR: [u8; 8] = [99, 40, 14, 105, 45, 107, 172, 201];
+/// The bridge's `wrap_sol` instruction discriminator.
+pub const WRAP_SOL_DISCRIMINATOR: [u8; 8] = [47, 62, 155, 172, 131, 205, 37, 201];
+
+/// `Pool.reserved[NATIVE_FLAG_OFFSET]`: 1 when the pool holds its quote (bridged SOL by its mint
+/// and seeds) as lamports on the pool account itself (a native pool, `docs/native-sol.md`).
+pub const NATIVE_FLAG_OFFSET: usize = 0;
+/// `Pool.reserved[BUFFER_OFFSET..+8]` (u64 LE): a native pool's buffer, the bridged SOL in its
+/// quote vault that its books count (the rest of the quote is lamports on the pool).
+pub const BUFFER_OFFSET: usize = 1;
+/// `Pool.reserved[BUFFER_TARGET_OFFSET..+8]` (u64 LE): the buffer `rebalance` moves toward.
+pub const BUFFER_TARGET_OFFSET: usize = 9;
 
 #[cfg(test)]
 mod bridge_tests {
@@ -66,6 +77,10 @@ mod bridge_tests {
         assert_eq!(
             super::UNWRAP_SOL_DISCRIMINATOR,
             bordrless_bridge::instruction::UnwrapSol::DISCRIMINATOR
+        );
+        assert_eq!(
+            super::WRAP_SOL_DISCRIMINATOR,
+            bordrless_bridge::instruction::WrapSol::DISCRIMINATOR
         );
     }
 }

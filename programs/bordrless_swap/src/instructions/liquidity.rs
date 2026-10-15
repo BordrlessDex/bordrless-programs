@@ -11,6 +11,7 @@ use crate::error::SwapError;
 use crate::events::*;
 use crate::hooks::{split_extras, PoolHookCall};
 use crate::instructions::pool::PoolSeeds;
+use crate::native::{buffer_in, buffer_out, check_native};
 use crate::state::*;
 use crate::token::{balance, read_holding, TokenAccounts, TokenSide};
 
@@ -337,6 +338,12 @@ pub fn process_add_liquidity<'info>(
             .checked_add(quote_received)
             .ok_or(SwapError::MathOverflow)?;
         pool.lp_supply = new_supply;
+        // A native pool: the bridged SOL deposited joins its buffer.
+        if pool.quote_native() {
+            buffer_in(pool, quote_received)?;
+        }
+        let pool_info = pool.to_account_info();
+        check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
     }
     if let Some(call) = &p.call {
         if ctx.accounts.pool.runs(pool_flags::AFTER_ADD_LIQUIDITY) {
@@ -425,6 +432,10 @@ pub fn process_remove_liquidity<'info>(
         args.lp_amount,
         &[],
     )?;
+    // A native pool pays the quote in bridged SOL from its buffer, which must cover it.
+    if ctx.accounts.pool.quote_native() {
+        buffer_out(&mut ctx.accounts.pool, quote_out)?;
+    }
     let pool_info = ctx.accounts.pool.to_account_info();
     let seeds = PoolSeeds::of(&ctx.accounts.pool);
     let pool_seeds = seeds.seeds();
@@ -467,6 +478,7 @@ pub fn process_remove_liquidity<'info>(
             .lp_supply
             .checked_sub(args.lp_amount)
             .ok_or(SwapError::MathOverflow)?;
+        check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
     }
     if let Some(call) = &p.call {
         if ctx.accounts.pool.runs(pool_flags::AFTER_REMOVE_LIQUIDITY) {

@@ -363,6 +363,151 @@ pub fn finalize_curve(
     }
 }
 
+/// The bridge's accounts of `wrap_sol` and `unwrap_sol` that a DEX instruction passes after the
+/// pool's: the bridge, its config, the SOL wrapper, the SOL vault (bridged SOL and the event
+/// authority are placed by each builder).
+fn bridge_keys() -> (Pubkey, Pubkey, Pubkey, Pubkey, Pubkey) {
+    use crate::constants::BRIDGE_ID;
+    let native = Pubkey::from_str_const("So11111111111111111111111111111111111111112");
+    let bridge = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &BRIDGE_ID).0;
+    (
+        BRIDGE_ID,
+        bridge(&[b"config"]),
+        bridge(&[b"wrapper", native.as_ref()]),
+        bridge(&[b"sol-vault"]),
+        bridge(&[b"__event_authority"]),
+    )
+}
+
+/// `create_native_pool`: as [`create_pool`] (the quote mint must be bridged SOL; the payer pays
+/// the quote deposit in SOL; the authority's quote holding is passed but unused).
+pub fn create_native_pool(
+    keys: &CreatePoolKeys,
+    args: CreatePoolArgs,
+    extras: Vec<AccountMeta>,
+) -> Instruction {
+    let mut ix = create_pool(keys, args.clone(), extras);
+    ix.data = crate::instruction::CreateNativePool { args }.data();
+    ix
+}
+
+/// The fixed keys of a `swap_v2`.
+pub struct SwapV2Keys {
+    /// The trader (pays a buy's SOL).
+    pub trader: Pubkey,
+    /// The pool (a native one).
+    pub pool: Pubkey,
+    /// Base mint.
+    pub base_mint: Pubkey,
+    /// The trader's base holding (or, on a buy, any holding of the base mint to deliver to).
+    pub trader_base: Pubkey,
+    /// On a buy the trader; on a sell any account to deliver the SOL to.
+    pub trader_quote: Pubkey,
+    /// The pool's hook program.
+    pub hook_program: Option<Pubkey>,
+    /// Pass the base mint writable (a hook may burn base).
+    pub base_mint_writable: bool,
+    /// Pass the bridge's accounts (and bridged SOL writable): needed when a quote-side cut names a
+    /// holding of bridged SOL, which is paid wrapped.
+    pub with_bridge: bool,
+}
+
+/// `swap_v2`. `extras` as for [`swap`].
+pub fn swap_v2(keys: &SwapV2Keys, args: SwapArgs, extras: Vec<AccountMeta>) -> Instruction {
+    use crate::constants::BRIDGED_SOL_MINT;
+    let (bridge, bridge_config, wrapper, sol_vault, bridge_events) = bridge_keys();
+    let mut accounts = vec![
+        AccountMeta::new(keys.trader, true),
+        AccountMeta::new_readonly(config_address(), false),
+        AccountMeta::new(keys.pool, false),
+        mint_meta(keys.base_mint, keys.base_mint_writable),
+        mint_meta(BRIDGED_SOL_MINT, keys.with_bridge),
+        AccountMeta::new(vault_address(&keys.pool, &keys.base_mint), false),
+        AccountMeta::new(keys.trader_base, false),
+        AccountMeta::new(keys.trader_quote, false),
+        optional(keys.hook_program),
+        hook_signer_meta(keys.hook_program),
+    ];
+    accounts.extend(token_fixed());
+    accounts.push(AccountMeta::new_readonly(system_program::ID, false));
+    if keys.with_bridge {
+        accounts.extend([
+            AccountMeta::new_readonly(bridge, false),
+            AccountMeta::new_readonly(bridge_config, false),
+            AccountMeta::new(wrapper, false),
+            AccountMeta::new(sol_vault, false),
+            AccountMeta::new_readonly(bridge_events, false),
+        ]);
+    } else {
+        accounts.extend((0..5).map(|_| optional(None)));
+    }
+    let mut accounts = with_events(accounts);
+    accounts.extend(extras);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SwapV2 { args }.data(),
+    }
+}
+
+/// The accounts of `migrate_pool_to_native`, `revert_pool_to_bridged`, `rebalance_pool` and
+/// `set_buffer_target`.
+fn quote_form_accounts(signer: Pubkey, pool: Pubkey) -> Vec<AccountMeta> {
+    use crate::constants::BRIDGED_SOL_MINT;
+    let (bridge, bridge_config, wrapper, sol_vault, bridge_events) = bridge_keys();
+    with_events(vec![
+        AccountMeta::new(signer, true),
+        AccountMeta::new_readonly(config_address(), false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new(vault_address(&pool, &BRIDGED_SOL_MINT), false),
+        AccountMeta::new_readonly(bridge, false),
+        AccountMeta::new_readonly(bridge_config, false),
+        AccountMeta::new(wrapper, false),
+        AccountMeta::new(sol_vault, false),
+        AccountMeta::new(BRIDGED_SOL_MINT, false),
+        AccountMeta::new_readonly(bridge_events, false),
+        AccountMeta::new_readonly(bordrless_token::ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+        AccountMeta::new_readonly(anchor_lang::system_program::ID, false),
+    ])
+}
+
+/// `migrate_pool_to_native`, signed by the admin.
+pub fn migrate_pool_to_native(admin: Pubkey, pool: Pubkey, buffer_target: u64) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: quote_form_accounts(admin, pool),
+        data: crate::instruction::MigratePoolToNative { buffer_target }.data(),
+    }
+}
+
+/// `revert_pool_to_bridged`, signed by the admin (a plain wallet: it wraps the pool's SOL).
+pub fn revert_pool_to_bridged(admin: Pubkey, pool: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: quote_form_accounts(admin, pool),
+        data: crate::instruction::RevertPoolToBridged {}.data(),
+    }
+}
+
+/// `rebalance_pool`, signed by anyone (a plain wallet: it may wrap the pool's SOL).
+pub fn rebalance_pool(cranker: Pubkey, pool: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: quote_form_accounts(cranker, pool),
+        data: crate::instruction::RebalancePool {}.data(),
+    }
+}
+
+/// `set_buffer_target`, signed by the admin.
+pub fn set_buffer_target(admin: Pubkey, pool: Pubkey, buffer_target: u64) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: quote_form_accounts(admin, pool),
+        data: crate::instruction::SetBufferTarget { buffer_target }.data(),
+    }
+}
+
 /// `collect_protocol_fees_sol`: anyone (`cranker`) unwraps a pool's accrued protocol fees (the pool's
 /// quote must be bridged SOL) and pays them to `fee_collector`, the wallet the config names, as SOL.
 pub fn collect_protocol_fees_sol(

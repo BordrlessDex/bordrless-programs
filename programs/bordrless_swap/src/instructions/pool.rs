@@ -14,6 +14,10 @@ use crate::constants::*;
 use crate::error::SwapError;
 use crate::events::*;
 use crate::hooks::{split_extras, PoolHookCall};
+use crate::native::{
+    buffer_in, buffer_out, check_credit_rent, check_native, move_lamports, transfer_from_wallet,
+    BridgeSol,
+};
 use crate::state::*;
 use crate::token::{balance, read_holding, TokenAccounts, TokenSide};
 
@@ -144,10 +148,14 @@ pub fn check_hook_caller(hook_caller: &Pubkey, hook_program: &Pubkey, bump: u8) 
     Ok(())
 }
 
-/// `create_pool`.
+/// `create_pool`, and `create_native_pool` (`native`): a pool quoted in bridged SOL that holds its
+/// quote as lamports on its own account; its quote deposit is a system transfer from the payer, and
+/// its quote vault (a holding of bridged SOL) is created all the same, as the buffer the old `swap`
+/// and the liquidity instructions use.
 pub fn process_create_pool<'info>(
     ctx: Context<'info, CreatePool<'info>>,
     args: CreatePoolArgs,
+    native: bool,
 ) -> Result<()> {
     let clock = Clock::get()?;
     let config = &mut ctx.accounts.config;
@@ -163,6 +171,13 @@ pub fn process_create_pool<'info>(
     );
     require!(args.base_amount > 0, SwapError::ZeroAmount);
     let curve = args.virtual_base > 0 || args.virtual_quote > 0;
+    if native {
+        require_keys_eq!(
+            ctx.accounts.quote_mint.key(),
+            BRIDGED_SOL_MINT,
+            SwapError::NotBridgedSol
+        );
+    }
     let hook_program_opt = if args.hook_program == Pubkey::default() {
         None
     } else {
@@ -278,6 +293,7 @@ pub fn process_create_pool<'info>(
         pool.fee_model = fee_model;
         pool.protocol_share_bps = protocol_share_bps;
         pool.reserved = [0; 60];
+        pool.set_quote_native(native);
     }
     let seeds = PoolSeeds::of(&ctx.accounts.pool);
     let pool_seeds = seeds.seeds();
@@ -378,7 +394,15 @@ pub fn process_create_pool<'info>(
         .ok_or(SwapError::MathOverflow)?;
     require!(base_received > 0, SwapError::NothingReceived);
     let mut quote_received = 0u64;
-    if args.quote_amount > 0 {
+    if args.quote_amount > 0 && native {
+        // A native pool's quote: lamports from the payer onto the pool account.
+        let before = pool_info.lamports();
+        transfer_from_wallet(&system, &payer, &pool_info, args.quote_amount)?;
+        quote_received = pool_info
+            .lamports()
+            .checked_sub(before)
+            .ok_or(SwapError::MathOverflow)?;
+    } else if args.quote_amount > 0 {
         let quote_before = balance(&ctx.accounts.quote_vault)?;
         token.transfer(
             &authority,
@@ -421,6 +445,7 @@ pub fn process_create_pool<'info>(
         .pools_created
         .checked_add(1)
         .ok_or(SwapError::MathOverflow)?;
+    check_native(&pool_info, &ctx.accounts.pool, None)?;
 
     if let Some(call) = &call {
         if !by_hook && args.hook_flags & pool_flags::AFTER_INITIALIZE != 0 {
@@ -506,8 +531,17 @@ pub fn process_finalize_curve(ctx: Context<FinalizeCurve>, hook_caller_bump: u8)
     };
     token.check()?;
     let base_total = balance(&ctx.accounts.base_vault)?;
-    let quote_total = balance(&ctx.accounts.quote_vault)?;
     let pool_info = ctx.accounts.pool.to_account_info();
+    // A native pool's quote: its lamports above the rent-exempt minimum plus its buffer.
+    let quote_total = if ctx.accounts.pool.quote_native() {
+        pool_info
+            .lamports()
+            .saturating_sub(crate::native::rent_minimum(&pool_info)?)
+            .checked_add(ctx.accounts.pool.buffer_quote())
+            .ok_or(SwapError::MathOverflow)?
+    } else {
+        balance(&ctx.accounts.quote_vault)?
+    };
     let seeds = PoolSeeds::of(&ctx.accounts.pool);
     let pool_seeds = seeds.seeds();
     let pool = &mut ctx.accounts.pool;
@@ -531,6 +565,7 @@ pub fn process_finalize_curve(ctx: Context<FinalizeCurve>, hook_caller_bump: u8)
     pool.virtual_quote = 0;
     pool.lp_supply = total;
     pool.curve = false;
+    check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
     emit_cpi!(CurveFinalized {
         pool: pool.key(),
         base_reserve,
@@ -600,6 +635,10 @@ pub fn process_collect_protocol_fees<'info>(
         SwapError::WrongHolding
     );
     let quote_amount = ctx.accounts.pool.protocol_fees_quote;
+    // A native pool pays the fees in bridged SOL from its buffer, which must cover them.
+    if ctx.accounts.pool.quote_native() {
+        buffer_out(&mut ctx.accounts.pool, quote_amount)?;
+    }
     if quote_amount > 0 {
         let quote_hook = bordrless_token::client::read_mint(&ctx.accounts.quote_mint)?.hook_program;
         let extras = ctx.remaining_accounts;
@@ -618,6 +657,8 @@ pub fn process_collect_protocol_fees<'info>(
     }
     let pool = &mut ctx.accounts.pool;
     pool.protocol_fees_quote = 0;
+    let pool_info = pool.to_account_info();
+    check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
     emit_cpi!(ProtocolFeesCollected {
         pool: pool.key(),
         quote_amount,
@@ -669,73 +710,289 @@ pub struct CollectProtocolFeesSol<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// The bridge's accounts of an instruction that has them all.
+macro_rules! bridge_sol {
+    ($a:expr) => {
+        BridgeSol {
+            program: $a.bridge_program.to_account_info(),
+            config: $a.bridge_config.to_account_info(),
+            wrapper: $a.sol_wrapper.to_account_info(),
+            sol_vault: $a.sol_vault.to_account_info(),
+            wrapped_mint: $a.bridged_sol_mint.to_account_info(),
+            event_authority: $a.bridge_event_authority.to_account_info(),
+            token_program: $a.token_program.to_account_info(),
+            token_event_authority: $a.token_event_authority.to_account_info(),
+            system_program: $a.system_program.to_account_info(),
+        }
+    };
+}
+
 /// `collect_protocol_fees_sol`: the pool's `protocol_fees_quote` (bridged SOL in its quote vault),
 /// unwrapped by the bridge with the pool as its user and paid to the fee collector as SOL. The
-/// pool's own lamports are left as they were.
+/// pool's own lamports are left as they were. A native pool pays them from its lamports, unwrapping
+/// from its buffer first only what its lamports lack.
 pub fn process_collect_protocol_fees_sol(ctx: Context<CollectProtocolFeesSol>) -> Result<()> {
     let amount = ctx.accounts.pool.protocol_fees_quote;
+    let native = ctx.accounts.pool.quote_native();
     if amount > 0 {
         let pool_info = ctx.accounts.pool.to_account_info();
         let seeds = PoolSeeds::of(&ctx.accounts.pool);
         let pool_seeds = seeds.seeds();
-        // The bridge's `unwrap_sol` with the pool as its user, from the accounts passed (the
-        // bridge checks every one of them).
-        let mut data = UNWRAP_SOL_DISCRIMINATOR.to_vec();
-        data.extend_from_slice(&amount.to_le_bytes());
-        let ro = |info: &AccountInfo| AccountMeta::new_readonly(info.key(), false);
-        let rw = |info: &AccountInfo| AccountMeta::new(info.key(), false);
-        let ix = anchor_lang::solana_program::instruction::Instruction {
-            program_id: BRIDGE_ID,
-            accounts: vec![
-                AccountMeta::new(pool_info.key(), true),
-                ro(&ctx.accounts.bridge_config),
-                rw(&ctx.accounts.sol_wrapper),
-                rw(&ctx.accounts.sol_vault),
-                rw(&ctx.accounts.bridged_sol_mint),
-                rw(&ctx.accounts.quote_vault),
-                ro(&ctx.accounts.token_program),
-                ro(&ctx.accounts.token_event_authority),
-                ro(&ctx.accounts.system_program),
-                ro(&ctx.accounts.bridge_event_authority),
-                ro(&ctx.accounts.bridge_program),
-            ],
-            data,
+        let bridge = bridge_sol!(ctx.accounts);
+        let unwrap = if native {
+            let lamports_quote = ctx
+                .accounts
+                .pool
+                .lamports_quote()
+                .ok_or(SwapError::NativeInvariant)?;
+            amount.saturating_sub(lamports_quote)
+        } else {
+            amount
         };
-        anchor_lang::solana_program::program::invoke_signed(
-            &ix,
-            &[
-                pool_info.clone(),
-                ctx.accounts.bridge_config.to_account_info(),
-                ctx.accounts.sol_wrapper.to_account_info(),
-                ctx.accounts.sol_vault.to_account_info(),
-                ctx.accounts.bridged_sol_mint.to_account_info(),
-                ctx.accounts.quote_vault.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.token_event_authority.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.bridge_event_authority.to_account_info(),
-                ctx.accounts.bridge_program.to_account_info(),
-            ],
-            &[&pool_seeds],
+        bridge.unwrap_to_pool(
+            &pool_info,
+            &ctx.accounts.quote_vault.to_account_info(),
+            unwrap,
+            &pool_seeds,
         )?;
-        // The SOL landed on the pool's account, which this program owns: hand it on.
+        if native {
+            buffer_out(&mut ctx.accounts.pool, unwrap)?;
+        }
+        // The SOL is on the pool's account, which this program owns: hand it on.
         let collector = ctx.accounts.collector.to_account_info();
-        let pool_lamports = pool_info.lamports();
-        **pool_info.try_borrow_mut_lamports()? = pool_lamports
-            .checked_sub(amount)
-            .ok_or(SwapError::MathOverflow)?;
-        let collector_lamports = collector.lamports();
-        **collector.try_borrow_mut_lamports()? = collector_lamports
-            .checked_add(amount)
-            .ok_or(SwapError::MathOverflow)?;
+        check_credit_rent(&collector, amount)?;
+        move_lamports(&pool_info, &collector, amount)?;
     }
     let pool = &mut ctx.accounts.pool;
     pool.protocol_fees_quote = 0;
+    let pool_info = pool.to_account_info();
+    check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
     emit_cpi!(ProtocolFeesCollected {
         pool: pool.key(),
         quote_amount: amount,
         collector: ctx.accounts.config.fee_collector,
         ts: Clock::get()?.unix_timestamp
     });
+    Ok(())
+}
+
+/// Accounts of `migrate_pool_to_native`, `revert_pool_to_bridged`, `rebalance_pool` and
+/// `set_buffer_target`: a pool quoted in bridged SOL, its quote vault, and the bridge's `wrap_sol`
+/// and `unwrap_sol` accounts. `signer` is the admin for all but `rebalance_pool`, which anyone may
+/// send; where SOL is wrapped it is the wallet that wraps the pool's lamports (credited them by the
+/// pool first, so it ends where it started), so it must be a plain system account.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct QuoteForm<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, constraint = pool.quote_mint == BRIDGED_SOL_MINT @ SwapError::NotBridgedSol)]
+    pub pool: Account<'info, Pool>,
+    /// CHECK: address-checked: the pool's quote vault, its holding of bridged SOL.
+    #[account(mut, address = pool.quote_vault @ SwapError::WrongVault)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the bridge.
+    #[account(address = BRIDGE_ID)]
+    pub bridge_program: UncheckedAccount<'info>,
+    /// CHECK: the bridge's config (the bridge checks it).
+    pub bridge_config: UncheckedAccount<'info>,
+    /// CHECK: the SOL wrapper (the bridge checks it).
+    #[account(mut)]
+    pub sol_wrapper: UncheckedAccount<'info>,
+    /// CHECK: the bridge's SOL vault (the bridge checks it).
+    #[account(mut)]
+    pub sol_vault: UncheckedAccount<'info>,
+    /// CHECK: address-checked: bridged SOL, the pool's quote mint.
+    #[account(mut, address = pool.quote_mint @ SwapError::WrongHolding)]
+    pub bridged_sol_mint: UncheckedAccount<'info>,
+    /// CHECK: the bridge's event authority (the bridge checks it).
+    pub bridge_event_authority: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the token program.
+    #[account(address = bordrless_token::ID)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the token program's event authority (the token program checks it).
+    pub token_event_authority: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// What a `QuoteForm` instruction did.
+const FORM_MIGRATED: u8 = 0;
+const FORM_REVERTED: u8 = 1;
+const FORM_REBALANCED: u8 = 2;
+const FORM_TARGET_SET: u8 = 3;
+
+fn form_event(
+    pool: &Account<Pool>,
+    kind: u8,
+    unwrapped: u64,
+    wrapped: u64,
+) -> Result<PoolQuoteFormChanged> {
+    Ok(PoolQuoteFormChanged {
+        pool: pool.key(),
+        kind,
+        native: pool.quote_native(),
+        unwrapped,
+        wrapped,
+        buffer_quote: pool.buffer_quote(),
+        buffer_target: pool.buffer_target(),
+        quote_reserve: pool.quote_reserve,
+        protocol_fees_quote: pool.protocol_fees_quote,
+        pool_lamports: pool.to_account_info().lamports(),
+        ts: Clock::get()?.unix_timestamp,
+    })
+}
+
+/// `migrate_pool_to_native`: the admin turns a pool quoted in bridged SOL into a native pool. The
+/// pool unwraps its books' quote (`quote_reserve + protocol_fees_quote`) from its quote vault onto
+/// its own account, keeping `min(buffer_target, books)` in the vault as its buffer, and is flagged
+/// native. Idempotent: a native pool is left as it is. Bridged SOL anyone sent the vault beyond the
+/// books stays there, uncounted, as before.
+pub fn process_migrate_pool_to_native(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.signer.key(),
+        ctx.accounts.config.admin,
+        SwapError::NotAdmin
+    );
+    if ctx.accounts.pool.quote_native() {
+        return Ok(());
+    }
+    let books = ctx
+        .accounts
+        .pool
+        .quote_books()
+        .ok_or(SwapError::MathOverflow)?;
+    require!(
+        balance(&ctx.accounts.quote_vault)? >= books,
+        SwapError::NativeInvariant
+    );
+    let keep = books.min(buffer_target);
+    let unwrap = books - keep;
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let seeds = PoolSeeds::of(&ctx.accounts.pool);
+    let pool_seeds = seeds.seeds();
+    bridge_sol!(ctx.accounts).unwrap_to_pool(
+        &pool_info,
+        &ctx.accounts.quote_vault.to_account_info(),
+        unwrap,
+        &pool_seeds,
+    )?;
+    let pool = &mut ctx.accounts.pool;
+    pool.set_quote_native(true);
+    pool.set_buffer_quote(keep);
+    pool.set_buffer_target(buffer_target);
+    check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
+    emit_cpi!(form_event(pool, FORM_MIGRATED, unwrap, 0)?);
+    Ok(())
+}
+
+/// `revert_pool_to_bridged`: the admin turns a native pool back into a bridged one: the pool's
+/// quote lamports (`Pool::lamports_quote`) are wrapped into its quote vault (the admin's wallet
+/// wrapping them, credited them by the pool first) and the flag, the buffer and its target are
+/// cleared. Idempotent: a bridged pool is left as it is.
+pub fn process_revert_pool_to_bridged(ctx: Context<QuoteForm>) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.signer.key(),
+        ctx.accounts.config.admin,
+        SwapError::NotAdmin
+    );
+    if !ctx.accounts.pool.quote_native() {
+        return Ok(());
+    }
+    let lamports_quote = ctx
+        .accounts
+        .pool
+        .lamports_quote()
+        .ok_or(SwapError::NativeInvariant)?;
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let bridge = bridge_sol!(ctx.accounts);
+    bridge.check()?;
+    bridge.wrap_from_pool(
+        &pool_info,
+        &ctx.accounts.signer.to_account_info(),
+        &ctx.accounts.quote_vault.to_account_info(),
+        lamports_quote,
+    )?;
+    let books = ctx
+        .accounts
+        .pool
+        .quote_books()
+        .ok_or(SwapError::MathOverflow)?;
+    require!(
+        balance(&ctx.accounts.quote_vault)? >= books,
+        SwapError::NativeInvariant
+    );
+    require!(
+        pool_info.lamports() >= crate::native::rent_minimum(&pool_info)?,
+        SwapError::NativeInvariant
+    );
+    let pool = &mut ctx.accounts.pool;
+    pool.set_quote_native(false);
+    pool.set_buffer_quote(0);
+    pool.set_buffer_target(0);
+    emit_cpi!(form_event(pool, FORM_REVERTED, 0, lamports_quote)?);
+    Ok(())
+}
+
+/// `rebalance_pool`: anyone moves a native pool's buffer to its target: a buffer above it is
+/// unwrapped onto the pool (the pool the bridge's user); one below it is filled from the pool's
+/// quote lamports, as far as they go, wrapped by the sender's wallet (credited them by the pool
+/// first, so it pays nothing). The value of the pool never changes, only its form, and only
+/// toward the target the admin set, so nobody can move it against the pool's policy.
+pub fn process_rebalance_pool(ctx: Context<QuoteForm>) -> Result<()> {
+    require!(ctx.accounts.pool.quote_native(), SwapError::NotNativePool);
+    require!(!ctx.accounts.config.paused, SwapError::Paused);
+    let (buffer, target) = (
+        ctx.accounts.pool.buffer_quote(),
+        ctx.accounts.pool.buffer_target(),
+    );
+    let lamports_quote = ctx
+        .accounts
+        .pool
+        .lamports_quote()
+        .ok_or(SwapError::NativeInvariant)?;
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let seeds = PoolSeeds::of(&ctx.accounts.pool);
+    let pool_seeds = seeds.seeds();
+    let bridge = bridge_sol!(ctx.accounts);
+    let (mut unwrapped, mut wrapped) = (0, 0);
+    if buffer > target {
+        unwrapped = buffer - target;
+        bridge.unwrap_to_pool(
+            &pool_info,
+            &ctx.accounts.quote_vault.to_account_info(),
+            unwrapped,
+            &pool_seeds,
+        )?;
+        buffer_out(&mut ctx.accounts.pool, unwrapped)?;
+    } else if buffer < target {
+        wrapped = (target - buffer).min(lamports_quote);
+        bridge.check()?;
+        bridge.wrap_from_pool(
+            &pool_info,
+            &ctx.accounts.signer.to_account_info(),
+            &ctx.accounts.quote_vault.to_account_info(),
+            wrapped,
+        )?;
+        buffer_in(&mut ctx.accounts.pool, wrapped)?;
+    }
+    let pool = &ctx.accounts.pool;
+    check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
+    emit_cpi!(form_event(pool, FORM_REBALANCED, unwrapped, wrapped)?);
+    Ok(())
+}
+
+/// `set_buffer_target`: the admin sets the buffer a native pool's `rebalance_pool` moves toward.
+pub fn process_set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.signer.key(),
+        ctx.accounts.config.admin,
+        SwapError::NotAdmin
+    );
+    require!(ctx.accounts.pool.quote_native(), SwapError::NotNativePool);
+    let pool = &mut ctx.accounts.pool;
+    pool.set_buffer_target(buffer_target);
+    emit_cpi!(form_event(pool, FORM_TARGET_SET, 0, 0)?);
     Ok(())
 }

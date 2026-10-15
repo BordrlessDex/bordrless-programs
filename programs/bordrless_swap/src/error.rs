@@ -83,6 +83,22 @@ pub enum SwapError {
     NotBridgedSol,
     #[msg("the hook answered a fill that is zero, above the input, or not for a buy on a curve")]
     BadFill,
+    #[msg("the pool is not a native-SOL pool")]
+    NotNativePool,
+    #[msg("the pool's bridged-SOL buffer cannot cover this; rebalance the pool first")]
+    BufferShort,
+    #[msg("the pool's lamports cannot cover this; rebalance the pool first")]
+    LamportsShort,
+    #[msg("a lamport recipient would be left below the rent-exempt minimum")]
+    RecipientBelowRent,
+    #[msg("the bridge accounts are missing or wrong (needed to wrap or unwrap SOL)")]
+    BridgeAccountsMissing,
+    #[msg("a native pool's lamports are below its rent-exempt minimum plus its books")]
+    NativeInvariant,
+    #[msg("the quote of a native pool cannot be burned")]
+    NativeBurn,
+    #[msg("the account cannot pay or receive SOL here")]
+    WrongNativeAccount,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.

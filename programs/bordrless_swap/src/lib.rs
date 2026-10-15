@@ -27,6 +27,7 @@ pub mod error;
 pub mod events;
 pub mod hooks;
 pub mod instructions;
+pub mod native;
 pub mod state;
 pub mod token;
 
@@ -64,7 +65,17 @@ pub mod bordrless_swap {
         ctx: Context<'info, CreatePool<'info>>,
         args: CreatePoolArgs,
     ) -> Result<()> {
-        pool::process_create_pool(ctx, args)
+        pool::process_create_pool(ctx, args, false)
+    }
+
+    /// Creates a native-SOL pool (quoted in bridged SOL by its mint and seeds, its quote held as
+    /// lamports on the pool account): as `create_pool`, with the quote deposit paid in SOL by the
+    /// payer (`crate::native`).
+    pub fn create_native_pool<'info>(
+        ctx: Context<'info, CreatePool<'info>>,
+        args: CreatePoolArgs,
+    ) -> Result<()> {
+        pool::process_create_pool(ctx, args, true)
     }
 
     /// The pool's hook turns a curve pool into an ordinary one: reserves synced to the vaults, no
@@ -108,5 +119,34 @@ pub mod bordrless_swap {
     /// Swaps an exact input for at least `min_amount_out`.
     pub fn swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> Result<()> {
         swap::process_swap(ctx, args)
+    }
+
+    /// Swaps on a native-SOL pool with the quote as SOL: the trader's wallet pays a buy, the pool's
+    /// lamports pay a sell, and the quote-side cuts are paid in SOL (wrapped through the bridge for
+    /// a holding of bridged SOL).
+    pub fn swap_v2<'info>(ctx: Context<'info, SwapV2<'info>>, args: SwapArgs) -> Result<()> {
+        swap::process_swap_v2(ctx, args)
+    }
+
+    /// Admin: turns a pool quoted in bridged SOL into a native one (its quote unwrapped onto the
+    /// pool account, `buffer_target` of it kept in the quote vault). Idempotent.
+    pub fn migrate_pool_to_native(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
+        pool::process_migrate_pool_to_native(ctx, buffer_target)
+    }
+
+    /// Admin: turns a native pool back into a bridged one (its quote lamports wrapped into the
+    /// quote vault). Idempotent.
+    pub fn revert_pool_to_bridged(ctx: Context<QuoteForm>) -> Result<()> {
+        pool::process_revert_pool_to_bridged(ctx)
+    }
+
+    /// Anyone: moves a native pool's buffer (bridged SOL in its quote vault) toward its target.
+    pub fn rebalance_pool(ctx: Context<QuoteForm>) -> Result<()> {
+        pool::process_rebalance_pool(ctx)
+    }
+
+    /// Admin: sets a native pool's buffer target.
+    pub fn set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
+        pool::process_set_buffer_target(ctx, buffer_target)
     }
 }
