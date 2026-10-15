@@ -56,4 +56,11 @@ pub enum VaultError {
     NoRoom,
     #[msg("only the vault's creator (who paid for it) or the coin's mint keypair opens a vault")]
     NotOpener,
+    // ---- Native SOL (phase 3). Appended, so every code above keeps its number. ----
+    #[msg("not the hook vault program's upgrade authority")]
+    NotUpgradeAuthority,
+    #[msg("the DEX must be paused for this")]
+    DexNotPaused,
+    #[msg("the coin's launch is not native yet: migrate its pool and launch first")]
+    LaunchNotNative,
 }

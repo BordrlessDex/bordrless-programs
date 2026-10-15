@@ -50,6 +50,11 @@ pub const SWAP_POOL: usize = 2;
 pub const SWAP_QUOTE_MINT: usize = 4;
 pub const SWAP_TRADER_QUOTE: usize = 8;
 pub const SWAP_MIN_ACCOUNTS: usize = 11;
+/// The DEX `swap_v2`'s accounts, as `bordrless_swap::client::swap_v2` lists them: the trader (0),
+/// the config (1), the pool (2), the quote mint (4) and the trader's quote account (7, its wallet);
+/// at least 13 before the bridge's and the event accounts.
+pub const SWAP_V2_TRADER_QUOTE: usize = 7;
+pub const SWAP_V2_MIN_ACCOUNTS: usize = 13;
 
 /// What a fee of `fee_bps` on `amount` comes to: the fee (rounded down) and Bordrless's share of it
 /// (rounded down); the integrator gets the fee less the share.
@@ -83,6 +88,179 @@ pub mod bordrless_router {
     pub fn swap<'info>(ctx: Context<'info, RouterSwap<'info>>, args: RouterSwapArgs) -> Result<()> {
         process_swap(ctx, args)
     }
+
+    /// `swap` on a native pool, through the DEX's `swap_v2`: the trader pays a buy's fee from its
+    /// wallet, and a sell, delivered to the trader's wallet, pays it from what arrived; the
+    /// integrator and the DEX treasury are paid SOL to their wallets. Remaining accounts: the DEX
+    /// `swap_v2`'s own, exactly as `bordrless_swap::client::swap_v2` lists them.
+    pub fn swap_v2<'info>(
+        ctx: Context<'info, RouterSwapV2<'info>>,
+        args: RouterSwapArgs,
+    ) -> Result<()> {
+        process_swap_v2(ctx, args)
+    }
+}
+
+/// Accounts of `swap_v2`.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct RouterSwapV2<'info> {
+    /// The trader: signs the DEX swap and pays the fee from its wallet.
+    #[account(mut)]
+    pub trader: Signer<'info>,
+    /// CHECK: the integrator's wallet (any account but the trader and the pool; it must end at or
+    /// above the rent-exempt minimum).
+    #[account(mut)]
+    pub integrator: UncheckedAccount<'info>,
+    /// CHECK: the DEX config's treasury (address-checked in the handler).
+    #[account(mut)]
+    pub treasury: UncheckedAccount<'info>,
+    /// CHECK: the DEX (address-checked).
+    #[account(address = bordrless_swap::ID @ RouterError::WrongProgram)]
+    pub dex_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// `amount` lamports from the trader's wallet to `to`, which must end at or above the rent-exempt
+/// minimum of its size.
+fn pay_sol<'info>(
+    ctx: &Context<'info, RouterSwapV2<'info>>,
+    to: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+    require!(
+        to.lamports().saturating_add(amount) >= Rent::get()?.minimum_balance(to.data_len()),
+        RouterError::RecipientBelowRent
+    );
+    anchor_lang::system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.key(),
+            anchor_lang::system_program::Transfer {
+                from: ctx.accounts.trader.to_account_info(),
+                to: to.clone(),
+            },
+        ),
+        amount,
+    )
+}
+
+fn process_swap_v2<'info>(
+    ctx: Context<'info, RouterSwapV2<'info>>,
+    args: RouterSwapArgs,
+) -> Result<()> {
+    require!(
+        (1..=MAX_FEE_BPS).contains(&args.fee_bps),
+        RouterError::BadFee
+    );
+    let swap = ctx.remaining_accounts;
+    require!(
+        swap.len() >= SWAP_V2_MIN_ACCOUNTS,
+        RouterError::SwapAccounts
+    );
+    let trader = ctx.accounts.trader.key();
+    require!(
+        *swap[SWAP_TRADER].key == trader && swap[SWAP_TRADER].is_signer,
+        RouterError::SwapAccounts
+    );
+    require_keys_eq!(
+        *swap[SWAP_CONFIG].key,
+        bordrless_swap::client::config_address(),
+        RouterError::SwapAccounts
+    );
+    let config = {
+        let info = &swap[SWAP_CONFIG];
+        require_keys_eq!(*info.owner, bordrless_swap::ID, RouterError::SwapAccounts);
+        let data = info.try_borrow_data()?;
+        bordrless_swap::state::Config::try_deserialize(&mut &data[..])?
+    };
+    // A sell delivers to the trader's own wallet (the fee moves from it).
+    require_keys_eq!(
+        *swap[SWAP_V2_TRADER_QUOTE].key,
+        trader,
+        RouterError::NotTradersHolding
+    );
+    require_keys_eq!(
+        ctx.accounts.treasury.key(),
+        config.treasury,
+        RouterError::WrongTreasury
+    );
+    require!(
+        ctx.accounts.integrator.key() != trader
+            && ctx.accounts.integrator.key() != swap[SWAP_POOL].key(),
+        RouterError::WrongIntegratorHolding
+    );
+
+    let buy = args.swap.direction == 1;
+    let mut dex_args = args.swap.clone();
+    let integrator = ctx.accounts.integrator.to_account_info();
+    let treasury = ctx.accounts.treasury.to_account_info();
+    let (charged_on, fee, share) = if buy {
+        let (fee, share) = fee_split(args.swap.amount_in, args.fee_bps);
+        dex_args.amount_in = args
+            .swap
+            .amount_in
+            .checked_sub(fee)
+            .filter(|a| *a > 0)
+            .ok_or(RouterError::BadFee)?;
+        pay_sol(&ctx, &integrator, fee - share)?;
+        pay_sol(&ctx, &treasury, share)?;
+        dex_v2(&ctx, swap, dex_args)?;
+        (args.swap.amount_in, fee, share)
+    } else {
+        let before = ctx.accounts.trader.lamports();
+        dex_v2(&ctx, swap, dex_args)?;
+        let delivered = ctx
+            .accounts
+            .trader
+            .lamports()
+            .checked_sub(before)
+            .ok_or(RouterError::SwapAccounts)?;
+        let (fee, share) = fee_split(delivered, args.fee_bps);
+        require!(
+            delivered - fee >= args.min_quote_after_fee,
+            RouterError::Slippage
+        );
+        pay_sol(&ctx, &integrator, fee - share)?;
+        pay_sol(&ctx, &treasury, share)?;
+        (delivered, fee, share)
+    };
+    emit_cpi!(IntegratorFeePaid {
+        pool: swap[SWAP_POOL].key(),
+        trader,
+        integrator: integrator.key(),
+        direction: args.swap.direction,
+        charged_on,
+        fee,
+        bordrless_share: share,
+    });
+    Ok(())
+}
+
+/// The DEX's `swap_v2` with `args`, its accounts exactly as passed.
+fn dex_v2<'info>(
+    ctx: &Context<'info, RouterSwapV2<'info>>,
+    swap: &[AccountInfo<'info>],
+    args: SwapArgs,
+) -> Result<()> {
+    let ix = Instruction {
+        program_id: bordrless_swap::ID,
+        accounts: swap
+            .iter()
+            .map(|a| AccountMeta {
+                pubkey: *a.key,
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            })
+            .collect(),
+        data: bordrless_swap::instruction::SwapV2 { args }.data(),
+    };
+    let mut infos = swap.to_vec();
+    infos.push(ctx.accounts.dex_program.to_account_info());
+    invoke(&ix, &infos)?;
+    Ok(())
 }
 
 /// Accounts of `swap`.
@@ -288,6 +466,45 @@ pub mod client {
     use super::*;
     use anchor_lang::ToAccountMetas;
 
+    /// `swap_v2`: `dex_swap_v2` (built by `bordrless_swap::client::swap_v2`, the trader's wallet its
+    /// quote account) routed with an integrator's fee of `fee_bps`, paid in SOL to `integrator`
+    /// (a wallet) and `treasury` (the DEX config's treasury).
+    pub fn swap_v2(
+        trader: Pubkey,
+        integrator: Pubkey,
+        treasury: Pubkey,
+        dex_swap_v2: &Instruction,
+        fee_bps: u16,
+        min_quote_after_fee: u64,
+    ) -> Instruction {
+        let args = bordrless_swap::instruction::SwapV2::try_from_slice(&dex_swap_v2.data[8..])
+            .expect("a DEX swap_v2's data")
+            .args;
+        let mut accounts = crate::accounts::RouterSwapV2 {
+            trader,
+            integrator,
+            treasury,
+            dex_program: bordrless_swap::ID,
+            system_program: anchor_lang::system_program::ID,
+            event_authority: event_authority(),
+            program: crate::ID,
+        }
+        .to_account_metas(None);
+        accounts.extend(dex_swap_v2.accounts.iter().cloned());
+        Instruction {
+            program_id: crate::ID,
+            accounts,
+            data: crate::instruction::SwapV2 {
+                args: RouterSwapArgs {
+                    swap: args,
+                    fee_bps,
+                    min_quote_after_fee,
+                },
+            }
+            .data(),
+        }
+    }
+
     /// This program's event authority.
     pub fn event_authority() -> Pubkey {
         Pubkey::find_program_address(&[b"__event_authority"], &crate::ID).0
@@ -370,6 +587,8 @@ pub enum RouterError {
     Slippage,
     #[msg("a program account is not the expected program")]
     WrongProgram,
+    #[msg("a fee recipient would be left below the rent-exempt minimum")]
+    RecipientBelowRent,
 }
 
 #[cfg(test)]

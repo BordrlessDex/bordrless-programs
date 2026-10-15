@@ -203,4 +203,9 @@ pub enum CompanionError {
     WalletPayoutTarget,
     #[msg("this script may not pay wallets: its launcher did not allow wallet payouts before the launch (allow_wallet_payouts)")]
     WalletPayoutsOff,
+    // ---- Native SOL (phase 3). Appended, so every code above keeps its number. ----
+    #[msg("the DEX must be paused for this")]
+    DexNotPaused,
+    #[msg("the companion's launch is not native yet: migrate the launch (and its pool) first")]
+    LaunchNotNative,
 }

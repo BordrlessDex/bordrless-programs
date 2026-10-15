@@ -6,10 +6,10 @@
 //! `creator_fees_claimed`, `author_fees_paid`, the partner's `paid_total` and `quote_cut_accrued`
 //! keep their meaning and their place: what was taken, and what was paid.
 //!
-//! New launches are native when the admin turned it on (`set_native_launches`); a companion coin
-//! (its creator the companion's `["creator", mint]`) stays bridged until the companion is paid in
-//! SOL. `migrate_launch_to_native` turns a live launch native: only the admin, only while the DEX is
-//! paused, only once its pool is native (`migrate_pool_to_native`), never a companion coin; its
+//! New launches are native when the admin turned it on (`set_native_launches`), a companion coin's
+//! too (its companion turns native at its launch). `migrate_launch_to_native` turns a live launch
+//! native: only the admin, only while the DEX is paused, only once its pool is native
+//! (`migrate_pool_to_native`; a companion coin's companion follows it); its
 //! creator-fee holding is unwrapped onto the launch account and its kit's reward vault onto the kit
 //! config (the kit's accounting untouched). `revert_launch_to_bridged` undoes it (revert the launch
 //! before its pool). Both are idempotent. The old claims keep paying whatever sits in the holding.
@@ -119,15 +119,12 @@ fn bridge<'info>(a: &LaunchForm<'info>) -> BridgeSol<'info> {
     }
 }
 
-/// The checks both share: the DEX paused, the launch not a companion coin.
+/// The checks both share: the DEX paused. A companion coin's companion migrates right after its
+/// launch (`migrate_companion_to_native`) and reverts right before it.
 fn check_form(a: &LaunchForm) -> Result<()> {
     let data = a.dex_config.try_borrow_data()?;
     let dex = bordrless_swap::state::Config::try_deserialize(&mut &data[..])?;
     require!(dex.paused, LaunchError::DexNotPaused);
-    require!(
-        !is_companion_creator(&a.launch.creator, &a.launch.mint),
-        LaunchError::CompanionLaunch
-    );
     Ok(())
 }
 

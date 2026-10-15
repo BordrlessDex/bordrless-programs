@@ -40,7 +40,7 @@ use crate::error::CompanionError;
 use crate::events::*;
 use crate::instructions::steps::{
     available, balance, buy_fee_bound, creator_buy, creator_sell, ensure_holding, find, pay_sol,
-    read,
+    read, sol_held,
 };
 use crate::instructions::CreatorSeeds;
 use crate::invoke::invoke_built;
@@ -360,7 +360,7 @@ pub fn process_snowball_step<'info>(ctx: Context<'info, SnowballStep<'info>>) ->
         Decision::Follow => return follow(ctx, reference, spot, now),
     };
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
 
     match side {
         Side::Buy => {
@@ -381,7 +381,7 @@ pub fn process_snowball_step<'info>(ctx: Context<'info, SnowballStep<'info>>) ->
             require!(min_out > 0, CompanionError::NoQuote);
             ensure_holding(&all, ctx.accounts.cranker.key(), mint, creator)?;
             let before = balance(&all, &mint, &creator)?;
-            let buy = creator_buy(&all, launch, creator, spend, min_out)?;
+            let buy = creator_buy(&all, launch, creator, spend, min_out, seeds.native)?;
             invoke_built(&buy, &all, &[&seeds.seeds()])?;
             let bought = balance(&all, &mint, &creator)?
                 .checked_sub(before)
@@ -431,10 +431,10 @@ pub fn process_snowball_step<'info>(ctx: Context<'info, SnowballStep<'info>>) ->
             let net = bps_of(p.sell_gross, BPS.saturating_sub(sell_fee_bound(launch)));
             let min_out = bps_of(net, BPS - BUYBACK_SLIPPAGE_BPS);
             require!(min_out > 0, CompanionError::NoQuote);
-            let before = balance(&all, &BRIDGED_SOL_MINT, &creator)?;
-            let sell = creator_sell(&all, launch, creator, tokens, min_out)?;
+            let before = sol_held(&all, &seeds, &creator)?;
+            let sell = creator_sell(&all, launch, creator, tokens, min_out, seeds.native)?;
             invoke_built(&sell, &all, &[&seeds.seeds()])?;
-            let got = balance(&all, &BRIDGED_SOL_MINT, &creator)?
+            let got = sol_held(&all, &seeds, &creator)?
                 .checked_sub(before)
                 .ok_or(CompanionError::MathOverflow)?;
             let bounty = bps_of(got, u64::from(c.bounty_bps));

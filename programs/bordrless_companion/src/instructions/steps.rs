@@ -162,9 +162,20 @@ pub(crate) fn creator_buy(
     creator: Pubkey,
     amount_in: u64,
     min_out: u64,
+    native: bool,
 ) -> Result<Instruction> {
     let keys = launch_client::LaunchKeys::of(launch);
     let Some(hook) = launch.custom_hook else {
+        if native {
+            return Ok(creator_swap_v2(
+                &keys,
+                creator,
+                1,
+                amount_in,
+                min_out,
+                launch_client::base_hook_slice(&keys.mint, &keys.quote_mint, keys.modules),
+            ));
+        }
         return Ok(launch_client::swap(
             &keys, creator, creator, 1, amount_in, min_out,
         ));
@@ -177,15 +188,31 @@ pub(crate) fn creator_buy(
         destination_owner: creator,
     };
     let extras = custom_extras(available, &hook, &launch.mint, &op)?;
+    let slice = launch_client::custom_hook_slice(hook, extras);
+    if native {
+        return Ok(creator_swap_v2(
+            &keys, creator, 1, amount_in, min_out, slice,
+        ));
+    }
     Ok(launch_client::swap_with_base_slice(
-        &keys,
-        creator,
-        creator,
-        1,
-        amount_in,
-        min_out,
-        launch_client::custom_hook_slice(hook, extras),
+        &keys, creator, creator, 1, amount_in, min_out, slice,
     ))
+}
+
+/// A native companion's trade: the DEX `swap_v2`, the creator address the trader and the
+/// recipient, paying a buy and taking a sell's SOL as its own lamports. No bridge accounts: a
+/// native launch's cuts are lamports.
+fn creator_swap_v2(
+    keys: &launch_client::LaunchKeys,
+    creator: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_out: u64,
+    base_slice: Vec<AccountMeta>,
+) -> Instruction {
+    launch_client::swap_v2_with_bridge(
+        keys, creator, creator, direction, amount_in, min_out, base_slice, false,
+    )
 }
 
 /// A sell on the launch's pool by the creator address, the SOL delivered to it: the launchpad
@@ -197,9 +224,20 @@ pub(crate) fn creator_sell(
     creator: Pubkey,
     amount_in: u64,
     min_out: u64,
+    native: bool,
 ) -> Result<Instruction> {
     let keys = launch_client::LaunchKeys::of(launch);
     let Some(hook) = launch.custom_hook else {
+        if native {
+            return Ok(creator_swap_v2(
+                &keys,
+                creator,
+                0,
+                amount_in,
+                min_out,
+                launch_client::base_hook_slice(&keys.mint, &keys.quote_mint, keys.modules),
+            ));
+        }
         return Ok(launch_client::swap(
             &keys, creator, creator, 0, amount_in, min_out,
         ));
@@ -212,14 +250,14 @@ pub(crate) fn creator_sell(
         destination_owner: launch.pool,
     };
     let extras = custom_extras(available, &hook, &launch.mint, &op)?;
+    let slice = launch_client::custom_hook_slice(hook, extras);
+    if native {
+        return Ok(creator_swap_v2(
+            &keys, creator, 0, amount_in, min_out, slice,
+        ));
+    }
     Ok(launch_client::swap_with_base_slice(
-        &keys,
-        creator,
-        creator,
-        0,
-        amount_in,
-        min_out,
-        launch_client::custom_hook_slice(hook, extras),
+        &keys, creator, creator, 0, amount_in, min_out, slice,
     ))
 }
 
@@ -308,11 +346,14 @@ pub(crate) fn pay_sol<'info>(
     if lamports == 0 {
         return Ok(());
     }
-    invoke_built(
-        &bordrless_bridge::client::unwrap_sol(creator, lamports),
-        available,
-        &[&seeds.seeds()],
-    )?;
+    // A native companion's SOL is already the creator address's lamports.
+    if !seeds.native {
+        invoke_built(
+            &bordrless_bridge::client::unwrap_sol(creator, lamports),
+            available,
+            &[&seeds.seeds()],
+        )?;
+    }
     let from = find(available, &creator)?.clone();
     let system = find(available, &system_program::ID)?.clone();
     system_program::transfer(
@@ -326,6 +367,38 @@ pub(crate) fn pay_sol<'info>(
         ),
         lamports,
     )
+}
+
+/// The SOL the creator holds: its bridged SOL, or for a native companion its lamports above the
+/// rent-exempt minimum of an account with no data (what every pot and bucket is counted against).
+pub(crate) fn sol_held(
+    available: &[AccountInfo],
+    seeds: &CreatorSeeds,
+    creator: &Pubkey,
+) -> Result<u64> {
+    if seeds.native {
+        let info = find(available, creator)?;
+        return Ok(info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(0)));
+    }
+    balance(available, &BRIDGED_SOL_MINT, creator)
+}
+
+/// The creator fees the launch holds unclaimed: its bridged-SOL holding's, or for a native
+/// companion (whose launch is native) the launch's lamports above its rent-exempt minimum.
+pub(crate) fn fees_waiting(
+    available: &[AccountInfo],
+    seeds: &CreatorSeeds,
+    launch: &Pubkey,
+) -> Result<u64> {
+    if seeds.native {
+        let info = find(available, launch)?;
+        return Ok(info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(info.data_len())));
+    }
+    balance(available, &BRIDGED_SOL_MINT, launch)
 }
 
 pub(crate) fn available<'info>(
@@ -373,7 +446,7 @@ pub fn process_dev_buy<'info>(
         CompanionError::DevBuyWindowClosed
     );
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.key(),
@@ -386,13 +459,23 @@ pub fn process_dev_buy<'info>(
     )?;
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     ensure_holding(&all, ctx.accounts.beneficiary.key(), mint, creator)?;
-    invoke_built(
-        &bordrless_bridge::client::wrap_sol(creator, lamports),
-        &all,
-        &[&seeds.seeds()],
-    )?;
+    // A native companion buys with the lamports as they are.
+    if !seeds.native {
+        invoke_built(
+            &bordrless_bridge::client::wrap_sol(creator, lamports),
+            &all,
+            &[&seeds.seeds()],
+        )?;
+    }
     let before = balance(&all, &mint, &creator)?;
-    let buy = creator_buy(&all, &ctx.accounts.launch, creator, lamports, min_out)?;
+    let buy = creator_buy(
+        &all,
+        &ctx.accounts.launch,
+        creator,
+        lamports,
+        min_out,
+        seeds.native,
+    )?;
     invoke_built(&buy, &all, &[&seeds.seeds()])?;
     let got = balance(&all, &mint, &creator)?
         .checked_sub(before)
@@ -481,7 +564,7 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let terms = if c.is_game() {
         Some(hook_terms(&all, &c.game_hook, &mint)?)
@@ -494,15 +577,17 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         None
     };
     let launch_key = launch_client::launch_address(&mint);
-    let before = balance(&all, &BRIDGED_SOL_MINT, &creator)?;
-    if balance(&all, &BRIDGED_SOL_MINT, &launch_key)? > 0 {
-        invoke_built(
-            &launch_client::claim_creator_fees(creator, mint, BRIDGED_SOL_MINT),
-            &all,
-            &[&seeds.seeds()],
-        )?;
+    let before = sol_held(&all, &seeds, &creator)?;
+    if fees_waiting(&all, &seeds, &launch_key)? > 0 {
+        // A native companion's launch pays its fees as lamports to the creator address.
+        let claim = if seeds.native {
+            launch_client::claim_creator_fees_sol(creator, mint, None, None)
+        } else {
+            launch_client::claim_creator_fees(creator, mint, BRIDGED_SOL_MINT)
+        };
+        invoke_built(&claim, &all, &[&seeds.seeds()])?;
     }
-    let holding = balance(&all, &BRIDGED_SOL_MINT, &creator)?;
+    let holding = sol_held(&all, &seeds, &creator)?;
     let set_aside = c.set_aside().ok_or(CompanionError::MathOverflow)?;
     let got = holding.saturating_sub(set_aside);
     require!(got > 0, CompanionError::NothingToDo);
@@ -881,7 +966,7 @@ pub fn process_buyback<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     );
     require!(c.pending_buyback > 0, CompanionError::NothingToDo);
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let launch = &ctx.accounts.launch;
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let pool_info = find(&all, &launch.pool)?;
@@ -941,7 +1026,7 @@ pub fn process_buyback<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     require!(min_out > 0, CompanionError::NoQuote);
     ensure_holding(&all, ctx.accounts.cranker.key(), mint, creator)?;
     let before = balance(&all, &mint, &creator)?;
-    let buy = creator_buy(&all, launch, creator, spend, min_out)?;
+    let buy = creator_buy(&all, launch, creator, spend, min_out, seeds.native)?;
     invoke_built(&buy, &all, &[&seeds.seeds()])?;
     let bought = balance(&all, &mint, &creator)?
         .checked_sub(before)
@@ -1012,14 +1097,16 @@ pub fn process_share<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
         CompanionError::NothingToDo
     );
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
-    let source = token_client::holding_address(&BRIDGED_SOL_MINT, &creator);
-    invoke_built(
-        &bordrless_kit::client::share(creator, mint, source, BRIDGED_SOL_MINT, amount),
-        &all,
-        &[&seeds.seeds()],
-    )?;
+    // A native companion shares its lamports with a native kit.
+    let ix = if seeds.native {
+        bordrless_kit::client::share_sol(creator, mint, amount)
+    } else {
+        let source = token_client::holding_address(&BRIDGED_SOL_MINT, &creator);
+        bordrless_kit::client::share(creator, mint, source, BRIDGED_SOL_MINT, amount)
+    };
+    invoke_built(&ix, &all, &[&seeds.seeds()])?;
     pay_sol(
         &all,
         &seeds,
@@ -1073,13 +1160,18 @@ pub fn process_withdraw<'info>(ctx: Context<'info, Withdraw<'info>>) -> Result<(
         .any(|a| a.key() == c.mint && a.is_signer);
     require!(c.launched || mint_signed, CompanionError::NotLaunched);
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let pending = c.pending_beneficiary;
-    let spare = ctx
-        .accounts
-        .creator
-        .lamports()
-        .saturating_sub(Rent::get()?.minimum_balance(0));
+    // A native companion has no spare SOL apart from its SOL: its lamports above the minimum are
+    // what its buckets count (the spare it had when it turned native went to the beneficiary's).
+    let spare = if seeds.native {
+        0
+    } else {
+        ctx.accounts
+            .creator
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(0))
+    };
     require!(pending > 0 || spare > 0, CompanionError::NothingToDo);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let beneficiary = ctx.accounts.beneficiary.to_account_info();
@@ -1152,7 +1244,7 @@ pub fn process_release<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     let vested = c.vested(now).saturating_sub(c.dev_released);
     require!(vested > 0, CompanionError::NothingToDo);
     let (mint, creator, beneficiary) = (c.mint, ctx.accounts.creator.key(), c.beneficiary);
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let kit = kit_config(&all, &ctx.accounts.launch)?;
     if let Some(k) = &kit {

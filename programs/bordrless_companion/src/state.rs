@@ -107,6 +107,82 @@ pub struct Companion {
     /// vault with the creator fee) this companion's fee claims have taken: what a claim takes
     /// beyond it, up to the whole claim, is the hook's and goes to the pot's bucket.
     pub quote_cut_claimed: QuoteCutClaimed,
+    // ---- Native SOL (phase 3), one byte past `quote_cut_claimed`: absent (bridged) in every
+    // companion made before, and in any companion until it is grown by its migration
+    // (`migrate_companion_to_native`) or by a native launch at creation. Kept out of `LEN`. ----
+    /// Whether the companion's SOL is lamports on its creator address (`crate::instructions::native`)
+    /// rather than bridged SOL in the creator's holding.
+    pub native_sol: NativeSol,
+}
+
+/// `Companion.native_sol`: one byte, stored only when the account has room for it (a companion is
+/// grown to `LEN + NATIVE_SOL_LEN` for it, after `quote_cut_claimed` is stored). Absent reads as
+/// bridged and writes nothing back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeSol {
+    pub on: bool,
+    pub stored: bool,
+}
+
+/// The bytes `NativeSol` takes when stored.
+pub const NATIVE_SOL_LEN: usize = 1;
+
+impl Space for NativeSol {
+    // Not counted in `Companion::LEN`: a companion is created without it and grown for it.
+    const INIT_SPACE: usize = 0;
+}
+
+impl AnchorSerialize for NativeSol {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        if self.stored {
+            writer.write_all(&[u8::from(self.on)])?;
+        }
+        Ok(())
+    }
+}
+
+impl AnchorDeserialize for NativeSol {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut buf = [0u8; 1];
+        match reader.read(&mut buf)? {
+            0 => Ok(Self::default()),
+            _ => Ok(Self {
+                on: buf[0] == 1,
+                stored: true,
+            }),
+        }
+    }
+}
+
+#[cfg(feature = "idl-build")]
+impl anchor_lang::IdlBuild for NativeSol {
+    fn create_type() -> Option<anchor_lang::idl::types::IdlTypeDef> {
+        use anchor_lang::idl::types::*;
+        Some(IdlTypeDef {
+            name: Self::get_full_path(),
+            docs: vec![
+                "A bool (1 byte); absent (read as false) in a companion not grown for it.".into(),
+            ],
+            serialization: IdlSerialization::default(),
+            repr: None,
+            generics: vec![],
+            ty: IdlTypeDefTy::Struct {
+                fields: Some(IdlDefinedFields::Named(vec![IdlField {
+                    name: "on".into(),
+                    docs: vec![],
+                    ty: IdlType::Bool,
+                }])),
+            },
+        })
+    }
+
+    fn insert_types(
+        types: &mut std::collections::BTreeMap<String, anchor_lang::idl::types::IdlTypeDef>,
+    ) {
+        if let Some(ty) = Self::create_type() {
+            types.insert(Self::get_full_path(), ty);
+        }
+    }
 }
 
 /// `Companion.quote_cut_claimed`: a `u64` on the wire, stored only when the account has room for
@@ -262,7 +338,54 @@ impl Companion {
         Ok(())
     }
 
-    /// Everything set aside in the creator's holding of bridged SOL.
+    /// Whether the companion's SOL is lamports on its creator address.
+    pub fn is_native(&self) -> bool {
+        self.native_sol.on
+    }
+
+    /// Grows the companion by [`NATIVE_SOL_LEN`] for `native_sol` (once `quote_cut_claimed` is
+    /// stored), `payer` paying the rent for the new byte; nothing when it is already stored.
+    pub fn grow_for_native<'info>(
+        &mut self,
+        info: &AccountInfo<'info>,
+        payer: &AccountInfo<'info>,
+        system_program: &AccountInfo<'info>,
+        payer_seeds: &[&[&[u8]]],
+    ) -> Result<()> {
+        if self.native_sol.stored {
+            return Ok(());
+        }
+        require!(
+            self.quote_cut_claimed.stored,
+            crate::error::CompanionError::MissingAccount
+        );
+        let len = Self::LEN + NATIVE_SOL_LEN;
+        let short = Rent::get()?
+            .minimum_balance(len)
+            .saturating_sub(info.lamports());
+        if short > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new_with_signer(
+                    system_program.key(),
+                    anchor_lang::system_program::Transfer {
+                        from: payer.clone(),
+                        to: info.clone(),
+                    },
+                    payer_seeds,
+                ),
+                short,
+            )?;
+        }
+        info.resize(len)?;
+        self.native_sol = NativeSol {
+            on: false,
+            stored: true,
+        };
+        Ok(())
+    }
+
+    /// Everything set aside in the creator's holding of bridged SOL (a native companion: in its
+    /// lamports above the rent-exempt minimum).
     pub fn set_aside(&self) -> Option<u64> {
         self.pending_buyback
             .checked_add(self.pending_holders)?
@@ -1220,6 +1343,7 @@ mod tests {
             pot_locked: 0,
             mode: MODE_CLASSIC,
             quote_cut_claimed: QuoteCutClaimed::default(),
+            native_sol: NativeSol::default(),
         }
     }
 

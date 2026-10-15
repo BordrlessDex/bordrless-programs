@@ -176,14 +176,35 @@ struct Held {
 }
 
 impl Held {
-    fn of(all: &[AccountInfo], creator: &AccountInfo, mint: Option<&Pubkey>) -> Result<Self> {
+    /// A native companion's SOL is its creator's lamports above the minimum of an account with no
+    /// data; its `lamports` then counts only up to that minimum, so the checks that its SOL and
+    /// its lamports never drop still hold a script to the same custody: it may spend the pot (by
+    /// `spent`) and never the creator address's own rent.
+    fn of(
+        all: &[AccountInfo],
+        creator: &AccountInfo,
+        mint: Option<&Pubkey>,
+        native: bool,
+    ) -> Result<Self> {
+        let (sol, lamports) = if native {
+            let rent0 = Rent::get()?.minimum_balance(0);
+            (
+                creator.lamports().saturating_sub(rent0),
+                creator.lamports().min(rent0),
+            )
+        } else {
+            (
+                balance(all, &BRIDGED_SOL_MINT, creator.key)?,
+                creator.lamports(),
+            )
+        };
         Ok(Self {
-            sol: balance(all, &BRIDGED_SOL_MINT, creator.key)?,
+            sol,
             tokens: match mint {
                 Some(mint) => balance(all, mint, creator.key)?,
                 None => 0,
             },
-            lamports: creator.lamports(),
+            lamports,
         })
     }
 }
@@ -365,7 +386,7 @@ fn setup_script<'info>(
         .map_or(Pubkey::default(), |a| a.author);
     let now = Clock::get()?.unix_timestamp;
     let mint = *s.mint.key;
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let all = available(named, remaining);
     // The script's state, made by the companion: the payer's signature never leaves this
     // instruction.
@@ -382,7 +403,7 @@ fn setup_script<'info>(
     } else {
         (s.system.clone(), false, false)
     };
-    let before = Held::of(&all, &s.creator, None)?;
+    let before = Held::of(&all, &s.creator, None, s.companion.is_native())?;
 
     let mut data = Vec::with_capacity(8 + 32 + 4 + args.init_data.len());
     data.extend_from_slice(&COMPANION_INIT_DISCRIMINATOR);
@@ -402,7 +423,7 @@ fn setup_script<'info>(
     )?;
 
     // Nothing is set aside before the launch: the init may spend none of it.
-    let after = Held::of(&all, &s.creator, None)?;
+    let after = Held::of(&all, &s.creator, None, s.companion.is_native())?;
     require!(after.sol >= before.sol, CompanionError::ScriptOverspent);
     require!(
         after.lamports >= before.lamports,
@@ -589,14 +610,14 @@ pub fn process_script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Res
         &ctx.accounts.script_programdata,
     )?;
     let mint = c.mint;
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let creator = ctx.accounts.creator.to_account_info();
     let cranker = ctx.accounts.cranker.key();
     let launch = ctx.accounts.launch.to_account_info();
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     // The creator's token holding: what the script buys lands there.
     ensure_holding(&all, cranker, mint, *creator.key)?;
-    let before = Held::of(&all, &creator, Some(&mint))?;
+    let before = Held::of(&all, &creator, Some(&mint), seeds.native)?;
     let claimed = fees_claimed(&launch)?;
     let pot_before = c.pending_pot;
 
@@ -625,7 +646,7 @@ pub fn process_script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Res
     let answer = read_answer(&s.program)?;
 
     // What the script did, against what it may do.
-    let after = Held::of(&all, &creator, Some(&mint))?;
+    let after = Held::of(&all, &creator, Some(&mint), seeds.native)?;
     let c = &ctx.accounts.companion;
     let spent = before.sol.saturating_sub(after.sol);
     require!(spent <= c.pending_pot, CompanionError::ScriptOverspent);

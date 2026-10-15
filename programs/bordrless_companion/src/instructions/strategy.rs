@@ -1266,12 +1266,14 @@ pub fn process_pay_strategy<'info>(
             total <= c.pot_locked && total <= c.pending_pot,
             CompanionError::MathOverflow
         );
-        let seeds = CreatorSeeds::new(mint, c.creator_bump);
-        crate::invoke::invoke_built(
-            &bordrless_bridge::client::unwrap_sol(creator, total),
-            &all,
-            &[&seeds.seeds()],
-        )?;
+        let seeds = CreatorSeeds::of(c);
+        if !seeds.native {
+            crate::invoke::invoke_built(
+                &bordrless_bridge::client::unwrap_sol(creator, total),
+                &all,
+                &[&seeds.seeds()],
+            )?;
+        }
         let from = ctx.accounts.creator.to_account_info();
         let send = |to: &AccountInfo<'info>, lamports: u64| -> Result<()> {
             system_program::transfer(

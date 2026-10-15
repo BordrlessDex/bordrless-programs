@@ -359,8 +359,8 @@ struct Plan<'info> {
     /// The partner's share of the creator fee and its account's bump, from a partner config
     /// (`docs/partner-fee.md`); none otherwise.
     partner: Option<(u16, u8)>,
-    /// A native launch (`crate::instructions::native`): native launches on, and not a companion
-    /// coin.
+    /// A native launch (`crate::instructions::native`): native launches on (a companion coin's
+    /// companion turns native with it, at its launch).
     native: bool,
 }
 
@@ -680,8 +680,7 @@ fn plan<'info>(
         custom,
         quote_cut,
         partner,
-        native: config.native_launches()
-            && !is_companion_creator(&ctx.accounts.creator.key(), &mint),
+        native: config.native_launches(),
     }))
 }
 

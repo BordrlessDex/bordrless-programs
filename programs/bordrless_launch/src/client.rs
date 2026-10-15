@@ -815,6 +815,31 @@ pub fn swap_v2_with_base_slice(
     min_amount_out: u64,
     base_slice: Vec<AccountMeta>,
 ) -> Instruction {
+    swap_v2_with_bridge(
+        keys,
+        trader,
+        recipient,
+        direction,
+        amount_in,
+        min_amount_out,
+        base_slice,
+        true,
+    )
+}
+
+/// [`swap_v2_with_base_slice`], the bridge's accounts passed only `with_bridge` (a native
+/// launch's cuts are lamports and need none; a program trading as a PDA can't wrap anyway).
+#[allow(clippy::too_many_arguments)]
+pub fn swap_v2_with_bridge(
+    keys: &LaunchKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+    base_slice: Vec<AccountMeta>,
+    with_bridge: bool,
+) -> Instruction {
     let buy = direction == 1;
     let (trader_base, trader_quote) = if buy {
         (
@@ -843,7 +868,7 @@ pub fn swap_v2_with_base_slice(
             trader_quote,
             hook_program: Some(crate::ID),
             base_mint_writable: keys.burns,
-            with_bridge: true,
+            with_bridge,
         },
         SwapArgs {
             direction,

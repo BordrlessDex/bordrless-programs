@@ -521,6 +521,7 @@ fn sample_companion() -> Companion {
             amount: 45_420_000_000,
             stored: true,
         },
+        native_sol: bordrless_companion::state::NativeSol::default(),
     }
 }
 

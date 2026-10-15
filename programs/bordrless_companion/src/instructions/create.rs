@@ -205,7 +205,7 @@ pub fn process_launch<'info>(
             .collect(),
         data: bordrless_launch::instruction::CreateLaunch { args }.data(),
     };
-    let seeds = CreatorSeeds::new(c.mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let mut available = remaining.to_vec();
     available.push(ctx.accounts.launch_program.to_account_info());
     available.push(ctx.accounts.creator.to_account_info());
@@ -240,6 +240,26 @@ pub fn process_launch<'info>(
     )
     .ok_or(CompanionError::NoQuote)?;
     let now = Clock::get()?.unix_timestamp;
+    // A launch made native (native launches on): the companion is native from here.
+    if launch.is_native() {
+        let system = remaining
+            .iter()
+            .find(|a| *a.key == anchor_lang::system_program::ID)
+            .ok_or(CompanionError::MissingAccount)?
+            .clone();
+        let creator_info = ctx.accounts.creator.to_account_info();
+        let spare = crate::instructions::native::native_at_launch(
+            &mut ctx.accounts.companion,
+            &creator_info,
+            &system,
+        )?;
+        emit_cpi!(crate::events::CompanionNativeSet {
+            companion: ctx.accounts.companion.key(),
+            native: true,
+            moved: 0,
+            spare,
+        });
+    }
     let c = &mut ctx.accounts.companion;
     c.launched = true;
     c.launched_at = now;

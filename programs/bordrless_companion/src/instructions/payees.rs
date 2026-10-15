@@ -234,11 +234,13 @@ pub(crate) fn pay_payees<'info>(
         };
     let paid: u64 = pays.iter().map(|(_, l)| *l).sum();
     if paid > 0 {
-        invoke_built(
-            &bordrless_bridge::client::unwrap_sol(creator, paid),
-            all,
-            &[&seeds.seeds()],
-        )?;
+        if !seeds.native {
+            invoke_built(
+                &bordrless_bridge::client::unwrap_sol(creator, paid),
+                all,
+                &[&seeds.seeds()],
+            )?;
+        }
         let from = find(all, &creator)?.clone();
         let system = find(all, &system_program::ID)?.clone();
         for (to, lamports) in &pays {
