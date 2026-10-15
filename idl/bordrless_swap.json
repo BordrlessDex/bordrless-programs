@@ -298,6 +298,188 @@
       "args": []
     },
     {
+      "name": "create_native_pool",
+      "docs": [
+        "Creates a native-SOL pool (quoted in bridged SOL by its mint and seeds, its quote held as",
+        "lamports on the pool account): as `create_pool`, with the quote deposit paid in SOL by the",
+        "payer (`crate::native`)."
+      ],
+      "discriminator": [
+        237,
+        223,
+        217,
+        142,
+        217,
+        5,
+        186,
+        244
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent and the creation fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Owns the deposit holdings and receives the LP."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_mint"
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              },
+              {
+                "kind": "arg",
+                "path": "args.lp_fee_bps"
+              },
+              {
+                "kind": "arg",
+                "path": "args.hook_program"
+              }
+            ]
+          }
+        },
+        {
+          "name": "lp_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "authority_base",
+          "writable": true
+        },
+        {
+          "name": "authority_quote",
+          "writable": true
+        },
+        {
+          "name": "authority_lp",
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_caller",
+          "docs": [
+            "The hook program's own hook authority, when the hook itself creates the pool: the initialize",
+            "callbacks are then skipped (a program cannot be re-entered through its own CPI)."
+          ],
+          "signer": true,
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "docs": [
+            "hook_program]` (checked in the handler); absent (this program's id) without."
+          ],
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreatePoolArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "create_pool",
       "docs": [
         "Creates a pool with its first deposit. A pool with virtual reserves (a curve) can only be",
@@ -609,6 +791,190 @@
       ]
     },
     {
+      "name": "migrate_pool_to_native",
+      "docs": [
+        "Admin: turns a pool quoted in bridged SOL into a native one (its quote unwrapped onto the",
+        "pool account, `buffer_target` of it kept in the quote vault). Idempotent."
+      ],
+      "discriminator": [
+        43,
+        213,
+        240,
+        177,
+        243,
+        239,
+        222,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "bridge_program",
+          "address": "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        },
+        {
+          "name": "bridge_config"
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true
+        },
+        {
+          "name": "bridged_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "bridge_event_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "buffer_target",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "rebalance_pool",
+      "docs": [
+        "Anyone: moves a native pool's buffer (bridged SOL in its quote vault) toward its target."
+      ],
+      "discriminator": [
+        51,
+        166,
+        130,
+        88,
+        225,
+        7,
+        165,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "bridge_program",
+          "address": "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        },
+        {
+          "name": "bridge_config"
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true
+        },
+        {
+          "name": "bridged_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "bridge_event_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "remove_liquidity",
       "docs": [
         "Burns LP and withdraws the proportional reserves."
@@ -715,6 +1081,190 @@
               "name": "RemoveLiquidityArgs"
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "revert_pool_to_bridged",
+      "docs": [
+        "Admin: turns a native pool back into a bridged one (its quote lamports wrapped into the",
+        "quote vault). Idempotent."
+      ],
+      "discriminator": [
+        21,
+        48,
+        98,
+        194,
+        84,
+        192,
+        15,
+        246
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "bridge_program",
+          "address": "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        },
+        {
+          "name": "bridge_config"
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true
+        },
+        {
+          "name": "bridged_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "bridge_event_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_buffer_target",
+      "docs": [
+        "Admin: sets a native pool's buffer target."
+      ],
+      "discriminator": [
+        223,
+        244,
+        64,
+        159,
+        67,
+        221,
+        54,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "bridge_program",
+          "address": "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        },
+        {
+          "name": "bridge_config"
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true
+        },
+        {
+          "name": "bridged_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "bridge_event_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "buffer_target",
+          "type": "u64"
         }
       ]
     },
@@ -885,6 +1435,136 @@
           }
         }
       ]
+    },
+    {
+      "name": "swap_v2",
+      "docs": [
+        "Swaps on a native-SOL pool with the quote as SOL: the trader's wallet pays a buy, the pool's",
+        "lamports pay a sell, and the quote-side cuts are paid in SOL (wrapped through the bridge for",
+        "a holding of bridged SOL)."
+      ],
+      "discriminator": [
+        43,
+        4,
+        237,
+        11,
+        26,
+        201,
+        30,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "trader",
+          "docs": [
+            "The trader: owner (or delegate) of the input holding; pays a buy's lamports."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "trader_base",
+          "docs": [
+            "(checked by the token program)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "trader_quote",
+          "docs": [
+            "lamports to."
+          ],
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "bridge_program",
+          "optional": true
+        },
+        {
+          "name": "bridge_config",
+          "optional": true
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "bridge_event_authority",
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "SwapArgs"
+            }
+          }
+        }
+      ]
     }
   ],
   "accounts": [
@@ -982,6 +1662,19 @@
       ]
     },
     {
+      "name": "PoolQuoteFormChanged",
+      "discriminator": [
+        1,
+        151,
+        7,
+        219,
+        96,
+        175,
+        155,
+        161
+      ]
+    },
+    {
       "name": "ProtocolFeesCollected",
       "discriminator": [
         165,
@@ -1005,6 +1698,19 @@
         135,
         96,
         109
+      ]
+    },
+    {
+      "name": "SwappedNative",
+      "discriminator": [
+        211,
+        64,
+        168,
+        225,
+        250,
+        98,
+        248,
+        180
       ]
     }
   ],
@@ -1203,6 +1909,46 @@
       "code": 6038,
       "name": "BadFill",
       "msg": "the hook answered a fill that is zero, above the input, or not for a buy on a curve"
+    },
+    {
+      "code": 6039,
+      "name": "NotNativePool",
+      "msg": "the pool is not a native-SOL pool"
+    },
+    {
+      "code": 6040,
+      "name": "BufferShort",
+      "msg": "the pool's bridged-SOL buffer cannot cover this; rebalance the pool first"
+    },
+    {
+      "code": 6041,
+      "name": "LamportsShort",
+      "msg": "the pool's lamports cannot cover this; rebalance the pool first"
+    },
+    {
+      "code": 6042,
+      "name": "RecipientBelowRent",
+      "msg": "a lamport recipient would be left below the rent-exempt minimum"
+    },
+    {
+      "code": 6043,
+      "name": "BridgeAccountsMissing",
+      "msg": "the bridge accounts are missing or wrong (needed to wrap or unwrap SOL)"
+    },
+    {
+      "code": 6044,
+      "name": "NativeInvariant",
+      "msg": "a native pool's lamports are below its rent-exempt minimum plus its books"
+    },
+    {
+      "code": 6045,
+      "name": "NativeBurn",
+      "msg": "the quote of a native pool cannot be burned"
+    },
+    {
+      "code": 6046,
+      "name": "WrongNativeAccount",
+      "msg": "the account cannot pay or receive SOL here"
     }
   ],
   "types": [
@@ -1843,6 +2589,31 @@
       }
     },
     {
+      "name": "NativeDeltaPaid",
+      "docs": [
+        "One cut a pool hook took from the native (lamports) side of a swap: the account it was paid to,",
+        "the lamports, and whether it was paid as bridged SOL (wrapped into a holding of bridged SOL, an",
+        "old-style destination) rather than as lamports."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "account",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "wrapped",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "Pool",
       "docs": [
         "A pool at `[\"pool\", base_mint, quote_mint, lp_fee_bps, hook_program or default]`."
@@ -2183,6 +2954,70 @@
       }
     },
     {
+      "name": "PoolQuoteFormChanged",
+      "docs": [
+        "A pool moved between bridged SOL in its quote vault and lamports on its account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 migrated to native, 1 reverted to bridged, 2 rebalanced, 3 buffer target set."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "native",
+            "type": "bool"
+          },
+          {
+            "name": "unwrapped",
+            "docs": [
+              "Lamports unwrapped from the buffer onto the pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "wrapped",
+            "docs": [
+              "Lamports wrapped from the pool into the buffer."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buffer_quote",
+            "type": "u64"
+          },
+          {
+            "name": "buffer_target",
+            "type": "u64"
+          },
+          {
+            "name": "quote_reserve",
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fees_quote",
+            "type": "u64"
+          },
+          {
+            "name": "pool_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "ProtocolFeesCollected",
       "docs": [
         "Protocol fees (always in the quote token) moved from a pool's quote vault to the fee",
@@ -2485,6 +3320,54 @@
           {
             "name": "ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwappedNative",
+      "docs": [
+        "The native details of a `swap_v2` (emitted right after its `Swapped`): the lamports that left",
+        "the trader (a buy) or the pool (a sell), each quote-side cut, and the pool's quote after it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "direction",
+            "type": "u8"
+          },
+          {
+            "name": "quote_lamports",
+            "docs": [
+              "A buy: the lamports the trader paid the pool. A sell: the lamports delivered."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "quote_deltas",
+            "docs": [
+              "The quote-side cuts (a buy's `deltas_in`, a sell's `deltas_out`)."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "NativeDeltaPaid"
+                }
+              }
+            }
+          },
+          {
+            "name": "buffer_quote",
+            "type": "u64"
+          },
+          {
+            "name": "pool_lamports",
+            "type": "u64"
           }
         ]
       }
