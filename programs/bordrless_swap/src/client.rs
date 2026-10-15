@@ -241,7 +241,9 @@ fn mint_meta(mint: Pubkey, writable: bool) -> AccountMeta {
 /// [`token_hook_slice`]; `args` gives their lengths), then the pool hook's extras.
 pub fn swap(keys: &SwapKeys, args: SwapArgs, extras: Vec<AccountMeta>) -> Instruction {
     let mut accounts = vec![
-        AccountMeta::new_readonly(keys.trader, true),
+        // Writable: on a native pool an old-path sell the buffer can't cover is paid to the
+        // trader as lamports.
+        AccountMeta::new(keys.trader, true),
         AccountMeta::new_readonly(config_address(), false),
         AccountMeta::new(keys.pool, false),
         mint_meta(keys.base_mint, keys.base_mint_writable),
@@ -280,7 +282,8 @@ pub struct LiquidityKeys {
 fn liquidity_accounts(keys: &LiquidityKeys) -> Vec<AccountMeta> {
     let lp_mint = lp_mint_address(&keys.pool);
     let mut accounts = vec![
-        AccountMeta::new_readonly(keys.provider, true),
+        // Writable: a native pool pays a withdrawal its buffer can't cover as lamports.
+        AccountMeta::new(keys.provider, true),
         AccountMeta::new_readonly(config_address(), false),
         AccountMeta::new(keys.pool, false),
         AccountMeta::new_readonly(keys.base_mint, false),

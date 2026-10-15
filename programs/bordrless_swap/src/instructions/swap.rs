@@ -42,7 +42,8 @@
 //! wallet paying a buy by a system transfer to the pool and the pool's lamports paying a sell, and
 //! the quote-side cuts paid as lamports (or wrapped, to a holding of bridged SOL). The old `swap`
 //! keeps working on a native pool, with the same accounts, through the pool's buffer: a buy's
-//! bridged SOL joins it, a sell is paid from it (`BufferShort` when it cannot cover the sell).
+//! bridged SOL joins it, a sell is paid from it as far as it goes and the rest as lamports to the
+//! trader (a writable signer; else `BufferShort`).
 
 use anchor_lang::prelude::*;
 use bordrless_core::{
@@ -348,6 +349,8 @@ pub fn run_swap<'info>(
     // has run (the runtime must see no direct move at a CPI that passes only one side of it).
     let mut pending: Vec<(&AccountInfo<'info>, u64)> = Vec::new();
     let quote_side = c.quote_vault.clone().unwrap_or_else(|| pool_info.clone());
+    // An old-path sell's delivery paid as lamports to the trader (see step 6).
+    let mut to_trader = 0u64;
 
     // The sides.
     let base_mint = c.base_mint.clone();
@@ -746,13 +749,22 @@ pub fn run_swap<'info>(
             .checked_sub(before)
             .ok_or(SwapError::MathOverflow)?
     } else {
-        // The old swap's sell on a native pool is paid from the buffer, which must cover it.
+        // The old swap's sell on a native pool is paid from the buffer as far as it goes (the
+        // wrapped cuts first, which only bridged SOL can pay); what it cannot cover of the
+        // delivery is paid as lamports to the trader (a writable signer: the owner of the input,
+        // or its delegate, which chose the delivery holding anyway), after the last CPI. So a
+        // rebalance that empties the buffer can no longer fail an old-path sell (audit N-5).
         let lamport_cuts: u64 = ncut_out.deltas.iter().filter(|d| !d.2).map(|d| d.1).sum();
         let buffer_before = if buffered && !buy {
-            let leaving = (cut_out_taken - lamport_cuts)
-                .checked_add(to_deliver)
-                .ok_or(SwapError::MathOverflow)?;
-            require!(pool_acc.buffer_quote() >= leaving, SwapError::BufferShort);
+            let wrapped_cuts = cut_out_taken - lamport_cuts;
+            let buffer = pool_acc.buffer_quote();
+            require!(buffer >= wrapped_cuts, SwapError::BufferShort);
+            let from_buffer = to_deliver.min(buffer - wrapped_cuts);
+            to_trader = to_deliver - from_buffer;
+            if to_trader > 0 {
+                require!(c.trader.is_writable, SwapError::BufferShort);
+                check_credit_rent(&c.trader, to_trader)?;
+            }
             Some(balance(&vault_out)?)
         } else {
             None
@@ -798,15 +810,17 @@ pub fn run_swap<'info>(
             )?;
         }
         let trader_out_before = balance(&trader_out)?;
-        token.transfer(
-            &pool_info,
-            &vault_out,
-            &trader_out,
-            &out_mint,
-            &out_side,
-            to_deliver,
-            &[&pool_seeds],
-        )?;
+        if to_deliver > to_trader {
+            token.transfer(
+                &pool_info,
+                &vault_out,
+                &trader_out,
+                &out_mint,
+                &out_side,
+                to_deliver - to_trader,
+                &[&pool_seeds],
+            )?;
+        }
         if let Some(before) = buffer_before {
             let left = before
                 .checked_sub(balance(&vault_out)?)
@@ -815,6 +829,7 @@ pub fn run_swap<'info>(
         }
         balance(&trader_out)?
             .checked_sub(trader_out_before)
+            .and_then(|got| got.checked_add(to_trader))
             .ok_or(SwapError::MathOverflow)?
     };
     // A fill holds the minimum to pro rata: what the trader accepted for the whole input, for the
@@ -871,6 +886,8 @@ pub fn run_swap<'info>(
     for (to, amount) in &pending {
         move_lamports(&pool_info, to, *amount)?;
     }
+    // An old-path sell's delivery the buffer could not cover.
+    move_lamports(&pool_info, &c.trader, to_trader)?;
     // A native pool's books against its lamports and buffer.
     check_native(&pool_info, pool_acc, c.quote_vault.as_ref())?;
 

@@ -612,8 +612,8 @@ fn swap_v2_sells_with_native_and_wrapped_cuts() {
 }
 
 /// The old `swap` on a native pool, with its very accounts: a buy's bridged SOL joins the buffer,
-/// a sell is paid from it, and a sell the buffer cannot cover fails with `BufferShort` and moves
-/// nothing.
+/// a sell is paid from it, and what the buffer cannot cover of a sell is paid as lamports to the
+/// trader (audit N-5).
 #[test]
 fn the_old_swap_trades_a_native_pool_through_its_buffer() {
     let mut m = M::new();
@@ -623,10 +623,16 @@ fn the_old_swap_trades_a_native_pool_through_its_buffer() {
     let t = m.trader.pubkey();
     assert_eq!(m.state(&pool).buffer_quote(), 0);
 
-    // A sell with an empty buffer.
+    // A sell with an empty buffer is paid as lamports to the trader (audit N-5).
     let sell = m.bal(&m.a, &t) / 10;
-    m.v1(&pool, 0, sell)
-        .expect_code(code(SwapError::BufferShort));
+    let (tl, tq0) = (m.lamports(&t), m.bal(&m.sol, &t));
+    let tx = m.v1(&pool, 0, sell);
+    tx.ok();
+    let ev0: Swapped = tx.event();
+    assert!(ev0.delivered_out > 0);
+    assert_eq!(m.lamports(&t), tl + ev0.delivered_out);
+    assert_eq!(m.bal(&m.sol, &t), tq0);
+    assert_eq!(m.state(&pool).buffer_quote(), 0);
     m.inv(&pool, 0);
 
     // A buy with bridged SOL fills it.
@@ -652,24 +658,6 @@ fn the_old_swap_trades_a_native_pool_through_its_buffer() {
     assert_eq!(m.lamports(&pool), pl);
     m.inv(&pool, 0);
 
-    // One it cannot cover fails, whatever the lamports hold.
-    let snapshot = (
-        m.state(&pool).buffer_quote(),
-        m.lamports(&pool),
-        m.bal(&m.a, &t),
-    );
-    m.v1(&pool, 0, m.bal(&m.a, &t))
-        .expect_code(code(SwapError::BufferShort));
-    assert_eq!(
-        snapshot,
-        (
-            m.state(&pool).buffer_quote(),
-            m.lamports(&pool),
-            m.bal(&m.a, &t)
-        )
-    );
-    m.inv(&pool, 0);
-
     // Old-style cuts to holdings of bridged SOL on a sell leave the buffer too.
     m.answer(pool, callback::AFTER_SWAP, &cut(&[(1_000_000, LEGACY)], 0));
     let (b0, legacy) = (
@@ -684,6 +672,23 @@ fn the_old_swap_trades_a_native_pool_through_its_buffer() {
         m.state(&pool).buffer_quote(),
         b0 - ev3.delivered_out - 1_000_000
     );
+    m.inv(&pool, 0);
+
+    // One it cannot cover: the buffer pays what it has in bridged SOL, the pool's lamports the
+    // rest, to the trader.
+    m.answer(pool, callback::AFTER_SWAP, &cut(&[], 0));
+    let (b1, tq, tl) = (
+        m.state(&pool).buffer_quote(),
+        m.bal(&m.sol, &t),
+        m.lamports(&t),
+    );
+    let tx = m.v1(&pool, 0, m.bal(&m.a, &t));
+    tx.ok();
+    let ev4: Swapped = tx.event();
+    assert!(ev4.delivered_out > b1);
+    assert_eq!(m.bal(&m.sol, &t), tq + b1);
+    assert_eq!(m.lamports(&t), tl + ev4.delivered_out - b1);
+    assert_eq!(m.state(&pool).buffer_quote(), 0);
     m.inv(&pool, 0);
 }
 
@@ -897,7 +902,7 @@ fn liquidity_on_a_native_pool_goes_through_the_buffer() {
     assert!(added > 0);
     m.inv(&pool, 0);
 
-    // Removing every LP the owner has asks for more quote than the buffer holds.
+    // The owner's LP.
     let lp = m.bal(&lp_mint, &o);
     let remove = |m: &M, lp_amount| {
         swap::remove_liquidity(
@@ -913,21 +918,24 @@ fn liquidity_on_a_native_pool_goes_through_the_buffer() {
             m.pool_extras(&pool, &o),
         )
     };
-    let ix = remove(&m, lp);
-    m.send(&[ix], &owner)
-        .expect_code(code(SwapError::BufferShort));
     // A twentieth of it fits.
     let q0 = m.bal(&m.sol, &o);
     let ix = remove(&m, lp / 20);
     m.send(&[ix], &owner).ok();
     assert!(m.bal(&m.sol, &o) > q0);
     m.inv(&pool, 0);
-    // A rebalance to a target above the whole quote lets the rest out.
-    m.set_target(&pool, u64::MAX).ok();
-    let cranker = m.w.env.funded(SOL);
-    m.rebalance(&pool, &cranker).ok();
+    // The rest asks for more quote than the buffer holds: the buffer pays what it has in bridged
+    // SOL, the pool's lamports the rest, to the provider (audit N-4).
+    let (b, q1, ol) = (
+        m.state(&pool).buffer_quote(),
+        m.bal(&m.sol, &o),
+        m.lamports(&o),
+    );
     let ix = remove(&m, m.bal(&lp_mint, &o));
     m.send(&[ix], &owner).ok();
+    assert_eq!(m.bal(&m.sol, &o), q1 + b);
+    assert!(m.lamports(&o) > ol);
+    assert_eq!(m.state(&pool).buffer_quote(), 0);
     m.inv(&pool, 0);
 }
 

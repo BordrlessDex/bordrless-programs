@@ -102,8 +102,20 @@ Reverse order per coin, each idempotent:
 ## What keeps working unchanged
 
 - The DEX's old `swap`, `add_liquidity`, `remove_liquidity` and `collect_protocol_fees`, on bridged and
-  native pools alike (a native pool moves bridged SOL through its buffer; `BufferShort` when it can't
-  cover). On a native pool, quote-side cuts may name lamport destinations, which the pool pays.
+  native pools alike, with the same accounts. On a native pool they move bridged SOL through its
+  buffer, with these differences:
+  - an old-path **sell** or a **`remove_liquidity`** is paid from the buffer as far as it goes, and the
+    rest as **lamports to the signer's wallet** (the trader or the provider, which must be writable;
+    it is when it pays the fee). So a rebalance that empties the buffer never fails them. Integrators
+    that measure only the bridged-SOL holding see part of the proceeds arrive as SOL instead; the
+    `Swapped` event's `delivered_out` counts both.
+  - an old-path **buy** whose hook names a lamport destination (a native launch's creator and holder
+    fees) pays it from the pool's lamports. On a fresh native launch pool that has no lamport quote
+    yet, it fails with `LamportsShort` until a `swap_v2` trade gives the pool some.
+  - `collect_protocol_fees` (bridged SOL) still needs the buffer to cover it (`BufferShort`); use
+    `collect_protocol_fees_sol`.
+
+  Integrators should move to `swap_v2` before the window.
 - The launchpad's old claims (they pay whatever sits in the old holding), and the kit's `claim` and
   `share` on bridged kits.
 - The router's old `swap`.

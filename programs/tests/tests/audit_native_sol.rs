@@ -7,7 +7,6 @@
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::solana_program::instruction::Instruction;
 use bordrless_hook::{pool_flags, Delta, ExtraAccount, HookReturn};
-use bordrless_kit::error::KitError;
 use bordrless_kit::state::KitConfig;
 use bordrless_launch::client as launch;
 use bordrless_launch::error::LaunchError;
@@ -592,7 +591,6 @@ fn ruled_out_seeded_walk_conserves_every_lamport_on_a_native_pool() {
     m.inv2(&pool, donated, vault_donated);
     let sol_vault = Pubkey::find_program_address(&[b"sol-vault"], &bordrless_bridge::ID).0;
     // The owner pays the hook scripts' fees, so it stays out of the value.
-    let _ = owner;
     let mut keys = vec![
         pool,
         t,
@@ -647,6 +645,7 @@ fn ruled_out_seeded_walk_conserves_every_lamport_on_a_native_pool() {
         }
         let held = m.bal(&m.a, &t);
         let value = m.value(&keys);
+        let mut owner_gain = 0u128;
         let tx = match op {
             0..=2 => {
                 let amount = rng.range(1_000_000, 3 * SOL);
@@ -700,7 +699,12 @@ fn ruled_out_seeded_walk_conserves_every_lamport_on_a_native_pool() {
                     },
                     m.pool_extras(&pool, &o.pubkey()),
                 );
-                m.send(&[ix], &o)
+                // A withdrawal the buffer can't cover pays the owner lamports (N-4 fix): count
+                // what the owner gained (it is otherwise outside the value).
+                let before = m.lamports(&owner);
+                let tx = m.send(&[ix], &o);
+                owner_gain = u128::from(m.lamports(&owner) - before);
+                tx
             }
             11 => {
                 let c = cranker.insecure_clone();
@@ -766,7 +770,7 @@ fn ruled_out_seeded_walk_conserves_every_lamport_on_a_native_pool() {
         }
         m.inv2(&pool, donated, vault_donated);
         assert_eq!(
-            m.value(&keys),
+            m.value(&keys) + owner_gain,
             value,
             "value conserved at step {step} (op {op})"
         );
@@ -894,7 +898,7 @@ fn ruled_out_native_cuts_to_the_pool_vaults_trader_or_executables() {
 /// right before an old-path sell, which then fails with `BufferShort`. Integrators still on the old
 /// instruction can't sell reliably. No value moves (the books never change), so it is liveness only.
 #[test]
-fn finding_anyone_can_empty_the_buffer_before_an_old_path_sell() {
+fn fixed_emptying_the_buffer_no_longer_fails_an_old_path_sell() {
     let mut m = M::new();
     let pool = m.pool();
     m.silence(pool);
@@ -908,8 +912,14 @@ fn finding_anyone_can_empty_the_buffer_before_an_old_path_sell() {
     let griefer = m.w.env.funded(SOL);
     m.rebalance(&pool, &griefer).ok();
     assert_eq!(m.state(&pool).buffer_quote(), 0);
-    m.v1(&pool, 0, sell)
-        .expect_code(code(SwapError::BufferShort));
+    // Fixed (N-5): the old sell still works; what the buffer can't cover is paid as lamports to
+    // the trader, and the invariant stays exact.
+    let lamports = m.w.env.lamports(&t);
+    let e: bordrless_swap::events::Swapped = m.v1(&pool, 0, sell).event();
+    assert!(e.delivered_out > 0);
+    assert!(m.w.env.lamports(&t) > lamports);
+    assert_eq!(m.state(&pool).buffer_quote(), 0);
+    m.inv2(&pool, 0, 0);
     // The same sell through swap_v2 is fine.
     m.v2(&pool, 0, sell, &t).ok();
     m.inv2(&pool, 0, 0);
@@ -1243,7 +1253,7 @@ fn fixed_old_path_buyer_no_longer_shares_its_own_holder_fee() {
 /// through the old swap first, to refill the buffer, and selling back) gets it out. On mainnet this
 /// is every LP of a graduated launch pool or a hook-less pool.
 #[test]
-fn finding_an_lp_of_a_native_pool_cannot_withdraw_at_target_zero() {
+fn fixed_an_lp_of_a_native_pool_withdraws_at_target_zero() {
     use bordrless_swap::instructions::{AddLiquidityArgs, RemoveLiquidityArgs};
     let mut m = M::new();
     let pool = m.pool();
@@ -1284,8 +1294,11 @@ fn finding_an_lp_of_a_native_pool_cannot_withdraw_at_target_zero() {
         },
         m.pool_extras(&pool, &o),
     );
-    m.send(&[ix], &owner)
-        .expect_code(code(SwapError::BufferShort));
+    // Fixed (N-4): the withdrawal pays what the buffer lacks as lamports to the provider.
+    let lamports = m.w.env.lamports(&o);
+    m.send(&[ix], &owner).ok();
+    assert!(m.w.env.lamports(&o) > lamports + SOL);
+    assert_eq!(m.bal(&lp_mint, &o), lp0);
     m.inv2(&pool, 0, 0);
 }
 // ---------------------------------------------------------------------------------------------
