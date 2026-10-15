@@ -6545,6 +6545,19 @@
               "`reserved`: zero, classic, in every companion made before."
             ],
             "type": "u8"
+          },
+          {
+            "name": "quote_cut_claimed",
+            "docs": [
+              "How much of the launch's `quote_cut_accrued` (the hook's SOL cut, paid into the creator fee",
+              "vault with the creator fee) this companion's fee claims have taken: what a claim takes",
+              "beyond it, up to the whole claim, is the hook's and goes to the pot's bucket."
+            ],
+            "type": {
+              "defined": {
+                "name": "QuoteCutClaimed"
+              }
+            }
           }
         ]
       }
@@ -7335,6 +7348,17 @@
           {
             "name": "cranker",
             "type": "pubkey"
+          },
+          {
+            "name": "from_hook",
+            "docs": [
+              "Of `claimed` less the bounty, the part that came from the launch's hook SOL cut, credited",
+              "whole to the pot's bucket and already counted in that bucket's figure: the pot (`PotFunded`",
+              "follows for a game's, a Snowball's or a script's), else `to_buyback`, else `to_holders`",
+              "(`to_beneficiary` only for a split of the beneficiary alone). Appended 2026-10-15: absent",
+              "from events before (read it as 0)."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -8698,7 +8722,9 @@
               "([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of",
               "`creator_fees_accrued`), `reserved[12]` the bump of the hook's `[\"state\", mint]` and",
               "`reserved[13]` of the launchpad's `[\"quote-cut\", hook]` signer; zeros for every launch made",
-              "before (`docs/quote-cut.md`)."
+              "before (`docs/quote-cut.md`). `reserved[14..16]` are the partner's share of the creator fee",
+              "and `reserved[16]` the bump of the config's [`PartnerFee`], from the config",
+              "([`Launch::partner_share_bps`], `docs/partner-fee.md`); zeros for every launch made before."
             ],
             "type": {
               "array": [
@@ -9452,6 +9478,21 @@
               "The program's author (the default key: none)."
             ],
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteCutClaimed",
+      "docs": [
+        "A u64; absent (read as 0) in a companion account made before 2026-10-15."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
           }
         ]
       }

@@ -39,6 +39,12 @@ pub struct FeesClaimed {
     pub to_holders: u64,
     pub to_beneficiary: u64,
     pub cranker: Pubkey,
+    /// Of `claimed` less the bounty, the part that came from the launch's hook SOL cut, credited
+    /// whole to the pot's bucket and already counted in that bucket's figure: the pot (`PotFunded`
+    /// follows for a game's, a Snowball's or a script's), else `to_buyback`, else `to_holders`
+    /// (`to_beneficiary` only for a split of the beneficiary alone). Appended 2026-10-15: absent
+    /// from events before (read it as 0).
+    pub from_hook: u64,
 }
 
 #[event]

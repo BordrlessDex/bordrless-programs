@@ -100,6 +100,90 @@ pub struct Companion {
     /// `MODE_CLASSIC`, `MODE_SNOWBALL` or `MODE_SCRIPT` (2026-10-12), the last byte of what was
     /// `reserved`: zero, classic, in every companion made before.
     pub mode: u8,
+    // ---- v2 of the account (2026-10-15), the first bytes past what was `reserved`: the account
+    // grew by 8. A companion made before is 300 bytes and reads this as not stored; its first fee
+    // claim after the upgrade grows it ([`QuoteCutClaimed`]). ----
+    /// How much of the launch's `quote_cut_accrued` (the hook's SOL cut, paid into the creator fee
+    /// vault with the creator fee) this companion's fee claims have taken: what a claim takes
+    /// beyond it, up to the whole claim, is the hook's and goes to the pot's bucket.
+    pub quote_cut_claimed: QuoteCutClaimed,
+}
+
+/// `Companion.quote_cut_claimed`: a `u64` on the wire, stored only when the account has room for
+/// it. A companion made before the field (300 bytes) has no bytes for it: it reads as
+/// `stored: false` (amount 0) and writes nothing back, so every step keeps working on it unchanged
+/// until a fee claim grows the account ([`Companion::grow_for_quote_cut`]). One made since (its
+/// account created at the new size, zeroed) reads `stored: true` from the start. Whether the bytes
+/// exist is the marker: a pre-upgrade companion can never be mistaken for a new one at 0.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QuoteCutClaimed {
+    pub amount: u64,
+    pub stored: bool,
+}
+
+impl Space for QuoteCutClaimed {
+    const INIT_SPACE: usize = 8;
+}
+
+impl AnchorSerialize for QuoteCutClaimed {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        if self.stored {
+            writer.write_all(&self.amount.to_le_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+impl AnchorDeserialize for QuoteCutClaimed {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut buf = [0u8; 8];
+        let mut got = 0;
+        while got < buf.len() {
+            match reader.read(&mut buf[got..])? {
+                0 => break,
+                n => got += n,
+            }
+        }
+        match got {
+            0 => Ok(Self::default()),
+            8 => Ok(Self {
+                amount: u64::from_le_bytes(buf),
+                stored: true,
+            }),
+            _ => Err(std::io::ErrorKind::UnexpectedEof.into()),
+        }
+    }
+}
+
+#[cfg(feature = "idl-build")]
+impl anchor_lang::IdlBuild for QuoteCutClaimed {
+    fn create_type() -> Option<anchor_lang::idl::types::IdlTypeDef> {
+        use anchor_lang::idl::types::*;
+        Some(IdlTypeDef {
+            name: Self::get_full_path(),
+            docs: vec![
+                "A u64; absent (read as 0) in a companion account made before 2026-10-15.".into(),
+            ],
+            serialization: IdlSerialization::default(),
+            repr: None,
+            generics: vec![],
+            ty: IdlTypeDefTy::Struct {
+                fields: Some(IdlDefinedFields::Named(vec![IdlField {
+                    name: "amount".into(),
+                    docs: vec![],
+                    ty: IdlType::U64,
+                }])),
+            },
+        })
+    }
+
+    fn insert_types(
+        types: &mut std::collections::BTreeMap<String, anchor_lang::idl::types::IdlTypeDef>,
+    ) {
+        if let Some(ty) = Self::create_type() {
+            types.insert(Self::get_full_path(), ty);
+        }
+    }
 }
 
 impl Companion {
@@ -138,6 +222,44 @@ impl Companion {
     /// script's.
     pub fn has_own_pot(&self) -> bool {
         self.is_snowball() || self.is_script()
+    }
+
+    /// Grows a companion made before `quote_cut_claimed` (2026-10-15) to the current size, `payer`
+    /// paying the rent for the new bytes, and sets the field to everything the launch's hook cut
+    /// has taken so far (`accrued`): what claims before the upgrade took was split as it was then,
+    /// and only what the cut takes from now on goes to the pot's bucket. Nothing for one already
+    /// stored.
+    pub fn grow_for_quote_cut<'info>(
+        &mut self,
+        info: &AccountInfo<'info>,
+        payer: &AccountInfo<'info>,
+        system_program: &AccountInfo<'info>,
+        accrued: u64,
+    ) -> Result<()> {
+        if self.quote_cut_claimed.stored {
+            return Ok(());
+        }
+        let need = Rent::get()?.minimum_balance(Self::LEN);
+        let short = need.saturating_sub(info.lamports());
+        if short > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    system_program.key(),
+                    anchor_lang::system_program::Transfer {
+                        from: payer.clone(),
+                        to: info.clone(),
+                    },
+                ),
+                short,
+            )?;
+        }
+        // `version` is left alone: it already means something (`VERSION_WITH_PAYEES`).
+        info.resize(Self::LEN)?;
+        self.quote_cut_claimed = QuoteCutClaimed {
+            amount: accrued,
+            stored: true,
+        };
+        Ok(())
     }
 
     /// Everything set aside in the creator's holding of bridged SOL.
@@ -1097,19 +1219,79 @@ mod tests {
             game_kind: GameKind::Lottery,
             pot_locked: 0,
             mode: MODE_CLASSIC,
+            quote_cut_claimed: QuoteCutClaimed::default(),
         }
+    }
+
+    /// A companion's size before `quote_cut_claimed` (2026-10-15).
+    const V1_LEN: usize = 300;
+
+    #[test]
+    fn quote_cut_claimed_is_stored_only_where_the_account_has_room() {
+        let old = companion();
+        let mut data = Vec::new();
+        old.try_serialize(&mut data).unwrap();
+        assert_eq!(data.len(), V1_LEN);
+        // A 300-byte account: read as not stored, written back as 300 bytes.
+        let back = Companion::try_deserialize(&mut &data[..]).unwrap();
+        assert_eq!(back.quote_cut_claimed, QuoteCutClaimed::default());
+        let mut again = Vec::new();
+        back.try_serialize(&mut again).unwrap();
+        assert_eq!(again, data);
+        // Into a 300-byte account: fits (any step writing an old companion back).
+        let mut account = vec![0u8; V1_LEN];
+        let mut writer: &mut [u8] = &mut account;
+        back.try_serialize(&mut writer).unwrap();
+        assert_eq!(account, data);
+        // A new account (zeroed at the current size): stored, at 0.
+        let mut fresh = data.clone();
+        fresh.resize(Companion::LEN, 0);
+        let new = Companion::try_deserialize(&mut &fresh[..]).unwrap();
+        assert_eq!(
+            new.quote_cut_claimed,
+            QuoteCutClaimed {
+                amount: 0,
+                stored: true
+            }
+        );
+        // Stored: the last 8 bytes, little-endian, after everything before unchanged.
+        let c = Companion {
+            quote_cut_claimed: QuoteCutClaimed {
+                amount: 0x0102_0304_0506_0708,
+                stored: true,
+            },
+            ..old.clone()
+        };
+        let mut data2 = Vec::new();
+        c.try_serialize(&mut data2).unwrap();
+        assert_eq!(data2.len(), Companion::LEN);
+        assert_eq!(data2[..V1_LEN], data[..]);
+        assert_eq!(&data2[V1_LEN..], &0x0102_0304_0506_0708u64.to_le_bytes());
+        assert_eq!(
+            Companion::try_deserialize(&mut &data2[..])
+                .unwrap()
+                .quote_cut_claimed,
+            c.quote_cut_claimed
+        );
+        // A stored one does not fit the old size: it is grown before it is written.
+        let mut small = vec![0u8; V1_LEN];
+        let mut writer: &mut [u8] = &mut small;
+        assert!(c.try_serialize(&mut writer).is_err());
+        // A torn tail is refused.
+        assert!(Companion::try_deserialize(&mut &data2[..V1_LEN + 3]).is_err());
     }
 
     #[test]
     fn a_v1_companion_reads_as_one_without_a_game() {
-        assert_eq!(Companion::INIT_SPACE, V1_INIT_SPACE);
-        assert_eq!(Companion::LEN, 300);
+        assert_eq!(Companion::INIT_SPACE, V1_INIT_SPACE + 8);
+        assert_eq!(Companion::LEN, 308);
+        // The helper's companion is one made before `quote_cut_claimed`: its 300 bytes.
         let c = companion();
         let mut data = Vec::new();
         c.try_serialize(&mut data).unwrap();
-        assert_eq!(data.len(), Companion::LEN);
+        assert_eq!(data.len(), V1_LEN);
         // What v1 wrote as `reserved` is all zeros: v2 reads no game, no pot.
-        assert_eq!(&data[Companion::LEN - 64..], &[0u8; 64][..]);
+        assert_eq!(&data[V1_LEN - 64..], &[0u8; 64][..]);
         let back = Companion::try_deserialize(&mut &data[..]).unwrap();
         assert!(!back.is_game());
         assert_eq!((back.pot_bps, back.pending_pot, back.round_secs), (0, 0, 0));
@@ -1142,9 +1324,9 @@ mod tests {
         };
         let mut data2 = Vec::new();
         g.try_serialize(&mut data2).unwrap();
-        assert_eq!(data2.len(), Companion::LEN);
-        assert_eq!(data[..Companion::LEN - 64], data2[..Companion::LEN - 64]);
-        let tail = &data2[Companion::LEN - 64..];
+        assert_eq!(data2.len(), V1_LEN);
+        assert_eq!(data[..V1_LEN - 64], data2[..V1_LEN - 64]);
+        let tail = &data2[V1_LEN - 64..];
         assert_eq!(&tail[..32], hook.as_ref());
         assert_eq!(&tail[32..34], &7_000u16.to_le_bytes());
         assert_eq!(&tail[34..42], &u64::MAX.to_le_bytes());
@@ -1160,9 +1342,9 @@ mod tests {
         };
         let mut data3 = Vec::new();
         k.try_serialize(&mut data3).unwrap();
-        assert_eq!(data3.len(), Companion::LEN);
-        assert_eq!(data2[..Companion::LEN - 10], data3[..Companion::LEN - 10]);
-        let tail = &data3[Companion::LEN - 10..];
+        assert_eq!(data3.len(), V1_LEN);
+        assert_eq!(data2[..V1_LEN - 10], data3[..V1_LEN - 10]);
+        let tail = &data3[V1_LEN - 10..];
         assert_eq!(tail[0], 2);
         assert_eq!(&tail[1..9], &(u64::MAX - 1).to_le_bytes());
         assert_eq!(tail[9], 0);
@@ -1221,7 +1403,7 @@ mod tests {
         assert!(c.is_script() && !c.is_classic() && !c.is_snowball() && c.has_own_pot());
         c.mode = MODE_SNOWBALL;
         assert!(c.is_snowball() && !c.is_script() && c.has_own_pot());
-        // The mode is the companion's last byte.
+        // The mode is the last byte of a companion made before `quote_cut_claimed`.
         let mut data = Vec::new();
         Companion {
             mode: MODE_SCRIPT,
@@ -1229,8 +1411,8 @@ mod tests {
         }
         .try_serialize(&mut data)
         .unwrap();
-        assert_eq!(data.len(), Companion::LEN);
-        assert_eq!(data[Companion::LEN - 1], MODE_SCRIPT);
+        assert_eq!(data.len(), V1_LEN);
+        assert_eq!(data[V1_LEN - 1], MODE_SCRIPT);
     }
 
     #[test]
