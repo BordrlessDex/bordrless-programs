@@ -30,7 +30,19 @@ pub const FEE_MODEL_SHARE: u8 = 1;
 pub const LAUNCHPAD_ID: anchor_lang::prelude::Pubkey =
     anchor_lang::prelude::Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
 /// Discriminator length.
-pub const DISCRIMINATOR_LEN: usize = 8;
+pub const DISCRIMINATOR_LEN: usize = 8;/// The launchpad's launch seed (`bordrless_launch::constants::LAUNCH_SEED`; the test suite checks
+/// it): `revert_pool_to_bridged` reads a launch pool's launch.
+pub const LAUNCH_SEED: &[u8] = b"launch";
+/// Byte offset of `bordrless_launch::state::Launch::custom_hook`'s option tag in a launch account.
+/// The fields after it are fixed: the hook (32 bytes when some), `custom_hook_flags` (2),
+/// `author_share_bps` (2), `author_fees_paid` (8), then `reserved`, whose byte 17 is the native
+/// flag. The test suite checks this against `Launch::is_native` for both tags.
+pub const LAUNCH_CUSTOM_HOOK_OFFSET: usize = 498;
+/// The one bridged-SOL pool that must never go native (its hook, `AwAvBe…`, is a third party's;
+/// audit N-9). The hook rule of `migrate_pool_to_native` already refuses it; named as well.
+pub const EXCLUDED_POOL: anchor_lang::prelude::Pubkey =
+    anchor_lang::prelude::Pubkey::from_str_const("4PvPnTByfrnhA1nNmsaou7GrdQsqJNrkinqLHp2JHFX7");
+
 /// Name of every LP mint.
 pub const LP_NAME: &str = "Bordrless LP";
 /// Symbol of every LP mint.

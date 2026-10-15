@@ -103,6 +103,12 @@ pub enum SwapError {
     NotPaused,
     #[msg("buffer_all needs a later rebalance_pool of the same pool in the same transaction")]
     NoRebalanceAfter,
+    #[msg("only a hook-less or launchpad pool may go native")]
+    ForeignHookPool,
+    #[msg("this pool is excluded from native SOL")]
+    ExcludedPool,
+    #[msg("revert the pool's launch to bridged first (pass the launch)")]
+    LaunchStillNative,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.

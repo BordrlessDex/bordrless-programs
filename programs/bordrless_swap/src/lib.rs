@@ -129,9 +129,14 @@ pub mod bordrless_swap {
     }
 
     /// Admin: turns a pool quoted in bridged SOL into a native one (its quote unwrapped onto the
-    /// pool account, `buffer_target` of it kept in the quote vault). Idempotent.
-    pub fn migrate_pool_to_native(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
-        pool::process_migrate_pool_to_native(ctx, buffer_target)
+    /// pool account, `buffer_target` of it kept in the quote vault). Idempotent. A pool whose hook
+    /// is neither absent nor the launchpad needs `allow_foreign_hook`; the excluded pool never.
+    pub fn migrate_pool_to_native(
+        ctx: Context<QuoteForm>,
+        buffer_target: u64,
+        allow_foreign_hook: bool,
+    ) -> Result<()> {
+        pool::process_migrate_pool_to_native(ctx, buffer_target, allow_foreign_hook)
     }
 
     /// Admin: turns a native pool back into a bridged one (its quote lamports wrapped into the

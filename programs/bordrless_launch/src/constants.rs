@@ -166,8 +166,19 @@ pub mod ceilings {
 /// between bridged SOL and lamports.
 pub const BRIDGE_ID: Pubkey = bordrless_kit::constants::BRIDGE_ID;
 
+/// The companion's seed (`bordrless_companion::constants::COMPANION_SEED`) and the byte past
+/// `Companion::LEN` that holds its native flag when the account has room for it
+/// (`bordrless_companion::state::NativeSol`); the test suite checks both.
+pub const COMPANION_SEED: &[u8] = b"companion";
+pub const COMPANION_NATIVE_OFFSET: usize = 308;
+/// hook_vault's vault seed and the offset of `Vault.reserved[0]`, its native flag (checked by the
+/// test suite).
+pub const HOOK_VAULT_SEED: &[u8] = b"vault";
+pub const HOOK_VAULT_NATIVE_OFFSET: usize = 638;
+
 /// Whether `creator` is the companion creator address of `mint` (`PDA(["creator", mint],
-/// COMPANION_ID)`): a companion coin, which stays bridged until the companion pays in SOL.
+/// COMPANION_ID)`): a companion coin. `revert_launch_to_bridged` uses it to know a launch has a
+/// companion that must revert first.
 pub fn is_companion_creator(creator: &Pubkey, mint: &Pubkey) -> bool {
     Pubkey::find_program_address(
         &[

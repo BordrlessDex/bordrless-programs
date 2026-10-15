@@ -129,6 +129,12 @@ pub enum LaunchError {
     PoolNotNative,
     #[msg("a recipient would be left below the rent-exempt minimum")]
     RecipientBelowRent,
+    /// Unused since phase 3 (companion coins are native from launch); kept so the codes after it
+    /// stay put.
     #[msg("a companion coin stays on bridged SOL until its companion is paid in SOL")]
     CompanionLaunch,
+    #[msg("revert the coin's companion to bridged first (pass the companion)")]
+    CompanionStillNative,
+    #[msg("revert the coin's hook vault to bridged first (pass the vault)")]
+    VaultStillNative,
 }

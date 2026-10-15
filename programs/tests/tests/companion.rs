@@ -545,6 +545,34 @@ fn rewards() -> LaunchRules {
 /// beneficiary's part; then a claim (in SOL), a holders' share (the kit's `share_sol`), a buyback
 /// (`swap_v2`, the creator address trading) and the beneficiary's withdraw all move exactly the
 /// lamports they say; the old claim path is refused; and it reverts.
+/// Audit N-8: a companion coin's launch reverts only after its companion
+/// (`CompanionStillNative`).
+#[test]
+fn a_launch_reverts_only_after_its_companion() {
+    let mut w = World::new();
+    let launcher = w.wallet_with_sol(5 * SOL);
+    let split = Split {
+        buyback_bps: 5_000,
+        holders_bps: 3_000,
+        beneficiary_bps: 2_000,
+    };
+    let (mint, tx) = launch_through(&mut w, &launcher, split, 0, rewards());
+    tx.ok();
+    w.env.warp(31);
+    trade(&mut w, &mint, 2, SOL);
+    w.migrate_companion_native(&mint).ok();
+    let a = w.admin().pubkey();
+    let (sol, modules) = (w.sol, w.launch(&mint).modules);
+    w.pause_dex(true);
+    w.as_admin(launch::revert_launch_to_bridged(a, mint, sol, modules))
+        .expect_code(bordrless_launch::error::LaunchError::CompanionStillNative.into());
+    w.as_admin(companion::revert_companion_to_bridged(a, mint)).ok();
+    w.as_admin(launch::revert_launch_to_bridged(a, mint, sol, modules))
+        .ok();
+    w.pause_dex(false);
+    assert!(!w.launch(&mint).is_native());
+}
+
 #[test]
 fn a_companion_migrates_mid_life_and_keeps_every_lamport() {
     let mut w = World::new();

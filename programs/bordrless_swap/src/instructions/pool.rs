@@ -850,7 +850,11 @@ fn form_event(
 /// its own account, keeping `min(buffer_target, books)` in the vault as its buffer, and is flagged
 /// native. Idempotent: a native pool is left as it is. Bridged SOL anyone sent the vault beyond the
 /// books stays there, uncounted, as before.
-pub fn process_migrate_pool_to_native(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
+pub fn process_migrate_pool_to_native(
+    ctx: Context<QuoteForm>,
+    buffer_target: u64,
+    allow_foreign_hook: bool,
+) -> Result<()> {
     require_keys_eq!(
         ctx.accounts.signer.key(),
         ctx.accounts.config.admin,
@@ -859,8 +863,30 @@ pub fn process_migrate_pool_to_native(ctx: Context<QuoteForm>, buffer_target: u6
     // Only while the DEX is paused: no swap sees a pool half converted.
     require!(ctx.accounts.config.paused, SwapError::NotPaused);
     if ctx.accounts.pool.quote_native() {
+        // A re-run moves nothing; a new target is applied rather than silently ignored (audit
+        // I-2).
+        let pool = &mut ctx.accounts.pool;
+        if pool.buffer_target() != buffer_target {
+            pool.set_buffer_target(buffer_target);
+            emit_cpi!(form_event(pool, FORM_TARGET_SET, 0, 0)?);
+        }
         return Ok(());
     }
+    // Only pools whose quote-side cuts are known (no hook, or the launchpad's), and never the
+    // excluded pool (audit N-9): a foreign hook would name lamport destinations nobody reviewed.
+    require!(
+        ctx.accounts.pool.key() != EXCLUDED_POOL,
+        SwapError::ExcludedPool
+    );
+    require!(
+        allow_foreign_hook
+            || ctx
+                .accounts
+                .pool
+                .hook_program
+                .is_none_or(|h| h == LAUNCHPAD_ID),
+        SwapError::ForeignHookPool
+    );
     let books = ctx
         .accounts
         .pool
@@ -904,6 +930,25 @@ pub fn process_revert_pool_to_bridged(ctx: Context<QuoteForm>) -> Result<()> {
     require!(ctx.accounts.config.paused, SwapError::NotPaused);
     if !ctx.accounts.pool.quote_native() {
         return Ok(());
+    }
+    // A launch pool reverts only after its launch (audit N-8): a native launch names lamport
+    // cuts, which a bridged pool can't pay, so every trade of the coin would fail.
+    if ctx.accounts.pool.hook_program == Some(LAUNCHPAD_ID) {
+        let base_mint = ctx.accounts.pool.base_mint;
+        let (launch, _) =
+            Pubkey::find_program_address(&[LAUNCH_SEED, base_mint.as_ref()], &LAUNCHPAD_ID);
+        let info = ctx
+            .remaining_accounts
+            .iter()
+            .find(|a| *a.key == launch)
+            .ok_or(SwapError::LaunchStillNative)?;
+        // No launch account (a curve the launchpad opened without one) has nothing to wait for.
+        if *info.owner == LAUNCHPAD_ID {
+            require!(
+                !launch_is_native(&info.try_borrow_data()?)?,
+                SwapError::LaunchStillNative
+            );
+        }
     }
     let lamports_quote = ctx
         .accounts
@@ -1153,4 +1198,19 @@ mod buffer_all_tests {
         assert_eq!(rebalance_follows(&[1, 0], &pool, rebalance), Some(false));
         assert_eq!(rebalance_follows(&[2, 0, 0, 0], &pool, rebalance), None);
     }
+}
+
+/// Whether a launch account's data (`bordrless_launch::state::Launch`) says the launch is native
+/// (see `LAUNCH_CUSTOM_HOOK_OFFSET`).
+pub fn launch_is_native(data: &[u8]) -> Result<bool> {
+    let tag = *data
+        .get(LAUNCH_CUSTOM_HOOK_OFFSET)
+        .ok_or(SwapError::LaunchStillNative)?;
+    let hook_len = match tag {
+        0 => 1,
+        1 => 33,
+        _ => return err!(SwapError::LaunchStillNative),
+    };
+    let flag = LAUNCH_CUSTOM_HOOK_OFFSET + hook_len + 2 + 2 + 8 + 17;
+    Ok(*data.get(flag).ok_or(SwapError::LaunchStillNative)? == 1)
 }

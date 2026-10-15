@@ -248,6 +248,39 @@ pub fn process_revert_launch_to_bridged(ctx: Context<LaunchForm>) -> Result<()> 
     if !ctx.accounts.launch.is_native() {
         return Ok(());
     }
+    // The order (audit N-8): the coin's hook vault and companion revert before its launch.
+    // Remaining: the vault's address, always (an account nobody created proves there is none),
+    // and a companion coin's companion.
+    let mint = ctx.accounts.launch.mint;
+    let flag_of = |program: &Pubkey, seed: &[u8], offset: usize, err: LaunchError| -> Result<()> {
+        let (key, _) = Pubkey::find_program_address(&[seed, mint.as_ref()], program);
+        let info = ctx
+            .remaining_accounts
+            .iter()
+            .find(|a| *a.key == key)
+            .ok_or(err)?;
+        if info.owner == program {
+            let data = info.try_borrow_data()?;
+            if data.get(offset).copied().unwrap_or(0) != 0 {
+                return Err(err.into());
+            }
+        }
+        Ok(())
+    };
+    flag_of(
+        &HOOK_VAULT_ID,
+        HOOK_VAULT_SEED,
+        HOOK_VAULT_NATIVE_OFFSET,
+        LaunchError::VaultStillNative,
+    )?;
+    if is_companion_creator(&ctx.accounts.launch.creator, &mint) {
+        flag_of(
+            &bordrless_kit::constants::COMPANION_ID,
+            COMPANION_SEED,
+            COMPANION_NATIVE_OFFSET,
+            LaunchError::CompanionStillNative,
+        )?;
+    }
     // The launch's lamports above its rent, wrapped back into its holding by the admin's wallet.
     let launch_info = ctx.accounts.launch.to_account_info();
     let rent = Rent::get()?.minimum_balance(launch_info.data_len());

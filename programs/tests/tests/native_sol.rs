@@ -221,7 +221,7 @@ impl M {
 
     fn migrate(&mut self, pool: &Pubkey, target: u64) -> Tx {
         let admin = self.admin();
-        let tx = self.paused(swap::migrate_pool_to_native(admin.pubkey(), *pool, target));
+        let tx = self.paused(swap::migrate_pool_to_native_with(admin.pubkey(), *pool, target, true));
         self.w.env.warp(1);
         tx
     }
@@ -370,7 +370,7 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
     // Nobody but the admin migrates or reverts.
     let stranger = m.w.env.funded(SOL);
     let tx = m.send(
-        &[swap::migrate_pool_to_native(stranger.pubkey(), pool, 0)],
+        &[swap::migrate_pool_to_native_with(stranger.pubkey(), pool, 0, true)],
         &stranger,
     );
     tx.expect_code(code(SwapError::NotAdmin));
@@ -390,7 +390,7 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
     // Not while the DEX trades.
     let admin = m.admin();
     m.send(
-        &[swap::migrate_pool_to_native(admin.pubkey(), pool, 0)],
+        &[swap::migrate_pool_to_native_with(admin.pubkey(), pool, 0, true)],
         &admin,
     )
     .expect_code(code(SwapError::NotPaused));
@@ -425,8 +425,8 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
         (before.base_reserve, before.lp_supply, before.swap_count)
     );
 
-    // Again: nothing changes.
-    m.migrate(&pool, 0).ok();
+    // Again with the same target: nothing changes.
+    m.migrate(&pool, 2 * SOL).ok();
     assert_eq!(m.state(&pool).buffer_quote(), 2 * SOL);
     assert_eq!(m.state(&pool).buffer_target(), 2 * SOL);
     m.inv(&pool, 0);
@@ -1238,4 +1238,86 @@ fn the_old_swap_pays_lamport_cuts_on_a_native_pool() {
     m.answer(pool, callback::AFTER_SWAP, &cut(&[(1_000, EMPTY)], 0));
     m.v1(&pool, 0, m.bal(&m.a, &t) / 20)
         .expect_code(code(SwapError::RecipientBelowRent));
+}
+
+/// Audit N-9: `migrate_pool_to_native` refuses a pool whose hook is neither absent nor the
+/// launchpad unless `allow_foreign_hook`, and refuses the excluded pool (`4PvPnTBy…`) whatever.
+#[test]
+fn migration_refuses_foreign_hooks_and_the_excluded_pool() {
+    let mut m = M::new();
+    let pool = m.pool();
+    let admin = m.admin();
+    let tx = m.paused(swap::migrate_pool_to_native(admin.pubkey(), pool, 0));
+    tx.expect_code(code(SwapError::ForeignHookPool));
+    assert!(!m.state(&pool).quote_native());
+    // The same pool's account at the excluded address (the pool account has no seeds check).
+    let excluded = bordrless_swap::constants::EXCLUDED_POOL;
+    let account = m.w.env.account(&pool).expect("the pool");
+    m.w.env.put(excluded, account);
+    let mut ix = swap::migrate_pool_to_native_with(admin.pubkey(), excluded, 0, true);
+    // Its quote vault is the cloned pool's.
+    let wrong = swap::vault_address(&excluded, &m.sol);
+    for meta in ix.accounts.iter_mut().filter(|a| a.pubkey == wrong) {
+        meta.pubkey = m.state(&pool).quote_vault;
+    }
+    let tx = m.paused(ix);
+    tx.expect_code(code(SwapError::ExcludedPool));
+    // Allowed explicitly, the foreign-hook pool migrates.
+    m.migrate(&pool, 0).ok();
+    assert!(m.state(&pool).quote_native());
+}
+
+/// The byte offsets the DEX and the launchpad read across programs (a crate can't depend on the
+/// program that depends on it): the launch's native flag, the companion's and the vault's.
+#[test]
+fn the_native_flag_offsets_match_the_accounts() {
+    use anchor_lang::AccountSerialize;
+    use bordrless_launch::constants as lc;
+    use bordrless_launch::state::Launch;
+    assert_eq!(bordrless_swap::constants::LAUNCH_SEED, lc::LAUNCH_SEED);
+    assert_eq!(bordrless_swap::constants::LAUNCHPAD_ID, bordrless_launch::ID);
+    assert_eq!(lc::COMPANION_SEED, bordrless_companion::constants::COMPANION_SEED);
+    assert_eq!(lc::HOOK_VAULT_SEED, hook_vault::constants::VAULT_SEED);
+    assert_eq!(lc::HOOK_VAULT_ID, hook_vault::ID);
+    assert_eq!(bordrless_companion::state::Companion::LEN, lc::COMPANION_NATIVE_OFFSET);
+    for hook in [None, Some(Pubkey::new_unique())] {
+        for native in [false, true] {
+            // SAFETY: a plain-data account struct; every field is overwritten or zero is valid.
+            let mut l: Launch = unsafe { std::mem::zeroed() };
+            l.custom_hook = hook;
+            l.author_fees_paid = u64::MAX;
+            l.set_native(native);
+            let mut data = vec![];
+            l.try_serialize(&mut data).unwrap();
+            data.resize(Launch::LEN, 0);
+            assert_eq!(
+                bordrless_swap::instructions::launch_is_native(&data).unwrap(),
+                native
+            );
+        }
+    }
+    for native in [false, true] {
+        // SAFETY: as above.
+        let mut v: hook_vault::state::Vault = unsafe { std::mem::zeroed() };
+        v.last_activity_at = -1;
+        v.set_native(native);
+        let mut data = vec![];
+        v.try_serialize(&mut data).unwrap();
+        assert_eq!(data[lc::HOOK_VAULT_NATIVE_OFFSET], u8::from(native));
+        assert_eq!(data.len(), hook_vault::state::Vault::LEN);
+    }
+}
+
+/// Audit I-2: re-running `migrate_pool_to_native` on a native pool moves nothing but applies a new
+/// buffer target.
+#[test]
+fn a_migration_rerun_applies_a_new_target() {
+    let mut m = M::new();
+    let pool = m.pool();
+    m.migrate(&pool, 0).ok();
+    let lamports = m.lamports(&pool);
+    m.migrate(&pool, 7 * SOL).ok();
+    assert_eq!(m.state(&pool).buffer_target(), 7 * SOL);
+    assert_eq!(m.state(&pool).buffer_quote(), 0);
+    assert_eq!(m.lamports(&pool), lamports);
 }

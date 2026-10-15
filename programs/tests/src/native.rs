@@ -93,7 +93,7 @@ impl World {
         ));
         self.as_admin(launch::revert_launch_to_bridged(a, *mint, sol, modules))
             .ok();
-        self.as_admin(swap::revert_pool_to_bridged(a, pool)).ok();
+        self.as_admin(swap::revert_launch_pool_to_bridged(a, pool, *mint)).ok();
         self.pause_dex(false);
         tx
     }

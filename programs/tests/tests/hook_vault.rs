@@ -1849,3 +1849,30 @@ fn a_native_vault_buys_bridged_and_native_pools() {
     );
     w.assert_pool_invariant(&x_pool);
 }
+
+/// Audit N-8: a vault coin's launch reverts only after its vault (`VaultStillNative`), and the
+/// launch revert needs the vault's address passed.
+#[test]
+fn a_launch_reverts_only_after_its_vault() {
+    let mut w = World::new();
+    let to = Keypair::new().pubkey();
+    let c = w.vault_coin(vault_args(vec![sell_for_sol(to)]), &[], true);
+    let m = c.mint;
+    w.migrate_launch_native(&m).ok();
+    set_vault_native(&mut w, &m, true).ok();
+    let a = w.admin().pubkey();
+    let (sol, modules) = (w.sol, w.launch(&m).modules);
+    w.pause_dex(true);
+    let ix = launch::revert_launch_to_bridged(a, m, sol, modules);
+    w.as_admin(ix.clone())
+        .expect_code(bordrless_launch::error::LaunchError::VaultStillNative.into());
+    let mut bare = ix.clone();
+    bare.accounts.truncate(bare.accounts.len() - 2);
+    w.as_admin(bare)
+        .expect_code(bordrless_launch::error::LaunchError::VaultStillNative.into());
+    let v = w.vault(&m);
+    w.as_admin(vault_client::set_vault_native(a, &v, false)).ok();
+    w.as_admin(ix).ok();
+    w.pause_dex(false);
+    assert!(!w.launch(&m).is_native());
+}

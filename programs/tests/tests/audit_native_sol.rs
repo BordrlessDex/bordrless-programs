@@ -438,7 +438,7 @@ impl M {
 
     fn migrate(&mut self, pool: &Pubkey, target: u64) -> Tx {
         let admin = self.admin();
-        self.paused(swap::migrate_pool_to_native(admin.pubkey(), *pool, target))
+        self.paused(swap::migrate_pool_to_native_with(admin.pubkey(), *pool, target, true))
     }
 
     fn revert(&mut self, pool: &Pubkey) -> Tx {
@@ -985,7 +985,7 @@ fn ruled_out_swap_and_swap_v2_price_identically_whatever_the_buffer() {
 /// of the coin, old and new, fails (`InvalidDeltaAccount` / `NotNativePool`) until the pool is
 /// migrated again. No value moves; the runbook's order is the only guard.
 #[test]
-fn finding_reverting_a_pool_before_its_launch_stops_every_trade() {
+fn fixed_a_pool_cannot_revert_before_its_launch() {
     let mut w = World::new();
     let creator = w.wallet_with_sol(20 * SOL);
     let (mint, tx) = w.create_launch(&creator, "ORD", 100, VQ);
@@ -997,19 +997,26 @@ fn finding_reverting_a_pool_before_its_launch_stops_every_trade() {
     migrate(&mut w, &mint).ok();
     let pool = pool_of(&w, &mint);
     let ad = admin(&w).pubkey();
+    let sol = w.sol;
+    let modules = w.launch(&mint).modules;
     pause(&mut w, true);
-    as_admin(&mut w, &[swap::revert_pool_to_bridged(ad, pool)]).ok();
+    // Fixed (N-8): the DEX refuses the pool's revert while its launch is native, whether the
+    // launch is passed or not.
+    as_admin(&mut w, &[swap::revert_pool_to_bridged(ad, pool)])
+        .expect_code(code(SwapError::LaunchStillNative));
+    as_admin(&mut w, &[swap::revert_launch_pool_to_bridged(ad, pool, mint)])
+        .expect_code(code(SwapError::LaunchStillNative));
+    assert!(w.env.read::<Pool>(&pool).quote_native());
+    // In order it works: the launch, then the pool.
+    as_admin(
+        &mut w,
+        &[launch::revert_launch_to_bridged(ad, mint, sol, modules)],
+    )
+    .ok();
+    as_admin(&mut w, &[swap::revert_launch_pool_to_bridged(ad, pool, mint)]).ok();
     pause(&mut w, false);
-    assert!(w.launch(&mint).is_native());
-    pool_inv(&w, &pool);
-    w.buy(&a, &mint, SOL / 10)
-        .expect_code(code(SwapError::InvalidDeltaAccount));
-    let held = w.env.holding(&mint, &a.pubkey());
-    w.sell(&a, &mint, held / 10)
-        .expect_code(code(SwapError::InvalidDeltaAccount));
-    let payer = w.env.funded(SOL);
-    let ix = v2_ix(&w, &a.pubkey(), &mint, 1, SOL / 10);
-    send(&mut w, &payer, ix, &a).expect_code(code(SwapError::NotNativePool));
+    assert!(!w.env.read::<Pool>(&pool).quote_native());
+    w.buy(&a, &mint, SOL / 10).ok();
 }
 
 /// RULED OUT (partial migration, unpause mid-way): with the pool native and its launch still

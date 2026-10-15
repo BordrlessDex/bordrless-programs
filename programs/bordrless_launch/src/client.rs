@@ -1060,9 +1060,18 @@ pub fn revert_launch_to_bridged(
     quote_mint: Pubkey,
     modules: u8,
 ) -> Instruction {
+    // The coin's hook vault and companion addresses (read): the launch reverts only after them.
+    let mut accounts = launch_form(admin, mint, quote_mint, modules);
+    for (seed, program) in [
+        (HOOK_VAULT_SEED, HOOK_VAULT_ID),
+        (COMPANION_SEED, bordrless_kit::constants::COMPANION_ID),
+    ] {
+        let (key, _) = Pubkey::find_program_address(&[seed, mint.as_ref()], &program);
+        accounts.push(AccountMeta::new_readonly(key, false));
+    }
     Instruction {
         program_id: crate::ID,
-        accounts: launch_form(admin, mint, quote_mint, modules),
+        accounts,
         data: crate::instruction::RevertLaunchToBridged {}.data(),
     }
 }

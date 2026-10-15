@@ -477,10 +477,25 @@ fn quote_form_accounts(signer: Pubkey, pool: Pubkey) -> Vec<AccountMeta> {
 
 /// `migrate_pool_to_native`, signed by the admin.
 pub fn migrate_pool_to_native(admin: Pubkey, pool: Pubkey, buffer_target: u64) -> Instruction {
+    migrate_pool_to_native_with(admin, pool, buffer_target, false)
+}
+
+/// `migrate_pool_to_native` with `allow_foreign_hook`: a pool whose hook is another program than
+/// the launchpad (refused otherwise).
+pub fn migrate_pool_to_native_with(
+    admin: Pubkey,
+    pool: Pubkey,
+    buffer_target: u64,
+    allow_foreign_hook: bool,
+) -> Instruction {
     Instruction {
         program_id: crate::ID,
         accounts: quote_form_accounts(admin, pool),
-        data: crate::instruction::MigratePoolToNative { buffer_target }.data(),
+        data: crate::instruction::MigratePoolToNative {
+            buffer_target,
+            allow_foreign_hook,
+        }
+        .data(),
     }
 }
 
@@ -491,6 +506,18 @@ pub fn revert_pool_to_bridged(admin: Pubkey, pool: Pubkey) -> Instruction {
         accounts: quote_form_accounts(admin, pool),
         data: crate::instruction::RevertPoolToBridged {}.data(),
     }
+}
+
+/// `revert_pool_to_bridged` of a launch pool (its hook the launchpad): the launch of `base_mint`
+/// is passed (read) so the DEX can check it reverted first.
+pub fn revert_launch_pool_to_bridged(admin: Pubkey, pool: Pubkey, base_mint: Pubkey) -> Instruction {
+    let mut ix = revert_pool_to_bridged(admin, pool);
+    let (launch, _) = Pubkey::find_program_address(
+        &[crate::constants::LAUNCH_SEED, base_mint.as_ref()],
+        &crate::constants::LAUNCHPAD_ID,
+    );
+    ix.accounts.push(AccountMeta::new_readonly(launch, false));
+    ix
 }
 
 /// `rebalance_pool`, signed by anyone (a plain wallet: it may wrap the pool's SOL).

@@ -108,7 +108,7 @@ fn revert(w: &mut World, mint: &Pubkey) -> Tx {
         w,
         &[launch::revert_launch_to_bridged(a, *mint, sol, modules)],
     );
-    as_admin(w, &[swap::revert_pool_to_bridged(a, pool)]).ok();
+    as_admin(w, &[swap::revert_launch_pool_to_bridged(a, pool, *mint)]).ok();
     {
         let ix = dex_pause_ix(w, false);
         as_admin(w, &[ix])
