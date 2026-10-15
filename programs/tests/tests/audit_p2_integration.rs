@@ -499,7 +499,7 @@ fn phase1_accounts_read_the_same() {
     let p1 = &json[json.find("\"accounts\": {").unwrap()..json.find("\"standard\": {").unwrap()];
     let comp = vector_hex(p1, "companion");
     let game = vector_hex(p1, "game");
-    assert_eq!((comp.len(), game.len()), (300, 486));
+    assert_eq!((comp.len(), game.len()), (308, 486));
     let c = Companion::try_deserialize(&mut &comp[..]).unwrap();
     assert_eq!(
         (c.game_kind, c.pot_locked, c.mode),
