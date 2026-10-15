@@ -97,6 +97,9 @@ pub(crate) fn native_at_launch<'info>(
 ) -> Result<u64> {
     let info = companion.to_account_info();
     let seeds = CreatorSeeds::of(companion);
+    // An old (300-byte) companion made before `quote_cut_claimed` grows for it first, with
+    // nothing claimed (nothing accrues before the launch), its creator address paying (audit N-6).
+    companion.grow_for_quote_cut(&info, creator, system_program, 0, &[&seeds.seeds()])?;
     companion.grow_for_native(&info, creator, system_program, &[&seeds.seeds()])?;
     let spare = spare_of(creator)?;
     turn_native(companion, spare)?;
@@ -123,7 +126,7 @@ pub fn process_migrate_companion_to_native<'info>(
     let accrued = ctx.accounts.launch.quote_cut_accrued();
     ctx.accounts
         .companion
-        .grow_for_quote_cut(&info, &admin, &system, accrued)?;
+        .grow_for_quote_cut(&info, &admin, &system, accrued, &[])?;
     ctx.accounts
         .companion
         .grow_for_native(&info, &admin, &system, &[])?;

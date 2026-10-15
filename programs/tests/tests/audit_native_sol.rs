@@ -1064,7 +1064,7 @@ fn ruled_out_pool_native_launch_bridged_still_trades_exactly() {
 /// not lost (`withdraw` with the mint's signature), but they can launch only while native launches
 /// are off.
 #[test]
-fn finding_an_old_unlaunched_companion_cannot_launch_once_launches_are_native() {
+fn fixed_an_old_unlaunched_companion_launches_native() {
     use bordrless_companion::client as companion;
     use bordrless_companion::error::CompanionError;
     use bordrless_companion::instructions::CreateArgs;
@@ -1098,7 +1098,7 @@ fn finding_an_old_unlaunched_companion_cannot_launch_once_launches_are_native() 
         )
         .ok();
     // As made before the upgrade: 300 bytes.
-    let key = companion::companion_address(&mint.pubkey());
+    let key = Companion::address(&mint.pubkey()).0;
     let mut account = w.env.account(&key).unwrap();
     assert_eq!(account.data.len(), Companion::LEN);
     account.data.truncate(300);
@@ -1127,13 +1127,14 @@ fn finding_an_old_unlaunched_companion_cannot_launch_once_launches_are_native() 
         &inner,
         launch_args.clone(),
     );
-    w.env
-        .send_paid_by(&[ix], &launcher, &[&mint])
-        .expect_code(u32::from(CompanionError::MissingAccount));
-    // With native launches off it launches (bridged).
-    as_admin(&mut w, &[launch::set_native_launches(ad, false)]).ok();
-    let ix = companion::launch(launcher.pubkey(), mint.pubkey(), &inner, launch_args);
+    // Fixed (N-6): it grows for `quote_cut_claimed` (nothing claimed) and then for the native
+    // flag, and launches native.
     w.env.send_paid_by(&[ix], &launcher, &[&mint]).ok();
+    let key = Companion::address(&mint.pubkey()).0;
+    let c: Companion = w.env.read(&key);
+    assert!(c.is_native());
+    assert!(c.quote_cut_claimed.stored && c.quote_cut_claimed.amount == 0);
+    let _ = CompanionError::MissingAccount;
 }
 
 // ---------------------------------------------------------------------------------------------

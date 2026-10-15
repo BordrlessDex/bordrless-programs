@@ -559,7 +559,7 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
         let system = ctx.accounts.system_program.to_account_info();
         ctx.accounts
             .companion
-            .grow_for_quote_cut(&info, &payer, &system, accrued)?;
+            .grow_for_quote_cut(&info, &payer, &system, accrued, &[])?;
     }
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);

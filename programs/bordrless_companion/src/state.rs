@@ -311,6 +311,7 @@ impl Companion {
         payer: &AccountInfo<'info>,
         system_program: &AccountInfo<'info>,
         accrued: u64,
+        payer_seeds: &[&[&[u8]]],
     ) -> Result<()> {
         if self.quote_cut_claimed.stored {
             return Ok(());
@@ -319,12 +320,13 @@ impl Companion {
         let short = need.saturating_sub(info.lamports());
         if short > 0 {
             anchor_lang::system_program::transfer(
-                CpiContext::new(
+                CpiContext::new_with_signer(
                     system_program.key(),
                     anchor_lang::system_program::Transfer {
                         from: payer.clone(),
                         to: info.clone(),
                     },
+                    payer_seeds,
                 ),
                 short,
             )?;
