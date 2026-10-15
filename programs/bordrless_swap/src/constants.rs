@@ -52,7 +52,7 @@ pub const UNWRAP_SOL_DISCRIMINATOR: [u8; 8] = [99, 40, 14, 105, 45, 107, 172, 20
 pub const WRAP_SOL_DISCRIMINATOR: [u8; 8] = [47, 62, 155, 172, 131, 205, 37, 201];
 
 /// `Pool.reserved[NATIVE_FLAG_OFFSET]`: 1 when the pool holds its quote (bridged SOL by its mint
-/// and seeds) as lamports on the pool account itself (a native pool, `docs/native-sol.md`).
+/// and seeds) as lamports on the pool account itself (a native pool, `crate::native`).
 pub const NATIVE_FLAG_OFFSET: usize = 0;
 /// `Pool.reserved[BUFFER_OFFSET..+8]` (u64 LE): a native pool's buffer, the bridged SOL in its
 /// quote vault that its books count (the rest of the quote is lamports on the pool).

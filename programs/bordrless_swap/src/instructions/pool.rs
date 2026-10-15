@@ -939,10 +939,10 @@ pub fn process_revert_pool_to_bridged(ctx: Context<QuoteForm>) -> Result<()> {
 /// unwrapped onto the pool (the pool the bridge's user); one below it is filled from the pool's
 /// quote lamports, as far as they go, wrapped by the sender's wallet (credited them by the pool
 /// first, so it pays nothing). The value of the pool never changes, only its form, and only
-/// toward the target the admin set, so nobody can move it against the pool's policy.
+/// toward the target the admin set, so nobody can move it against the pool's policy. It runs while
+/// the DEX is paused too (a migration window), since it never changes what the pool holds.
 pub fn process_rebalance_pool(ctx: Context<QuoteForm>) -> Result<()> {
     require!(ctx.accounts.pool.quote_native(), SwapError::NotNativePool);
-    require!(!ctx.accounts.config.paused, SwapError::Paused);
     let (buffer, target) = (
         ctx.accounts.pool.buffer_quote(),
         ctx.accounts.pool.buffer_target(),

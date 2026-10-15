@@ -1,4 +1,4 @@
-//! Native-SOL pools (`docs/native-sol.md`): a pool quoted in bridged SOL (by its mint and seeds,
+//! Native-SOL pools (`crate::native`): a pool quoted in bridged SOL (by its mint and seeds,
 //! which never change) that holds its quote as lamports on the pool account itself.
 //!
 //! The books of a native pool: `quote_reserve + protocol_fees_quote` is its whole quote, held in
@@ -86,12 +86,13 @@ impl<'info> BridgeSol<'info> {
         holding: &AccountInfo<'info>,
         amount: u64,
         signer_seeds: &[&[&[u8]]],
+        trailing: Option<&AccountInfo<'info>>,
     ) -> Result<()> {
         let mut data = discriminator.to_vec();
         data.extend_from_slice(&amount.to_le_bytes());
         let ro = |info: &AccountInfo| AccountMeta::new_readonly(info.key(), false);
         let rw = |info: &AccountInfo| AccountMeta::new(info.key(), false);
-        let ix = anchor_lang::solana_program::instruction::Instruction {
+        let mut ix = anchor_lang::solana_program::instruction::Instruction {
             program_id: BRIDGE_ID,
             accounts: vec![
                 AccountMeta::new(user.key(), true),
@@ -108,7 +109,7 @@ impl<'info> BridgeSol<'info> {
             ],
             data,
         };
-        let infos = [
+        let mut infos = vec![
             user.clone(),
             self.config.clone(),
             self.wrapper.clone(),
@@ -121,6 +122,13 @@ impl<'info> BridgeSol<'info> {
             self.event_authority.clone(),
             self.program.clone(),
         ];
+        // An account whose lamports this program changed before the CPI (the pool, which credited
+        // the wallet): passed on (the bridge ignores it) so the runtime sees both sides of that
+        // move at the CPI, not only the wallet's.
+        if let Some(extra) = trailing {
+            ix.accounts.push(AccountMeta::new(extra.key(), false));
+            infos.push(extra.clone());
+        }
         if signer_seeds.is_empty() {
             invoke(&ix, &infos)?;
         } else {
@@ -147,6 +155,7 @@ impl<'info> BridgeSol<'info> {
             quote_vault,
             amount,
             &[pool_seeds],
+            None,
         )
     }
 
@@ -165,7 +174,7 @@ impl<'info> BridgeSol<'info> {
             wallet.is_signer && wallet.is_writable,
             SwapError::WrongNativeAccount
         );
-        self.call(WRAP_SOL_DISCRIMINATOR, wallet, holding, amount, &[])
+        self.call(WRAP_SOL_DISCRIMINATOR, wallet, holding, amount, &[], None)
     }
 
     /// Wraps `amount` of the pool's lamports into `holding`: the pool's lamports go to `wallet`
@@ -186,7 +195,14 @@ impl<'info> BridgeSol<'info> {
             SwapError::WrongNativeAccount
         );
         move_lamports(pool, wallet, amount)?;
-        self.wrap_from_wallet(wallet, holding, amount)
+        self.call(
+            WRAP_SOL_DISCRIMINATOR,
+            wallet,
+            holding,
+            amount,
+            &[],
+            Some(pool),
+        )
     }
 }
 

@@ -376,6 +376,18 @@ pub fn run_swap<'info>(
     if native_in {
         require_keys_eq!(*trader_in.key, *c.trader.key, SwapError::WrongNativeAccount);
     }
+    // A native sell delivers lamports: never to the pool or its vaults, nor to any account of the
+    // token program (a holding of bridged SOL passed out of habit would keep them as lamports,
+    // stranded, not as bridged SOL).
+    if native_out {
+        require!(
+            *trader_out.key != pool_key
+                && *trader_out.key != pool_acc.base_vault
+                && *trader_out.key != pool_acc.quote_vault
+                && *trader_out.owner != bordrless_token::ID,
+            SwapError::WrongNativeAccount
+        );
+    }
     // No delta may go to a vault or to either of the trader's holdings (on a native swap, nor to
     // the pool, its quote vault or the trader).
     let mut forbidden = vec![
@@ -671,14 +683,15 @@ pub fn run_swap<'info>(
     let seeds = PoolSeeds::of(pool_acc);
     let pool_seeds = seeds.seeds();
     let delivered = if let (true, Some(leg)) = (native_out, native.as_ref()) {
-        for (to, amount, wrapped) in &ncut_out.deltas {
-            if *wrapped {
-                leg.bridge()?
-                    .wrap_from_pool(&pool_info, &trader, to, *amount)?;
-            } else {
-                check_credit_rent(to, *amount)?;
-                move_lamports(&pool_info, to, *amount)?;
-            }
+        // The wrapped deltas first: each is a CPI, at which the runtime must see every lamport
+        // this program has moved so far on accounts it passes, so no direct move precedes them.
+        for (to, amount, _) in ncut_out.deltas.iter().filter(|d| d.2) {
+            leg.bridge()?
+                .wrap_from_pool(&pool_info, &trader, to, *amount)?;
+        }
+        for (to, amount, _) in ncut_out.deltas.iter().filter(|d| !d.2) {
+            check_credit_rent(to, *amount)?;
+            move_lamports(&pool_info, to, *amount)?;
         }
         let before = trader_out.lamports();
         check_credit_rent(&trader_out, to_deliver)?;
