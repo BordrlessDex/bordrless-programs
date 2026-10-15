@@ -2366,6 +2366,16 @@
       "code": 6059,
       "name": "CompanionLaunch",
       "msg": "a companion coin stays on bridged SOL until its companion is paid in SOL"
+    },
+    {
+      "code": 6060,
+      "name": "CompanionStillNative",
+      "msg": "revert the coin's companion to bridged first (pass the companion)"
+    },
+    {
+      "code": 6061,
+      "name": "VaultStillNative",
+      "msg": "revert the coin's hook vault to bridged first (pass the vault)"
     }
   ],
   "types": [

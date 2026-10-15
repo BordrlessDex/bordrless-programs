@@ -887,7 +887,8 @@
       "name": "migrate_pool_to_native",
       "docs": [
         "Admin: turns a pool quoted in bridged SOL into a native one (its quote unwrapped onto the",
-        "pool account, `buffer_target` of it kept in the quote vault). Idempotent."
+        "pool account, `buffer_target` of it kept in the quote vault). Idempotent. A pool whose hook",
+        "is neither absent nor the launchpad needs `allow_foreign_hook`; the excluded pool never."
       ],
       "discriminator": [
         43,
@@ -975,6 +976,10 @@
         {
           "name": "buffer_target",
           "type": "u64"
+        },
+        {
+          "name": "allow_foreign_hook",
+          "type": "bool"
         }
       ]
     },
@@ -2052,6 +2057,21 @@
       "code": 6048,
       "name": "NoRebalanceAfter",
       "msg": "buffer_all needs a later rebalance_pool of the same pool in the same transaction"
+    },
+    {
+      "code": 6049,
+      "name": "ForeignHookPool",
+      "msg": "only a hook-less or launchpad pool may go native"
+    },
+    {
+      "code": 6050,
+      "name": "ExcludedPool",
+      "msg": "this pool is excluded from native SOL"
+    },
+    {
+      "code": 6051,
+      "name": "LaunchStillNative",
+      "msg": "revert the pool's launch to bridged first (pass the launch)"
     }
   ],
   "types": [

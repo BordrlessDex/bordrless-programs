@@ -6131,6 +6131,11 @@
       "code": 6092,
       "name": "LaunchNotNative",
       "msg": "the companion's launch is not native yet: migrate the launch (and its pool) first"
+    },
+    {
+      "code": 6093,
+      "name": "ScriptNotNativeReady",
+      "msg": "this script is not native-ready: it can't launch while native launches are on"
     }
   ],
   "types": [
