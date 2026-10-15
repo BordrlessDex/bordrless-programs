@@ -729,3 +729,29 @@ whenever the launch isn't native.
   failure; typecheck clean.
 - **Rehearsal artifacts:** the conservation summaries hold (`conserved: true`; bridge backing 4,113
   lamports before and after), and so does the revert/remigrate round trip.
+
+## Fix status (native-sol, after the audit)
+
+Every finding is fixed on `native-sol` (programs), `native-sol` (monorepo) and `native-sol` (public
+SDK). The audit tests in `programs/tests/tests/audit_native_sol.rs` are inverted to prove each fix
+(`fixed_…`), the `buffer_all` tests appended to the same file.
+
+| ID | Fix | Test |
+| --- | --- | --- |
+| N-1 | kit `set_native(false)` skips the move without holder rewards (donations stay on the config) | `fixed_kit_donation_no_longer_blocks_launch_revert_without_holder_rewards` |
+| N-2 | the old swap pays a buy's lamport cut that the output hook also sees (the kit's holder fee) right after the input; every later CPI passes both sides | `fixed_old_path_buyer_no_longer_shares_its_own_holder_fee` |
+| N-3 | `open_vault` makes the vault native when the launch is | `fixed_a_new_vault_coin_on_native_launches_sells` |
+| N-4 | `remove_liquidity` pays what the buffer lacks as lamports to the provider; CLI `set-buffer-target` | `fixed_an_lp_of_a_native_pool_withdraws_at_target_zero`, `native_sol.rs` liquidity test |
+| N-5 | the old sell pays what the buffer lacks as lamports to the trader; doc corrected | `fixed_emptying_the_buffer_no_longer_fails_an_old_path_sell`, `native_sol.rs` old-swap test |
+| N-6 | `native_at_launch` grows for `quote_cut_claimed` first | `fixed_an_old_unlaunched_companion_launches_native` |
+| N-7 | `create_partner_config` refuses reserved keys; CLI flags bad partner keys; the site refuses claims that would leave a wallet below rent | `fixed_a_partner_key_that_cannot_take_lamports_is_refused`; server `creatorNative.test.ts` |
+| N-8 | revert order enforced: pool after launch, launch after vault and companion | `fixed_a_pool_cannot_revert_before_its_launch`; `companion.rs`, `hook_vault.rs` order tests |
+| N-9 | `migrate_pool_to_native` refuses `4PvPnTBy…` and foreign hooks unless `allow_foreign_hook` | `native_sol.rs` `migration_refuses_foreign_hooks_and_the_excluded_pool` |
+| N-10 | vault migration funds slot owners to rent(0) (open already did) | `hook_vault.rs` `a_vault_migration_funds_an_unfunded_slot_owner_to_rent` |
+| H-1, I-5 | the companion refuses a script on `NOT_NATIVE_READY_SCRIPTS` at a native launch; the site refuses it too | `companion_script.rs` `a_script_that_is_not_native_ready_cannot_launch_native` |
+| I-1 | `is_companion_creator` used again (the launch revert's order); `CompanionLaunch` documented unused | covered by the order tests |
+| I-2 | a re-run of `migrate_pool_to_native` applies a new target | `native_sol.rs` `a_migration_rerun_applies_a_new_target` |
+| O-1, O-2, O-3, O-4, O-5, H-2, H-3, H-4 | off-chain (monorepo, SDK): see the monorepo's commits | server and SDK tests |
+
+Left as they are: I-3 (excess legacy rent, tiny and accepted; `verify` uses `≥`), I-4 (a rent
+increase; theoretical), I-6 (operational: notify partners whose key is a program PDA).

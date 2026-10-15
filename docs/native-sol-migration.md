@@ -89,7 +89,10 @@ The ordinary (non-launch) pools need only step 1.
 
 ### Rollback (before reopening, or later under a pause)
 
-Reverse order per coin, each idempotent:
+Reverse order per coin, each idempotent. The programs enforce it: `revert_launch_to_bridged` takes
+the coin's hook-vault address (and a companion coin's companion) and refuses while either is native
+(`VaultStillNative`, `CompanionStillNative`); `revert_pool_to_bridged` of a launch pool takes the
+launch and refuses while it is native (`LaunchStillNative`).
 
 1. `hook_vault::revert_vault_to_bridged`.
 2. `bordrless_companion::revert_companion_to_bridged`. The spare booked to the beneficiary stays
@@ -124,12 +127,20 @@ Reverse order per coin, each idempotent:
 
 ## New entry points (for the SDK)
 
-- DEX: `swap_v2`, `create_native_pool`, `migrate_pool_to_native`, `revert_pool_to_bridged`,
+- DEX: `swap_v2`, `create_native_pool`, `migrate_pool_to_native(buffer_target, allow_foreign_hook)`
+  (a pool whose hook is neither absent nor the launchpad needs `allow_foreign_hook`; pool
+  `4PvPnTBy…` is refused whatever; a re-run on a native pool applies a new target),
+  `revert_pool_to_bridged` (a launch pool passes its launch, client `revert_launch_pool_to_bridged`),
   `rebalance_pool`, `set_buffer_target`, `buffer_all`; events `SwappedNative`, `PoolQuoteFormChanged`.
 - Launchpad: `claim_creator_fees_sol`, `claim_author_fees_sol`, `distribute_fees_sol`,
   `set_native_launches`, `migrate_launch_to_native`, `revert_launch_to_bridged`; client `swap_v2`.
 - Kit: `claim_sol`, `share_sol`, `set_native` (launchpad only).
 - Companion: `migrate_companion_to_native`, `revert_companion_to_bridged`; wallet payouts may name a
-  holding of bridged SOL (its owner passed, paid in bridged SOL).
+  holding of bridged SOL (its owner passed, paid in bridged SOL). A script companion launches with
+  `client::launch_script` (its script's address appended): while native launches are on, a script on
+  `NOT_NATIVE_READY_SCRIPTS` is refused (`ScriptNotNativeReady`). An old 300-byte companion grows for
+  `quote_cut_claimed` at a native launch.
+- hook_vault: a vault opened (`open_vault`) for a coin launched native is native from the start.
+- Launchpad: `create_partner_config` refuses a reserved key (sysvar, builtin program) as the partner.
 - hook_vault: `migrate_vault_to_native`, `revert_vault_to_bridged`.
 - Router: `swap_v2` (fees in SOL to the integrator's wallet and the DEX treasury).
