@@ -145,6 +145,15 @@ pub mod bordrless_swap {
         pool::process_rebalance_pool(ctx)
     }
 
+    /// Anyone: wraps all of a native pool's lamport quote into its buffer, for the rest of the
+    /// transaction only: a later instruction of the same transaction must be `rebalance_pool` on
+    /// the same pool (the instructions sysvar is the first remaining account). Its books and its
+    /// value do not change; it lets a program that checks the quote vault against the books (a
+    /// Workshop script written for bridged pools) run on a native pool.
+    pub fn buffer_all<'info>(ctx: Context<'info, QuoteForm<'info>>) -> Result<()> {
+        pool::process_buffer_all(ctx)
+    }
+
     /// Admin: sets a native pool's buffer target.
     pub fn set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
         pool::process_set_buffer_target(ctx, buffer_target)

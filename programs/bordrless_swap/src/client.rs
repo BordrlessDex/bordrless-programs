@@ -499,6 +499,21 @@ pub fn rebalance_pool(cranker: Pubkey, pool: Pubkey) -> Instruction {
     }
 }
 
+/// `buffer_all`, signed by anyone (a plain wallet: it wraps the pool's SOL). The same transaction
+/// must send `rebalance_pool` of the same pool after it.
+pub fn buffer_all(cranker: Pubkey, pool: Pubkey) -> Instruction {
+    let mut accounts = quote_form_accounts(cranker, pool);
+    accounts.push(AccountMeta::new_readonly(
+        Pubkey::from_str_const("Sysvar1nstructions1111111111111111111111111"),
+        false,
+    ));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::BufferAll {}.data(),
+    }
+}
+
 /// `set_buffer_target`, signed by the admin.
 pub fn set_buffer_target(admin: Pubkey, pool: Pubkey, buffer_target: u64) -> Instruction {
     Instruction {

@@ -822,6 +822,7 @@ const FORM_MIGRATED: u8 = 0;
 const FORM_REVERTED: u8 = 1;
 const FORM_REBALANCED: u8 = 2;
 const FORM_TARGET_SET: u8 = 3;
+const FORM_BUFFERED_ALL: u8 = 4;
 
 fn form_event(
     pool: &Account<Pool>,
@@ -987,6 +988,93 @@ pub fn process_rebalance_pool(ctx: Context<QuoteForm>) -> Result<()> {
     Ok(())
 }
 
+/// The instructions sysvar.
+const INSTRUCTIONS_SYSVAR: Pubkey =
+    Pubkey::from_str_const("Sysvar1nstructions1111111111111111111111111");
+
+/// Whether the instructions sysvar's `data` shows, after the instruction now running, a top-level
+/// instruction of this program whose data starts with `discriminator` and whose third account is
+/// `pool` (the accounts of `QuoteForm`). None when the data is malformed. The sysvar's layout: a
+/// u16 count, a u16 offset per instruction, each instruction a u16 account count, per account a
+/// flags byte and its key, the program id, a u16 data length and the data; the current index is
+/// the last two bytes.
+fn rebalance_follows(data: &[u8], pool: &Pubkey, discriminator: &[u8]) -> Option<bool> {
+    let u16_at = |at: usize| -> Option<usize> {
+        Some(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?) as usize)
+    };
+    let count = u16_at(0)?;
+    let current = u16_at(data.len().checked_sub(2)?)?;
+    for index in current + 1..count {
+        let mut at = u16_at(2 + 2 * index)?;
+        let accounts = u16_at(at)?;
+        at += 2;
+        let third = if accounts > 2 {
+            Some(data.get(at + 2 * 33 + 1..at + 3 * 33)?)
+        } else {
+            None
+        };
+        at += 33 * accounts;
+        let program = data.get(at..at + 32)?;
+        at += 32;
+        let len = u16_at(at)?;
+        at += 2;
+        let ix_data = data.get(at..at + len)?;
+        if program == crate::ID.as_ref()
+            && ix_data.get(..8) == Some(discriminator)
+            && third == Some(pool.as_ref())
+        {
+            return Some(true);
+        }
+    }
+    Some(false)
+}
+
+/// `buffer_all`: anyone wraps all of a native pool's lamport quote (`Pool::lamports_quote`) into
+/// its quote vault, the signer's wallet wrapping it as `rebalance_pool` does, so the vault holds the
+/// pool's whole books. Only for the rest of the transaction: the instructions sysvar (the first
+/// remaining account) must show a later top-level `rebalance_pool` of this program on this pool,
+/// which moves the buffer back to its target. The books, the reserves and the pool's value are
+/// unchanged; only the form of its quote moves, and back.
+pub fn process_buffer_all<'info>(ctx: Context<'info, QuoteForm<'info>>) -> Result<()> {
+    use anchor_lang::Discriminator;
+    require!(ctx.accounts.pool.quote_native(), SwapError::NotNativePool);
+    let sysvar = ctx
+        .remaining_accounts
+        .first()
+        .ok_or(SwapError::NoRebalanceAfter)?;
+    require_keys_eq!(
+        *sysvar.key,
+        INSTRUCTIONS_SYSVAR,
+        SwapError::NoRebalanceAfter
+    );
+    let found = rebalance_follows(
+        &sysvar.try_borrow_data()?,
+        &ctx.accounts.pool.key(),
+        crate::instruction::RebalancePool::DISCRIMINATOR,
+    )
+    .ok_or(SwapError::NoRebalanceAfter)?;
+    require!(found, SwapError::NoRebalanceAfter);
+    let wrapped = ctx
+        .accounts
+        .pool
+        .lamports_quote()
+        .ok_or(SwapError::NativeInvariant)?;
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let bridge = bridge_sol!(ctx.accounts);
+    bridge.check()?;
+    bridge.wrap_from_pool(
+        &pool_info,
+        &ctx.accounts.signer.to_account_info(),
+        &ctx.accounts.quote_vault.to_account_info(),
+        wrapped,
+    )?;
+    buffer_in(&mut ctx.accounts.pool, wrapped)?;
+    let pool = &ctx.accounts.pool;
+    check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
+    emit_cpi!(form_event(pool, FORM_BUFFERED_ALL, 0, wrapped)?);
+    Ok(())
+}
+
 /// `set_buffer_target`: the admin sets the buffer a native pool's `rebalance_pool` moves toward.
 pub fn process_set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
     require_keys_eq!(
@@ -999,4 +1087,70 @@ pub fn process_set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) ->
     pool.set_buffer_target(buffer_target);
     emit_cpi!(form_event(pool, FORM_TARGET_SET, 0, 0)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod buffer_all_tests {
+    use super::*;
+    use anchor_lang::solana_program::sysvar::instructions::{
+        construct_instructions_data, BorrowedAccountMeta, BorrowedInstruction,
+    };
+    use anchor_lang::Discriminator;
+
+    /// The instructions sysvar's data for `ixs`, `current` the instruction running.
+    fn sysvar(ixs: &[(Pubkey, Vec<Pubkey>, Vec<u8>)], current: u16) -> Vec<u8> {
+        let borrowed: Vec<BorrowedInstruction> = ixs
+            .iter()
+            .map(|(program, keys, data)| BorrowedInstruction {
+                program_id: program,
+                accounts: keys
+                    .iter()
+                    .map(|k| BorrowedAccountMeta {
+                        pubkey: k,
+                        is_signer: false,
+                        is_writable: true,
+                    })
+                    .collect(),
+                data,
+            })
+            .collect();
+        let mut data = construct_instructions_data(&borrowed);
+        let n = data.len();
+        data[n - 2..].copy_from_slice(&current.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn rebalance_follows_needs_a_later_rebalance_of_the_same_pool() {
+        let pool = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let rebalance = crate::instruction::RebalancePool::DISCRIMINATOR;
+        let buffer_all = crate::instruction::BufferAll::DISCRIMINATOR.to_vec();
+        let ix = |program: Pubkey, p: Pubkey, d: &[u8]| (program, vec![a, b, p], d.to_vec());
+        let me = ix(crate::ID, pool, &buffer_all);
+        let reb = |p: Pubkey| ix(crate::ID, p, rebalance);
+        let step = (Pubkey::new_unique(), vec![a, pool], vec![1, 2, 3]);
+        let found = |ixs: &[(Pubkey, Vec<Pubkey>, Vec<u8>)], current: u16| {
+            rebalance_follows(&sysvar(ixs, current), &pool, rebalance)
+        };
+        // buffer_all, the step, rebalance_pool of the pool: accepted.
+        assert_eq!(found(&[me.clone(), step.clone(), reb(pool)], 0), Some(true));
+        // Alone, or only a rebalance before it, or of another pool, or another program's: refused.
+        assert_eq!(found(&[me.clone()], 0), Some(false));
+        assert_eq!(found(&[reb(pool), me.clone()], 1), Some(false));
+        assert_eq!(found(&[me.clone(), reb(other)], 0), Some(false));
+        assert_eq!(
+            found(&[me.clone(), ix(Pubkey::new_unique(), pool, rebalance)], 0),
+            Some(false)
+        );
+        // Another instruction of this program on the pool (buffer_all again): refused.
+        assert_eq!(found(&[me.clone(), me.clone()], 0), Some(false));
+        // An instruction with fewer than three accounts after it is skipped, not misread.
+        let short = (crate::ID, vec![a], rebalance.to_vec());
+        assert_eq!(found(&[me.clone(), short, reb(pool)], 0), Some(true));
+        // Nothing after the last instruction: refused. Truncated data (a count of two, no offsets): none.
+        assert_eq!(rebalance_follows(&[1, 0], &pool, rebalance), Some(false));
+        assert_eq!(rebalance_follows(&[2, 0, 0, 0], &pool, rebalance), None);
+    }
 }

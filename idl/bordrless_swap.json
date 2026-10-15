@@ -121,6 +121,99 @@
       ]
     },
     {
+      "name": "buffer_all",
+      "docs": [
+        "Anyone: wraps all of a native pool's lamport quote into its buffer, for the rest of the",
+        "transaction only: a later instruction of the same transaction must be `rebalance_pool` on",
+        "the same pool (the instructions sysvar is the first remaining account). Its books and its",
+        "value do not change; it lets a program that checks the quote vault against the books (a",
+        "Workshop script written for bridged pools) run on a native pool."
+      ],
+      "discriminator": [
+        214,
+        169,
+        106,
+        187,
+        208,
+        200,
+        232,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "bridge_program",
+          "address": "CtLkuFVitoXHTa86Hfp8KmfSDfqJaMYFWr6EGmQVsKb7"
+        },
+        {
+          "name": "bridge_config"
+        },
+        {
+          "name": "sol_wrapper",
+          "writable": true
+        },
+        {
+          "name": "sol_vault",
+          "writable": true
+        },
+        {
+          "name": "bridged_sol_mint",
+          "writable": true
+        },
+        {
+          "name": "bridge_event_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "collect_protocol_fees",
       "docs": [
         "Admin: moves the accrued protocol fees of a pool (always in its quote token) to the fee",
@@ -1954,6 +2047,11 @@
       "code": 6047,
       "name": "NotPaused",
       "msg": "the DEX must be paused for this"
+    },
+    {
+      "code": 6048,
+      "name": "NoRebalanceAfter",
+      "msg": "buffer_all needs a later rebalance_pool of the same pool in the same transaction"
     }
   ],
   "types": [

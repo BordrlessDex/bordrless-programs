@@ -101,6 +101,8 @@ pub enum SwapError {
     WrongNativeAccount,
     #[msg("the DEX must be paused for this")]
     NotPaused,
+    #[msg("buffer_all needs a later rebalance_pool of the same pool in the same transaction")]
+    NoRebalanceAfter,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.

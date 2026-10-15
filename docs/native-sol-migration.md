@@ -32,6 +32,15 @@ Before the window, re-list every pool's `hook_program` (`getProgramAccounts` on 
 `dataSize 411`, Option tag at byte 171, key at 172..204) and confirm every other pool's hook is the
 launchpad `1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC`.
 
+## Held coins (pool native, the rest bridged)
+
+The coins whose companion runs a Workshop script that checks the pool's quote vault against its books and buys from the creator's
+bridged SOL (PumpTek `HxsFA5…`, Turbo PumpTek `DMQE7D…`; the server's `NATIVE_SCRIPT_HOLD`) get step 1 only: the pool goes native,
+the launch, kit, companion and hook vault stay bridged. Each script step is sent as one transaction `buffer_all` → step →
+`rebalance_pool`: `buffer_all` (anyone, a plain wallet) wraps the pool's lamport quote into its vault, and is refused
+(`NoRebalanceAfter`) unless a later top-level `rebalance_pool` of the same pool is in the transaction, which moves it back to the
+target. The books, the reserves and the pool's value never change; only the quote's form moves, and back.
+
 ## Order
 
 ### 0. Upgrade, everything paused
@@ -104,7 +113,7 @@ Reverse order per coin, each idempotent:
 ## New entry points (for the SDK)
 
 - DEX: `swap_v2`, `create_native_pool`, `migrate_pool_to_native`, `revert_pool_to_bridged`,
-  `rebalance_pool`, `set_buffer_target`; events `SwappedNative`, `PoolQuoteFormChanged`.
+  `rebalance_pool`, `set_buffer_target`, `buffer_all`; events `SwappedNative`, `PoolQuoteFormChanged`.
 - Launchpad: `claim_creator_fees_sol`, `claim_author_fees_sol`, `distribute_fees_sol`,
   `set_native_launches`, `migrate_launch_to_native`, `revert_launch_to_bridged`; client `swap_v2`.
 - Kit: `claim_sol`, `share_sol`, `set_native` (launchpad only).
