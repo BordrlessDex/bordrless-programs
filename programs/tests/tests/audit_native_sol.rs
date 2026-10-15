@@ -1,8 +1,9 @@
 //! Native-SOL upgrade audit (branch `native-sol-audit`, `docs/native-sol-audit.md`): adversarial
 //! LiteSVM tests against the native-SOL paths of the DEX, the launchpad, the kit, the companion,
-//! hook_vault and the router. Each test either proves a finding (its name starts `finding_`) or
-//! rules an attack out (`ruled_out_`). A finding test asserts today's (faulty) behaviour, so it
-//! passes on `native-sol` and is expected to fail once the finding is fixed.
+//! hook_vault and the router. Each test either rules an attack out (`ruled_out_`) or covers a
+//! finding (`fixed_`). The finding tests first asserted the faulty behaviour; each is now inverted
+//! to prove its fix (the doc comment keeps the original finding, the test's end says what holds
+//! now). The `buffer_all` tests (programs `native-sol-held`) follow the original file.
 
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::solana_program::instruction::Instruction;
@@ -132,7 +133,7 @@ fn launch_fees(w: &World, mint: &Pubkey) -> (u64, u64) {
 // Kit: a lamport donation to a native kit without holder rewards blocks the rollback.
 // ---------------------------------------------------------------------------------------------
 
-/// FINDING (kit `set_native(false)`): a native kit whose config holds lamports above its base and
+/// FIXED; the finding was (kit `set_native(false)`): a native kit whose config holds lamports above its base and
 /// has no holder rewards (no reward vault) can never turn back: `set_native(false)` debits the
 /// lamports and then asks for the vault (`MissingRewardVault`). Anyone can send the kit config a
 /// lamport, so anyone can permanently block `revert_launch_to_bridged` for every native coin whose
@@ -230,7 +231,7 @@ fn partner_launch(w: &mut World, partner: Pubkey) -> (Pubkey, Keypair, Pubkey) {
     (mint, creator, config.pubkey())
 }
 
-/// FINDING (launchpad `pay_sol` to `PartnerFee.partner`): the `_sol` claims pay the partner's part
+/// FIXED; the finding was (launchpad `pay_sol` to `PartnerFee.partner`): the `_sol` claims pay the partner's part
 /// as lamports straight to the partner key, which `create_partner_config` takes unchecked (any key
 /// but the default). A partner key that can't take lamports (an executable program, or a key the
 /// runtime always demotes to read-only, like a sysvar) makes every SOL claim of every native
@@ -447,7 +448,12 @@ impl M {
 
     fn migrate(&mut self, pool: &Pubkey, target: u64) -> Tx {
         let admin = self.admin();
-        self.paused(swap::migrate_pool_to_native_with(admin.pubkey(), *pool, target, true))
+        self.paused(swap::migrate_pool_to_native_with(
+            admin.pubkey(),
+            *pool,
+            target,
+            true,
+        ))
     }
 
     fn revert(&mut self, pool: &Pubkey) -> Tx {
@@ -901,7 +907,7 @@ fn ruled_out_native_cuts_to_the_pool_vaults_trader_or_executables() {
 // The buffer: the old swap's sells, and who moves the buffer.
 // ---------------------------------------------------------------------------------------------
 
-/// FINDING (compatibility, griefing): at the recommended buffer target of 0, the old `swap`'s
+/// FIXED; the finding was (compatibility, griefing): at the recommended buffer target of 0, the old `swap`'s
 /// sells on a native pool work only while bridged SOL from earlier old-path buys sits in the
 /// buffer, and `rebalance_pool` is permissionless: anyone can empty the buffer (toward the target)
 /// right before an old-path sell, which then fails with `BufferShort`. Integrators still on the old
@@ -988,7 +994,7 @@ fn ruled_out_swap_and_swap_v2_price_identically_whatever_the_buffer() {
 // Migration ordering.
 // ---------------------------------------------------------------------------------------------
 
-/// FINDING (ordering not enforced on the way back): `revert_pool_to_bridged` does not check that
+/// FIXED; the finding was (ordering not enforced on the way back): `revert_pool_to_bridged` does not check that
 /// the pool's launch was reverted first. A pool reverted while its launch is still native makes
 /// the launch hook name the launch account (lamports) as a bridged pool's quote cut, so every swap
 /// of the coin, old and new, fails (`InvalidDeltaAccount` / `NotNativePool`) until the pool is
@@ -1013,8 +1019,11 @@ fn fixed_a_pool_cannot_revert_before_its_launch() {
     // launch is passed or not.
     as_admin(&mut w, &[swap::revert_pool_to_bridged(ad, pool)])
         .expect_code(code(SwapError::LaunchStillNative));
-    as_admin(&mut w, &[swap::revert_launch_pool_to_bridged(ad, pool, mint)])
-        .expect_code(code(SwapError::LaunchStillNative));
+    as_admin(
+        &mut w,
+        &[swap::revert_launch_pool_to_bridged(ad, pool, mint)],
+    )
+    .expect_code(code(SwapError::LaunchStillNative));
     assert!(w.env.read::<Pool>(&pool).quote_native());
     // In order it works: the launch, then the pool.
     as_admin(
@@ -1022,7 +1031,11 @@ fn fixed_a_pool_cannot_revert_before_its_launch() {
         &[launch::revert_launch_to_bridged(ad, mint, sol, modules)],
     )
     .ok();
-    as_admin(&mut w, &[swap::revert_launch_pool_to_bridged(ad, pool, mint)]).ok();
+    as_admin(
+        &mut w,
+        &[swap::revert_launch_pool_to_bridged(ad, pool, mint)],
+    )
+    .ok();
     pause(&mut w, false);
     assert!(!w.env.read::<Pool>(&pool).quote_native());
     w.buy(&a, &mint, SOL / 10).ok();
@@ -1073,7 +1086,7 @@ fn ruled_out_pool_native_launch_bridged_still_trades_exactly() {
 // Companion.
 // ---------------------------------------------------------------------------------------------
 
-/// FINDING (companion `native_at_launch`): a companion created before `quote_cut_claimed`
+/// FIXED; the finding was (companion `native_at_launch`): a companion created before `quote_cut_claimed`
 /// (300 bytes) that has not launched yet can't launch once native launches are on:
 /// `grow_for_native` requires `quote_cut_claimed` stored and `process_launch` never grows it
 /// first (`MissingAccount`). The cloned-mainnet dump has three such companions. Their funding is
@@ -1157,7 +1170,7 @@ fn fixed_an_old_unlaunched_companion_launches_native() {
 // hook_vault: a vault made for a coin launched native.
 // ---------------------------------------------------------------------------------------------
 
-/// FINDING (hook_vault has no native-at-creation path): once native launches are on, a coin made
+/// FIXED; the finding was (hook_vault has no native-at-creation path): once native launches are on, a coin made
 /// with a hook vault launches native (pool, launch, kit) but its vault is created bridged, and only
 /// `migrate_vault_to_native` (the upgrade authority, with the whole DEX paused) turns it native.
 /// Until then every slot sale goes through the old swap's buffer and fails with `BufferShort`
@@ -1221,7 +1234,7 @@ fn kit_world() -> (World, Pubkey, Keypair, Keypair) {
     (w, mint, payer, b)
 }
 
-/// FINDING (fairness, old swap on a native launch pool): the old swap pays a native pool's
+/// FIXED; the finding was (fairness, old swap on a native launch pool): the old swap pays a native pool's
 /// lamport cuts only after every CPI (`pending`), so on an old-path buy the holder fee reaches the
 /// kit config after the kit's transfer hook has already settled the buyer at its new balance; the
 /// next sync then shares the fee with the buyer too. On `swap_v2` (and on bridged pools) the fee
@@ -1265,7 +1278,7 @@ fn fixed_old_path_buyer_no_longer_shares_its_own_holder_fee() {
 // Liquidity providers of a native pool.
 // ---------------------------------------------------------------------------------------------
 
-/// FINDING (LPs locked at buffer target 0): `remove_liquidity` on a native pool pays the quote in
+/// FIXED; the finding was (LPs locked at buffer target 0): `remove_liquidity` on a native pool pays the quote in
 /// bridged SOL from the buffer only. A third party's deposit joins the buffer, the permissionless
 /// `rebalance_pool` (or the keeper) unwraps it to lamports toward the target of 0, and the LP can
 /// no longer withdraw (`BufferShort`); only the admin's `set_buffer_target` (or the LP buying
@@ -1324,7 +1337,6 @@ fn fixed_an_lp_of_a_native_pool_withdraws_at_target_zero() {
 // `buffer_all` (branch `native-sol-held`, 963ad6d).
 // ---------------------------------------------------------------------------------------------
 
-
 /// RULED OUT (introspection bypasses): `buffer_all` is refused alone, with a rebalance of another
 /// pool after it, with a rebalance only before it, without the instructions sysvar or with another
 /// account in its place, on a bridged pool, and for a second pool whose rebalance is missing. With
@@ -1348,7 +1360,7 @@ fn ruled_out_buffer_all_needs_a_later_rebalance_of_the_same_pool() {
     m.inv2(&pool, 0, 0);
     // A second native pool (another base mint).
     let mut m2_extras = m.extras();
-    m2_extras.truncate(0);
+    m2_extras.clear();
     let owner = m.owner.insecure_clone();
     let b = m.w.mint_to_owner(&owner, 6, SUPPLY, "BBB");
     let spec = NewPool {
@@ -1369,7 +1381,8 @@ fn ruled_out_buffer_all_needs_a_later_rebalance_of_the_same_pool() {
     let refused = code(SwapError::NoRebalanceAfter);
     let before = (m.state(&pool), m.lamports(&pool), m.lamports(&c));
     m.send(&[ba(pool)], &cranker).expect_code(refused);
-    m.send(&[ba(pool), rb(other)], &cranker).expect_code(refused);
+    m.send(&[ba(pool), rb(other)], &cranker)
+        .expect_code(refused);
     m.send(&[rb(pool), ba(pool)], &cranker).expect_code(refused);
     m.send(&[ba(pool), rb(pool), ba(pool)], &cranker)
         .expect_code(refused);
@@ -1378,7 +1391,8 @@ fn ruled_out_buffer_all_needs_a_later_rebalance_of_the_same_pool() {
     // No sysvar, or another account where it goes.
     let mut no_sysvar = ba(pool);
     no_sysvar.accounts.pop();
-    m.send(&[no_sysvar, rb(pool)], &cranker).expect_code(refused);
+    m.send(&[no_sysvar, rb(pool)], &cranker)
+        .expect_code(refused);
     let mut fake = ba(pool);
     let n = fake.accounts.len();
     fake.accounts[n - 1] = AccountMeta::new_readonly(swap::config_address(), false);
@@ -1399,10 +1413,19 @@ fn ruled_out_buffer_all_needs_a_later_rebalance_of_the_same_pool() {
     let tx = m.send(&[ba(pool), ba(pool), rb(pool)], &cranker);
     tx.ok();
     let evs = tx.events::<bordrless_swap::events::PoolQuoteFormChanged>();
-    assert_eq!(evs.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![4, 4, 2]);
-    assert_eq!(evs[0].buffer_quote, books, "the window holds the whole books in the vault");
+    assert_eq!(
+        evs.iter().map(|e| e.kind).collect::<Vec<_>>(),
+        vec![4, 4, 2]
+    );
+    assert_eq!(
+        evs[0].buffer_quote, books,
+        "the window holds the whole books in the vault"
+    );
     assert_eq!(evs[0].wrapped, books - p0.buffer_quote());
-    assert_eq!(evs[1].wrapped, 0, "a second buffer_all has nothing left to wrap");
+    assert_eq!(
+        evs[1].wrapped, 0,
+        "a second buffer_all has nothing left to wrap"
+    );
     assert_eq!(evs[2].unwrapped, books - SOL);
     let p1 = m.state(&pool);
     assert_eq!(p1.buffer_quote(), SOL, "back at the target");
@@ -1436,10 +1459,7 @@ fn ruled_out_trades_inside_the_buffer_all_window_are_value_neutral() {
         let c = cranker.pubkey();
         let trader = m.trader.insecure_clone();
         let sell = m.bal(&m.a, &t) / 3;
-        let sell_ix = m
-            .w
-            .env
-            .swap_ix(&SwapSpec::new(t, pool, 0, sell));
+        let sell_ix = m.w.env.swap_ix(&SwapSpec::new(t, pool, 0, sell));
         let buy_ix = m.v2_ix_by(&t, &pool, 1, SOL, &t);
         let q0 = m.bal(&m.sol, &t);
         let l0 = m.lamports(&t);
@@ -1469,7 +1489,11 @@ fn ruled_out_trades_inside_the_buffer_all_window_are_value_neutral() {
         // A v2 sell inside a window fails, and with it the whole transaction.
         let payer = m.payer.insecure_clone();
         let v2_sell = m.v2_ix_by(&t, &pool, 0, m.bal(&m.a, &t) / 4, &t);
-        let snapshot = (m.state(&pool).buffer_quote(), m.lamports(&pool), m.lamports(&t));
+        let snapshot = (
+            m.state(&pool).buffer_quote(),
+            m.lamports(&pool),
+            m.lamports(&t),
+        );
         m.w.env
             .send_paid_by(
                 &[
@@ -1483,7 +1507,11 @@ fn ruled_out_trades_inside_the_buffer_all_window_are_value_neutral() {
             .expect_fail();
         assert_eq!(
             snapshot,
-            (m.state(&pool).buffer_quote(), m.lamports(&pool), m.lamports(&t))
+            (
+                m.state(&pool).buffer_quote(),
+                m.lamports(&pool),
+                m.lamports(&t)
+            )
         );
         // An LP withdraws inside a window (the N-4 way out): its quote is covered.
         let o = m.owner.insecure_clone();
@@ -1512,17 +1540,25 @@ fn ruled_out_trades_inside_the_buffer_all_window_are_value_neutral() {
             )
             .ok();
         m.inv2(&pool, 0, 0);
-        (
-            m.bal(&m.sol, &t) - q0,
-            l0 - m.lamports(&t),
-            m.state(&pool),
-        )
+        (m.bal(&m.sol, &t) - q0, l0 - m.lamports(&t), m.state(&pool))
     };
     let (q_in, l_in, p_in) = run(true);
     let (q_out, l_out, p_out) = run(false);
-    assert_eq!((q_in, l_in), (q_out, l_out), "the trader's result is the same");
     assert_eq!(
-        (p_in.quote_reserve, p_in.base_reserve, p_in.protocol_fees_quote),
-        (p_out.quote_reserve, p_out.base_reserve, p_out.protocol_fees_quote)
+        (q_in, l_in),
+        (q_out, l_out),
+        "the trader's result is the same"
+    );
+    assert_eq!(
+        (
+            p_in.quote_reserve,
+            p_in.base_reserve,
+            p_in.protocol_fees_quote
+        ),
+        (
+            p_out.quote_reserve,
+            p_out.base_reserve,
+            p_out.protocol_fees_quote
+        )
     );
 }

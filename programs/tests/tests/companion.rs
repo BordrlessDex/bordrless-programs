@@ -566,7 +566,8 @@ fn a_launch_reverts_only_after_its_companion() {
     w.pause_dex(true);
     w.as_admin(launch::revert_launch_to_bridged(a, mint, sol, modules))
         .expect_code(bordrless_launch::error::LaunchError::CompanionStillNative.into());
-    w.as_admin(companion::revert_companion_to_bridged(a, mint)).ok();
+    w.as_admin(companion::revert_companion_to_bridged(a, mint))
+        .ok();
     w.as_admin(launch::revert_launch_to_bridged(a, mint, sol, modules))
         .ok();
     w.pause_dex(false);

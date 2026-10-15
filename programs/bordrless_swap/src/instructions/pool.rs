@@ -1134,6 +1134,21 @@ pub fn process_set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) ->
     Ok(())
 }
 
+/// Whether a launch account's data (`bordrless_launch::state::Launch`) says the launch is native
+/// (see `LAUNCH_CUSTOM_HOOK_OFFSET`).
+pub fn launch_is_native(data: &[u8]) -> Result<bool> {
+    let tag = *data
+        .get(LAUNCH_CUSTOM_HOOK_OFFSET)
+        .ok_or(SwapError::LaunchStillNative)?;
+    let hook_len = match tag {
+        0 => 1,
+        1 => 33,
+        _ => return err!(SwapError::LaunchStillNative),
+    };
+    let flag = LAUNCH_CUSTOM_HOOK_OFFSET + hook_len + 2 + 2 + 8 + 17;
+    Ok(*data.get(flag).ok_or(SwapError::LaunchStillNative)? == 1)
+}
+
 #[cfg(test)]
 mod buffer_all_tests {
     use super::*;
@@ -1182,7 +1197,7 @@ mod buffer_all_tests {
         // buffer_all, the step, rebalance_pool of the pool: accepted.
         assert_eq!(found(&[me.clone(), step.clone(), reb(pool)], 0), Some(true));
         // Alone, or only a rebalance before it, or of another pool, or another program's: refused.
-        assert_eq!(found(&[me.clone()], 0), Some(false));
+        assert_eq!(found(std::slice::from_ref(&me), 0), Some(false));
         assert_eq!(found(&[reb(pool), me.clone()], 1), Some(false));
         assert_eq!(found(&[me.clone(), reb(other)], 0), Some(false));
         assert_eq!(
@@ -1200,17 +1215,3 @@ mod buffer_all_tests {
     }
 }
 
-/// Whether a launch account's data (`bordrless_launch::state::Launch`) says the launch is native
-/// (see `LAUNCH_CUSTOM_HOOK_OFFSET`).
-pub fn launch_is_native(data: &[u8]) -> Result<bool> {
-    let tag = *data
-        .get(LAUNCH_CUSTOM_HOOK_OFFSET)
-        .ok_or(SwapError::LaunchStillNative)?;
-    let hook_len = match tag {
-        0 => 1,
-        1 => 33,
-        _ => return err!(SwapError::LaunchStillNative),
-    };
-    let flag = LAUNCH_CUSTOM_HOOK_OFFSET + hook_len + 2 + 2 + 8 + 17;
-    Ok(*data.get(flag).ok_or(SwapError::LaunchStillNative)? == 1)
-}

@@ -30,7 +30,8 @@ pub const FEE_MODEL_SHARE: u8 = 1;
 pub const LAUNCHPAD_ID: anchor_lang::prelude::Pubkey =
     anchor_lang::prelude::Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
 /// Discriminator length.
-pub const DISCRIMINATOR_LEN: usize = 8;/// The launchpad's launch seed (`bordrless_launch::constants::LAUNCH_SEED`; the test suite checks
+pub const DISCRIMINATOR_LEN: usize = 8;
+/// The launchpad's launch seed (`bordrless_launch::constants::LAUNCH_SEED`; the test suite checks
 /// it): `revert_pool_to_bridged` reads a launch pool's launch.
 pub const LAUNCH_SEED: &[u8] = b"launch";
 /// Byte offset of `bordrless_launch::state::Launch::custom_hook`'s option tag in a launch account.

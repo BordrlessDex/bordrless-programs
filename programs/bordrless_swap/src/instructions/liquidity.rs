@@ -503,7 +503,11 @@ pub fn process_remove_liquidity<'info>(
         check_credit_rent(&provider, quote_lamports)?;
         move_lamports(&pool_info, &provider, quote_lamports)?;
     }
-    check_native(&pool_info, &ctx.accounts.pool, Some(&ctx.accounts.quote_vault))?;
+    check_native(
+        &pool_info,
+        &ctx.accounts.pool,
+        Some(&ctx.accounts.quote_vault),
+    )?;
     let pool = &ctx.accounts.pool;
     emit_cpi!(LiquidityRemoved {
         pool: pool_key,

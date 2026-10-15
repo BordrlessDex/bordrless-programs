@@ -221,7 +221,12 @@ impl M {
 
     fn migrate(&mut self, pool: &Pubkey, target: u64) -> Tx {
         let admin = self.admin();
-        let tx = self.paused(swap::migrate_pool_to_native_with(admin.pubkey(), *pool, target, true));
+        let tx = self.paused(swap::migrate_pool_to_native_with(
+            admin.pubkey(),
+            *pool,
+            target,
+            true,
+        ));
         self.w.env.warp(1);
         tx
     }
@@ -370,7 +375,12 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
     // Nobody but the admin migrates or reverts.
     let stranger = m.w.env.funded(SOL);
     let tx = m.send(
-        &[swap::migrate_pool_to_native_with(stranger.pubkey(), pool, 0, true)],
+        &[swap::migrate_pool_to_native_with(
+            stranger.pubkey(),
+            pool,
+            0,
+            true,
+        )],
         &stranger,
     );
     tx.expect_code(code(SwapError::NotAdmin));
@@ -390,7 +400,12 @@ fn migrate_and_revert_round_trip_a_pool_with_reserves_and_fees() {
     // Not while the DEX trades.
     let admin = m.admin();
     m.send(
-        &[swap::migrate_pool_to_native_with(admin.pubkey(), pool, 0, true)],
+        &[swap::migrate_pool_to_native_with(
+            admin.pubkey(),
+            pool,
+            0,
+            true,
+        )],
         &admin,
     )
     .expect_code(code(SwapError::NotPaused));
@@ -1275,11 +1290,20 @@ fn the_native_flag_offsets_match_the_accounts() {
     use bordrless_launch::constants as lc;
     use bordrless_launch::state::Launch;
     assert_eq!(bordrless_swap::constants::LAUNCH_SEED, lc::LAUNCH_SEED);
-    assert_eq!(bordrless_swap::constants::LAUNCHPAD_ID, bordrless_launch::ID);
-    assert_eq!(lc::COMPANION_SEED, bordrless_companion::constants::COMPANION_SEED);
+    assert_eq!(
+        bordrless_swap::constants::LAUNCHPAD_ID,
+        bordrless_launch::ID
+    );
+    assert_eq!(
+        lc::COMPANION_SEED,
+        bordrless_companion::constants::COMPANION_SEED
+    );
     assert_eq!(lc::HOOK_VAULT_SEED, hook_vault::constants::VAULT_SEED);
     assert_eq!(lc::HOOK_VAULT_ID, hook_vault::ID);
-    assert_eq!(bordrless_companion::state::Companion::LEN, lc::COMPANION_NATIVE_OFFSET);
+    assert_eq!(
+        bordrless_companion::state::Companion::LEN,
+        lc::COMPANION_NATIVE_OFFSET
+    );
     for hook in [None, Some(Pubkey::new_unique())] {
         for native in [false, true] {
             // SAFETY: a plain-data account struct; every field is overwritten or zero is valid.

@@ -1871,7 +1871,8 @@ fn a_launch_reverts_only_after_its_vault() {
     w.as_admin(bare)
         .expect_code(bordrless_launch::error::LaunchError::VaultStillNative.into());
     let v = w.vault(&m);
-    w.as_admin(vault_client::set_vault_native(a, &v, false)).ok();
+    w.as_admin(vault_client::set_vault_native(a, &v, false))
+        .ok();
     w.as_admin(ix).ok();
     w.pause_dex(false);
     assert!(!w.launch(&m).is_native());

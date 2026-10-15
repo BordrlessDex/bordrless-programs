@@ -510,7 +510,11 @@ pub fn revert_pool_to_bridged(admin: Pubkey, pool: Pubkey) -> Instruction {
 
 /// `revert_pool_to_bridged` of a launch pool (its hook the launchpad): the launch of `base_mint`
 /// is passed (read) so the DEX can check it reverted first.
-pub fn revert_launch_pool_to_bridged(admin: Pubkey, pool: Pubkey, base_mint: Pubkey) -> Instruction {
+pub fn revert_launch_pool_to_bridged(
+    admin: Pubkey,
+    pool: Pubkey,
+    base_mint: Pubkey,
+) -> Instruction {
     let mut ix = revert_pool_to_bridged(admin, pool);
     let (launch, _) = Pubkey::find_program_address(
         &[crate::constants::LAUNCH_SEED, base_mint.as_ref()],
