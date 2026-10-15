@@ -1949,6 +1949,11 @@
       "code": 6046,
       "name": "WrongNativeAccount",
       "msg": "the account cannot pay or receive SOL here"
+    },
+    {
+      "code": 6047,
+      "name": "NotPaused",
+      "msg": "the DEX must be paused for this"
     }
   ],
   "types": [
