@@ -1,0 +1,1935 @@
+{
+  "address": "5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG",
+  "metadata": {
+    "name": "hook_vault",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Bordrless hook vault: a launchpad coin's token hook sends its cuts to up to three slots, each with a policy fixed before the launch (burn, sell for SOL to a fixed wallet, or sell and buy-and-burn another token), run by anyone under a port of the companion's buyback guards."
+  },
+  "instructions": [
+    {
+      "name": "create_vault",
+      "docs": [
+        "Makes the vault of `mint` (not created yet; it signs): the coin's hook, the slots' policies,",
+        "the bounty, the sell limits and the interval, all fixed for good. Remaining: each",
+        "`SellBuyBurn` slot's pool and that pool's launch."
+      ],
+      "discriminator": [
+        29,
+        237,
+        247,
+        208,
+        193,
+        82,
+        54,
+        135
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The coin's mint, a fresh keypair: it signs here, so only whoever holds it can make its vault",
+            "(nobody can make one first and route the coin's cuts to their own wallet), and its launch",
+            "later (exactly as the companion's `create`). It must not exist yet (no data, the system",
+            "program's): the vault, and so every slot's policy, is fixed before the coin is launched."
+          ],
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateVaultArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "execute",
+      "docs": [
+        "Anyone: runs slot `i`: burns its coin, or sells a slice of it (or waits), paying the SOL to",
+        "the slot's wallet or keeping it for the slot's buy."
+      ],
+      "discriminator": [
+        130,
+        221,
+        242,
+        154,
+        13,
+        193,
+        189,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty (as SOL), and pays any holding a step creates."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.mint",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "slot_owner",
+          "writable": true
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "i",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "execute_buy",
+      "docs": [
+        "Anyone: a `SellBuyBurn` slot buys the other token with the SOL its sells left (or waits),",
+        "and burns it."
+      ],
+      "discriminator": [
+        14,
+        137,
+        248,
+        5,
+        172,
+        244,
+        183,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty (as SOL), and pays any holding a step creates."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.mint",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "slot_owner",
+          "writable": true
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "i",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "migrate_vault_to_native",
+      "docs": [
+        "The upgrade authority, with the DEX paused and the coin's launch native: turns the vault",
+        "native (each slot's pending SOL unwrapped onto its owner). Idempotent."
+      ],
+      "discriminator": [
+        77,
+        196,
+        1,
+        138,
+        47,
+        126,
+        199,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "dex_config",
+          "address": "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.mint",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_vault",
+      "docs": [
+        "The vault's creator (or a sender with the mint's keypair signing), once the coin is launched",
+        "with the vault's hook: creates the slots' holdings (the sender pays) and sets the reference",
+        "prices (the sells': the coin's pool price, at most its launch's opening price)."
+      ],
+      "discriminator": [
+        181,
+        248,
+        228,
+        67,
+        6,
+        175,
+        37,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "sender",
+          "docs": [
+            "The vault's creator (`Vault::creator`, who paid for it), or anyone with the coin's mint",
+            "keypair signing too; pays the holdings' rent (and each selling slot owner's)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.mint",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch",
+          "docs": [
+            "launchpad owns it)."
+          ]
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "keypair, as at `create_vault`), which lets a sender other than the creator open."
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "retire",
+      "docs": [
+        "Anyone, after 60 days in which slot `i` did not run: burns its SOL (to the incinerator) and,",
+        "with `burn_coin`, its coin. Nobody receives anything."
+      ],
+      "discriminator": [
+        44,
+        138,
+        153,
+        31,
+        222,
+        53,
+        21,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty (as SOL), and pays any holding a step creates."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.mint",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "slot_owner",
+          "writable": true
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "i",
+          "type": "u8"
+        },
+        {
+          "name": "burn_coin",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "revert_vault_to_bridged",
+      "docs": [
+        "The upgrade authority, with the DEX paused: turns a native vault back (each slot's pending",
+        "SOL wrapped into its holding). Idempotent."
+      ],
+      "discriminator": [
+        179,
+        91,
+        16,
+        210,
+        111,
+        9,
+        183,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "dex_config",
+          "address": "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.mint",
+                "account": "Vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Vault",
+      "discriminator": [
+        211,
+        8,
+        232,
+        43,
+        2,
+        152,
+        117,
+        119
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BuyWaited",
+      "discriminator": [
+        198,
+        115,
+        43,
+        89,
+        120,
+        116,
+        254,
+        113
+      ]
+    },
+    {
+      "name": "PendingPaid",
+      "discriminator": [
+        137,
+        85,
+        173,
+        71,
+        231,
+        212,
+        55,
+        161
+      ]
+    },
+    {
+      "name": "SellWaited",
+      "discriminator": [
+        162,
+        179,
+        145,
+        226,
+        246,
+        55,
+        154,
+        167
+      ]
+    },
+    {
+      "name": "SlotBought",
+      "discriminator": [
+        223,
+        232,
+        239,
+        15,
+        153,
+        234,
+        120,
+        254
+      ]
+    },
+    {
+      "name": "SlotBurned",
+      "discriminator": [
+        63,
+        60,
+        11,
+        105,
+        32,
+        191,
+        154,
+        232
+      ]
+    },
+    {
+      "name": "SlotRetired",
+      "discriminator": [
+        48,
+        0,
+        23,
+        157,
+        31,
+        143,
+        222,
+        192
+      ]
+    },
+    {
+      "name": "SlotSold",
+      "discriminator": [
+        34,
+        38,
+        24,
+        165,
+        83,
+        251,
+        137,
+        227
+      ]
+    },
+    {
+      "name": "VaultCreated",
+      "discriminator": [
+        117,
+        25,
+        120,
+        254,
+        75,
+        236,
+        78,
+        115
+      ]
+    },
+    {
+      "name": "VaultOpened",
+      "discriminator": [
+        198,
+        250,
+        195,
+        25,
+        26,
+        107,
+        197,
+        16
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BountyTooHigh",
+      "msg": "the bounty is at most 1% of what a step moves"
+    },
+    {
+      "code": 6001,
+      "name": "BadMaxSell",
+      "msg": "one sell takes from 1 to 100 basis points of the pool's quote side"
+    },
+    {
+      "code": 6002,
+      "name": "BadInterval",
+      "msg": "the interval is from a minute to 30 days"
+    },
+    {
+      "code": 6003,
+      "name": "BadHookCut",
+      "msg": "the hook's declared cut of the vault's sell is at most 50%"
+    },
+    {
+      "code": 6004,
+      "name": "BadSlots",
+      "msg": "a vault has one to three slots, each with a policy"
+    },
+    {
+      "code": 6005,
+      "name": "BadTarget",
+      "msg": "a slot's target does not fit its policy"
+    },
+    {
+      "code": 6006,
+      "name": "BadPool",
+      "msg": "the pool to buy from must be another launchpad token's pool quoted in bridged SOL, without holder rewards"
+    },
+    {
+      "code": 6007,
+      "name": "BadHook",
+      "msg": "the hook must be a program of the coin's own, not a protocol program"
+    },
+    {
+      "code": 6008,
+      "name": "MissingAccount",
+      "msg": "an account the step needs was not passed"
+    },
+    {
+      "code": 6009,
+      "name": "AlreadyOpen",
+      "msg": "the vault is open already"
+    },
+    {
+      "code": 6010,
+      "name": "NotOpen",
+      "msg": "the vault is not open yet"
+    },
+    {
+      "code": 6011,
+      "name": "LaunchMissing",
+      "msg": "the coin has no launch yet"
+    },
+    {
+      "code": 6012,
+      "name": "WrongHook",
+      "msg": "the coin's launch or mint runs another hook than the vault's"
+    },
+    {
+      "code": 6013,
+      "name": "WrongSlot",
+      "msg": "no such slot"
+    },
+    {
+      "code": 6014,
+      "name": "WrongSlotOwner",
+      "msg": "the slot's owner is not that slot's address"
+    },
+    {
+      "code": 6015,
+      "name": "NotDue",
+      "msg": "not yet: the launch's first minute, or the slot's interval, has not passed"
+    },
+    {
+      "code": 6016,
+      "name": "NothingToDo",
+      "msg": "nothing to do yet"
+    },
+    {
+      "code": 6017,
+      "name": "NoQuote",
+      "msg": "the pool gives no quote for this amount"
+    },
+    {
+      "code": 6018,
+      "name": "MathOverflow",
+      "msg": "math overflow"
+    },
+    {
+      "code": 6019,
+      "name": "NotSellBuyBurn",
+      "msg": "only a sell-and-buy-and-burn slot buys"
+    },
+    {
+      "code": 6020,
+      "name": "NotRetirable",
+      "msg": "a slot is retired only after 60 days with no execution"
+    },
+    {
+      "code": 6021,
+      "name": "HookRegistry",
+      "msg": "the hook's registry is missing, not the hook's, or out of bounds"
+    },
+    {
+      "code": 6022,
+      "name": "MintExists",
+      "msg": "a vault is made before its coin: the mint must not exist yet"
+    },
+    {
+      "code": 6023,
+      "name": "DuplicatePool",
+      "msg": "two buy slots of one vault can't buy on the same pool"
+    },
+    {
+      "code": 6024,
+      "name": "BadWallet",
+      "msg": "the wallet paid can't take SOL: a program, a reserved key, or an address of the vault's own"
+    },
+    {
+      "code": 6025,
+      "name": "NoRoom",
+      "msg": "the bought token's wallet cap leaves no room for a buy"
+    },
+    {
+      "code": 6026,
+      "name": "NotOpener",
+      "msg": "only the vault's creator (who paid for it) or the coin's mint keypair opens a vault"
+    },
+    {
+      "code": 6027,
+      "name": "NotUpgradeAuthority",
+      "msg": "not the hook vault program's upgrade authority"
+    },
+    {
+      "code": 6028,
+      "name": "DexNotPaused",
+      "msg": "the DEX must be paused for this"
+    },
+    {
+      "code": 6029,
+      "name": "LaunchNotNative",
+      "msg": "the coin's launch is not native yet: migrate its pool and launch first"
+    }
+  ],
+  "types": [
+    {
+      "name": "BuyWaited",
+      "docs": [
+        "A buy that waited: the token's price was more than 3% above the buy's reference. The wait uses",
+        "up the slot's turn to buy."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "reference",
+            "type": "u128"
+          },
+          {
+            "name": "new_reference",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateVaultArgs",
+      "docs": [
+        "Arguments of `create_vault`. None of them can change afterwards: no instruction writes them."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hook",
+            "docs": [
+              "The coin's own token hook: the program its `LaunchConfig` names (`custom_hook`). It sends the",
+              "cuts; `open_vault` checks the launch and the mint run it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "slots",
+            "docs": [
+              "One to three slots, in the order the hook names them."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SlotArgs"
+                }
+              }
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "docs": [
+              "The crank's pay: at most 100 basis points of the SOL a step moves."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_sell_bps",
+            "docs": [
+              "The most one sell takes of the pool's quote side: 1 to 100 basis points (and never more",
+              "than the launch's `pool_share_bps`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "docs": [
+              "The least time between two sells of a slot (and two buys): a minute to 30 days."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "max_hook_cut_bps",
+            "docs": [
+              "The most the coin's own hook may cut from the vault's sell: at most 5,000 basis points."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Launch",
+      "docs": [
+        "A launch at `[\"launch\", mint]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The token."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who launched it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The pool on the DEX."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "`STATUS_CURVE` or `STATUS_GRADUATED`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee on every swap, in basis points of the quote."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee of the pool."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "docs": [
+              "Sniper window."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "docs": [
+              "LP fee at the start of the window."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "Virtual quote reserve at opening."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "virtual_base",
+            "docs": [
+              "Virtual base reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_quote",
+            "docs": [
+              "Real quote reserve at which the launch graduates."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "curve_tokens",
+            "docs": [
+              "Tokens on the curve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_tokens",
+            "docs": [
+              "Tokens reserved for graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserve_holding",
+            "docs": [
+              "The launch's holding of the token (the reserve, then nothing)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_holding",
+            "docs": [
+              "The launch's holding of the quote (creator fees)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_holding",
+            "docs": [
+              "The launch's holding of the pool's LP mint (locked for ever)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation time."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "graduated_at",
+            "docs": [
+              "Graduation time (0 until then)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_fees_accrued",
+            "docs": [
+              "Creator fees taken so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_fees_claimed",
+            "docs": [
+              "Creator fees claimed so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_topup",
+            "docs": [
+              "Base added to the pool at graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "graduation_burned",
+            "docs": [
+              "Base burned at graduation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, fixed at launch."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "modules",
+            "docs": [
+              "The kit modules of `rules` (0: no kit, no token hook)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kit_config",
+            "docs": [
+              "`PDA([\"kit\", mint], KIT_ID)`, derived whatever the modules (the pool hook's fixed key)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "holder_vault",
+            "docs": [
+              "`holding(quote_mint, kit_config)`, derived whatever the modules: the kit's reward vault",
+              "when holder rewards are on, where holder fees go."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "kit_caller_bump",
+            "docs": [
+              "Bump of `PDA([\"kit-caller\", mint], LAUNCH_ID)`, which signs the kit's `init` and",
+              "`graduate`; 0 without a kit."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The creator wallet unlocks at this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "docs": [
+              "Buys from the pool before this time are locked; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "docs": [
+              "... until this time; 0 when off."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_bought",
+            "docs": [
+              "The creator's own first buy took the normal LP fee inside the sniper window (once)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "holder_fees_accrued",
+            "docs": [
+              "Holder fees taken so far (bridged SOL, into the holder vault)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burned_on_trades",
+            "docs": [
+              "Tokens burned on trades (both sides; not the graduation burn)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "config",
+            "docs": [
+              "The `LaunchConfig` the launch was made from; the default key for inline rules."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "custom_hook",
+            "docs": [
+              "The creator's own token hook (from the config), when the token has one. It runs on every",
+              "transfer, mint and burn its flags name; nobody vets its code."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "docs": [
+              "The custom hook's flags; 0 without one."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "author_share_bps",
+            "docs": [
+              "The config author's share of the creator fee (basis points of it), from a listed config",
+              "whose author is not the launch's creator; 0 otherwise. Fixed at launch: every claim pays",
+              "the author this part of what it takes."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "author_fees_paid",
+            "docs": [
+              "Creator fees paid to the config's author so far (quote)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved. `reserved[0..4]` are the custom hook's SOL cut caps from the config",
+              "([`Launch::quote_cut`]), `reserved[4..12]` the SOL it has taken so far (part of",
+              "`creator_fees_accrued`), `reserved[12]` the bump of the hook's `[\"state\", mint]` and",
+              "`reserved[13]` of the launchpad's `[\"quote-cut\", hook]` signer; zeros for every launch made",
+              "before (`docs/quote-cut.md`). `reserved[14..16]` are the partner's share of the creator fee",
+              "and `reserved[16]` the bump of the config's [`PartnerFee`], from the config",
+              "([`Launch::partner_share_bps`], `docs/partner-fee.md`); zeros for every launch made before."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                22
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LaunchRules",
+      "docs": [
+        "The rules a launch fixes for its token (`docs/hooks-v2.md` §5.1): what the pool hook takes on",
+        "each side, and the kit modules the token gets. Holder rewards are on when either holder fee is",
+        "above 0."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "holder_fee_buy_bps",
+            "docs": [
+              "Holder fee on buys, from the quote input, paid to the holder vault."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holder_fee_sell_bps",
+            "docs": [
+              "Holder fee on sells, from the quote output after the protocol fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "burn_buy_bps",
+            "docs": [
+              "Burn on buys, from the token output."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "burn_sell_bps",
+            "docs": [
+              "Burn on sells, from the token input."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_wallet_bps",
+            "docs": [
+              "Max wallet in basis points of the supply; 0 = off. Lifts at graduation."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "creator_lock_secs",
+            "docs": [
+              "Creator wallet lock, counted from the launch; 0 = off."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "early_window_secs",
+            "docs": [
+              "Early-buyer window, counted from the launch; 0 = off."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "early_lock_secs",
+            "docs": [
+              "Early-buyer unlock, counted from the launch; above `early_window_secs` (0 when the lock is",
+              "off)."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingPaid",
+      "docs": [
+        "`SellForSol`: a payment held back earlier, paid now."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "paid",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SellWaited",
+      "docs": [
+        "A sell that waited: the price was more than 3% below the reference. The wait uses up the slot's",
+        "turn: its next sell (or wait) is an interval later."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "reference",
+            "docs": [
+              "The reference the price was held to, and where it is now."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "new_reference",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Slot",
+      "docs": [
+        "One slot of a vault: its policy, fixed at `create_vault`, and its running state.",
+        "",
+        "Fixed layout (no `Option`): an unused slot is all zeros with `policy == policy::UNUSED`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy",
+            "docs": [
+              "`policy::BURN`, `SELL_FOR_SOL`, `SELL_BUY_BURN`, or `UNUSED`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "docs": [
+              "`SellForSol`: the wallet paid. `SellBuyBurn`: the DEX pool of the token bought and burned (a",
+              "launchpad pool quoted in bridged SOL). The default key for `Burn`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner_bump",
+            "docs": [
+              "Bump of the slot's owner, `PDA([\"slot\", mint, [i]])`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_cut_bps",
+            "docs": [
+              "`SellBuyBurn` with a custom-hook token: the most that token's own hook may cut from the",
+              "slot's buy, as the creator declared it (basis points, at most `MAX_HOOK_CUT_BPS`): the buy's",
+              "`min_out` is loosened by that cut and Bordrless's share of it. 0 otherwise."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "last_at",
+            "docs": [
+              "The slot's last sell (or its burn, or its retirement); 0 before the first. The next sell is",
+              "an interval later."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "waited_at",
+            "docs": [
+              "The last time the slot's sell waited (the price more than 3% below the reference); 0 before",
+              "the first. The next attempt is `MIN_INTERVAL` later: a wait and a sell never share a",
+              "transaction (or a block), and a one-block dip costs the slot a minute, not an interval."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reference_price",
+            "docs": [
+              "The sell's reference price (quote per base unit times `PRICE_SCALE`): set to the pool's price",
+              "at `open_vault`, raised only by a sell, lowered toward the price only while a sell waits."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "reference_at",
+            "docs": [
+              "When the sell's reference clock last restarted: at `open_vault`, at every sale, and at every",
+              "wait that stepped the reference. A wait steps it once for each interval since then."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "pending_sol",
+            "docs": [
+              "Bridged SOL the slot holds for later: `SellBuyBurn`'s proceeds, to buy with;",
+              "`SellForSol`'s payment to an empty wallet that it could not yet open (below a wallet's",
+              "rent-exempt minimum)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buy_reference",
+            "docs": [
+              "The buy's reference price (of the token bought): set at `open_vault`, lowered only by a buy,",
+              "raised toward the price only while a buy waits (the companion's buyback reference, as is)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "buy_reference_at",
+            "docs": [
+              "When the buy's reference clock last restarted (at `open_vault`, every buy, and every wait",
+              "that stepped it)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "buy_last_at",
+            "docs": [
+              "The slot's last buy; 0 before the first."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "buy_waited_at",
+            "docs": [
+              "The last time the slot's buy waited; the next attempt is `MIN_INTERVAL` later."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sold",
+            "docs": [
+              "Coin sold so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sol_out",
+            "docs": [
+              "SOL the sells brought in so far (before bounties)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "x_burned",
+            "docs": [
+              "The other token bought and burned so far (`SellBuyBurn`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burned",
+            "docs": [
+              "Coin burned so far (`Burn`, and `retire`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bounties",
+            "docs": [
+              "Bounties paid so far (lamports)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotArgs",
+      "docs": [
+        "A slot's policy as `create_vault` takes it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy",
+            "docs": [
+              "`policy::BURN`, `SELL_FOR_SOL` or `SELL_BUY_BURN`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "docs": [
+              "`SellForSol`: the wallet paid. `SellBuyBurn`: the pool of the token bought and burned. The",
+              "default key for `Burn`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "max_cut_bps",
+            "docs": [
+              "`SellBuyBurn` of a token with its own custom hook: the most that hook may cut from the",
+              "slot's buy (basis points, at most 5,000), included in the buy's `min_out`. 0 otherwise."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotBought",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "spent",
+            "docs": [
+              "SOL spent (after the bounty)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "burned",
+            "docs": [
+              "The other token bought and burned (with any of it someone had sent the slot's owner, burned",
+              "first)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "pending_sol",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotBurned",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotPolicy",
+      "docs": [
+        "A slot as `create_vault` fixed it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy",
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_cut_bps",
+            "docs": [
+              "`SellBuyBurn` of a custom-hook token: the most that token's hook may cut from the buy."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotRetired",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "sol_burned",
+            "docs": [
+              "SOL sent to the incinerator."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "coin_burned",
+            "docs": [
+              "Coin burned."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SlotSold",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "sold",
+            "docs": [
+              "Coin sold."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "got",
+            "docs": [
+              "SOL it brought (bridged), before the bounty."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "paid",
+            "docs": [
+              "SOL paid to the slot's wallet (`SellForSol`); 0 for `SellBuyBurn`, or while it waits."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_sol",
+            "docs": [
+              "What the slot holds for later after this sell."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "The pool's price before the sell, and the reference after it."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "reference",
+            "type": "u128"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Vault",
+      "docs": [
+        "A coin's vault, `PDA([\"vault\", mint])`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The coin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "hook",
+            "docs": [
+              "The coin's own token hook (its launch's `custom_hook`), which sends the vault its cuts."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Who paid for the vault (informational)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "n_slots",
+            "docs": [
+              "Slots in use: `slots[..n_slots]`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "slots",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Slot"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "docs": [
+              "The crank's pay, in basis points of the SOL a sell or a buy moves."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_sell_bps",
+            "docs": [
+              "The most one sell takes of the pool's quote side (basis points), and never more than the",
+              "launch's `pool_share_bps`."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "docs": [
+              "The least time between two sells of a slot, and between two buys."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "max_hook_cut_bps",
+            "docs": [
+              "The most the coin's own hook may cut from the vault's sell, as its creator declared it: the",
+              "sell's `min_out` is loosened by that cut and Bordrless's share of it, and by nothing more."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "opened",
+            "docs": [
+              "`open_vault` has run: the slots' holdings exist and their references are set."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_activity_at",
+            "docs": [
+              "The last time any instruction changed the vault."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "VaultCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "hook",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "slots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "SlotPolicy"
+                }
+              }
+            }
+          },
+          {
+            "name": "slot_owners",
+            "docs": [
+              "The slots' owners, `PDA([\"slot\", mint, [i]])`: their holdings of the coin are what the hook",
+              "names as delta targets once the vault is open."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_sell_bps",
+            "type": "u16"
+          },
+          {
+            "name": "interval",
+            "type": "i64"
+          },
+          {
+            "name": "max_hook_cut_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VaultOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "docs": [
+              "The price the sells' references start at: the coin's pool price, or its launch's opening",
+              "price when the pool is above it (so nobody can open a vault at a pumped price)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}
