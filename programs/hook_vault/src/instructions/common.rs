@@ -23,6 +23,8 @@ pub struct SlotSeeds {
     mint: Pubkey,
     index: [u8; 1],
     bump: [u8; 1],
+    /// The vault is native: the slot's SOL is its owner's lamports.
+    pub native: bool,
 }
 
 impl SlotSeeds {
@@ -31,6 +33,7 @@ impl SlotSeeds {
             mint,
             index: [i],
             bump: [bump],
+            native: false,
         }
     }
 
@@ -53,7 +56,8 @@ pub fn slot_of(vault: &Vault, i: u8, owner: &Pubkey) -> Result<(Slot, SlotSeeds)
     );
     let slot = vault.slots[usize::from(i)];
     require!(slot.policy != policy::UNUSED, VaultError::WrongSlot);
-    let seeds = SlotSeeds::new(vault.mint, i, slot.owner_bump);
+    let mut seeds = SlotSeeds::new(vault.mint, i, slot.owner_bump);
+    seeds.native = vault.is_native();
     require_keys_eq!(seeds.address()?, *owner, VaultError::WrongSlotOwner);
     Ok((slot, seeds))
 }
@@ -305,6 +309,17 @@ pub fn pool_price(pool: &Pool) -> Result<u128> {
     .ok_or_else(|| error!(VaultError::NoQuote))
 }
 
+/// The SOL a slot's owner holds: its bridged SOL, or (a native vault) its lamports above the
+/// rent-exempt minimum of an account with no data.
+pub fn sol_of(available: &[AccountInfo], seeds: &SlotSeeds, owner: &Pubkey) -> Result<u64> {
+    if seeds.native {
+        return Ok(find(available, owner)?
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(0)));
+    }
+    balance(available, &BRIDGED_SOL_MINT, owner)
+}
+
 /// A holding's balance; 0 for one that does not exist yet.
 pub fn balance(available: &[AccountInfo], mint: &Pubkey, owner: &Pubkey) -> Result<u64> {
     let info = find(available, &token_client::holding_address(mint, owner))?;
@@ -347,11 +362,14 @@ pub fn pay_sol<'info>(
     if total == 0 {
         return Ok(());
     }
-    invoke_built(
-        &bordrless_bridge::client::unwrap_sol(owner, total),
-        available,
-        &[&seeds.seeds()],
-    )?;
+    // A native vault's slot already holds its SOL as lamports.
+    if !seeds.native {
+        invoke_built(
+            &bordrless_bridge::client::unwrap_sol(owner, total),
+            available,
+            &[&seeds.seeds()],
+        )?;
+    }
     let from = find(available, &owner)?.clone();
     let system = find(available, &system_program::ID)?.clone();
     for (to, lamports) in payments {

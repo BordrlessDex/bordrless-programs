@@ -184,7 +184,13 @@ pub fn process_launch<'info>(
             CompanionError::BeneficiaryNotAWallet
         );
     }
-    let remaining = ctx.remaining_accounts;
+    // The client appends the companion's script address after `create_launch`'s accounts; it is
+    // read here (audit H-1) and never forwarded (the launchpad refuses accounts it doesn't expect).
+    let script_key = Pubkey::find_program_address(&[SCRIPT_SEED, c.mint.as_ref()], &crate::ID).0;
+    let (remaining, script_info) = match ctx.remaining_accounts.split_last() {
+        Some((last, rest)) if *last.key == script_key => (rest, Some(last)),
+        _ => (ctx.remaining_accounts, None),
+    };
     require!(remaining.len() > LAUNCH_AT, CompanionError::MissingAccount);
     require_keys_eq!(
         *remaining[CREATOR_AT].key,
@@ -205,7 +211,7 @@ pub fn process_launch<'info>(
             .collect(),
         data: bordrless_launch::instruction::CreateLaunch { args }.data(),
     };
-    let seeds = CreatorSeeds::new(c.mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let mut available = remaining.to_vec();
     available.push(ctx.accounts.launch_program.to_account_info());
     available.push(ctx.accounts.creator.to_account_info());
@@ -240,6 +246,36 @@ pub fn process_launch<'info>(
     )
     .ok_or(CompanionError::NoQuote)?;
     let now = Clock::get()?.unix_timestamp;
+    // A launch made native (native launches on): the companion is native from here. A script
+    // that is not native-ready (it trades the classic swap with bridged SOL) would fail every
+    // step, so such a launch is refused while native launches are on (audit H-1, I-5).
+    if launch.is_native() && c.is_script() {
+        let info = script_info.ok_or(CompanionError::MissingAccount)?;
+        let script = Account::<Script>::try_from(info)?;
+        require!(
+            !NOT_NATIVE_READY_SCRIPTS.contains(&script.program),
+            CompanionError::ScriptNotNativeReady
+        );
+    }
+    if launch.is_native() {
+        let system = remaining
+            .iter()
+            .find(|a| *a.key == anchor_lang::system_program::ID)
+            .ok_or(CompanionError::MissingAccount)?
+            .clone();
+        let creator_info = ctx.accounts.creator.to_account_info();
+        let spare = crate::instructions::native::native_at_launch(
+            &mut ctx.accounts.companion,
+            &creator_info,
+            &system,
+        )?;
+        emit_cpi!(crate::events::CompanionNativeSet {
+            companion: ctx.accounts.companion.key(),
+            native: true,
+            moved: 0,
+            spare,
+        });
+    }
     let c = &mut ctx.accounts.companion;
     c.launched = true;
     c.launched_at = now;

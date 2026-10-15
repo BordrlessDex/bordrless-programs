@@ -117,6 +117,18 @@ pub struct Vault {
 }
 
 impl Vault {
+    /// Whether the vault is native (`reserved[0]`, `crate::instructions::native`): its slots' SOL
+    /// (`pending_sol`, and every sell's proceeds) is their owners' lamports, not bridged SOL in
+    /// their holdings. 0 for every vault made before.
+    pub fn is_native(&self) -> bool {
+        self.reserved[0] == 1
+    }
+
+    /// Sets or clears it.
+    pub fn set_native(&mut self, on: bool) {
+        self.reserved[0] = u8::from(on);
+    }
+
     /// Account size.
     pub const LEN: usize = 8 + Self::INIT_SPACE;
 

@@ -254,6 +254,30 @@ impl KitConfig {
         self.has(modules::HOLDER_REWARDS)
     }
 
+    /// Whether the reward vault is lamports on this config (a native kit, `crate::native`) rather
+    /// than the holding of bridged SOL at `reward_vault`. `reserved[0]`; zero for every config
+    /// made before.
+    pub fn is_native(&self) -> bool {
+        self.reserved[0] == 1
+    }
+
+    /// A native kit's lamport base (`reserved[1..9]`): the config's lamports that are not rewards
+    /// (its rent, and whatever it held when it turned native).
+    pub fn lamports_base(&self) -> u64 {
+        u64::from_le_bytes(self.reserved[1..9].try_into().expect("8 bytes"))
+    }
+
+    /// Turns the kit native with `base`, or back (`None`).
+    pub fn set_native(&mut self, base: Option<u64>) {
+        self.reserved[0] = u8::from(base.is_some());
+        self.reserved[1..9].copy_from_slice(&base.unwrap_or(0).to_le_bytes());
+    }
+
+    /// A native kit's vault amount: the config's `lamports` above its base.
+    pub fn native_vault(&self, lamports: u64) -> u64 {
+        lamports.saturating_sub(self.lamports_base())
+    }
+
     /// Whether `owner` is excluded (the pool, the launch, or a companion that is the launch's
     /// creator, holding a vesting dev bag or what it buys back to burn): never settled, capped,
     /// counted in `eligible`, and never able to claim. Any other creator is a holder like anyone.

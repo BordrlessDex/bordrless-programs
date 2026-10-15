@@ -2812,6 +2812,106 @@
       ]
     },
     {
+      "name": "migrate_companion_to_native",
+      "docs": [
+        "The upgrade authority, with the DEX paused, the companion's launch native: turns the",
+        "companion native (its SOL to its creator address's lamports). Idempotent."
+      ],
+      "discriminator": [
+        19,
+        116,
+        79,
+        169,
+        30,
+        74,
+        42,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "The companion program's upgrade authority; pays a byte's rent when the companion grows."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "dex_config",
+          "address": "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx"
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "pay_strategy",
       "docs": [
         "Anyone, for up to `max_per_tx` holdings: asks the strategy what each gets of the open",
@@ -3610,6 +3710,106 @@
               }
             ]
           }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revert_companion_to_bridged",
+      "docs": [
+        "The upgrade authority, with the DEX paused: turns a native companion back to bridged SOL.",
+        "Idempotent."
+      ],
+      "discriminator": [
+        218,
+        107,
+        1,
+        145,
+        205,
+        65,
+        126,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "The companion program's upgrade authority; pays a byte's rent when the companion grows."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "dex_config",
+          "address": "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx"
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
         },
         {
           "name": "system_program",
@@ -4920,6 +5120,19 @@
       ]
     },
     {
+      "name": "CompanionNativeSet",
+      "discriminator": [
+        236,
+        11,
+        92,
+        254,
+        57,
+        252,
+        56,
+        1
+      ]
+    },
+    {
       "name": "DevBought",
       "discriminator": [
         215,
@@ -5908,6 +6121,21 @@
       "code": 6090,
       "name": "WalletPayoutsOff",
       "msg": "this script may not pay wallets: its launcher did not allow wallet payouts before the launch (allow_wallet_payouts)"
+    },
+    {
+      "code": 6091,
+      "name": "DexNotPaused",
+      "msg": "the DEX must be paused for this"
+    },
+    {
+      "code": 6092,
+      "name": "LaunchNotNative",
+      "msg": "the companion's launch is not native yet: migrate the launch (and its pool) first"
+    },
+    {
+      "code": 6093,
+      "name": "ScriptNotNativeReady",
+      "msg": "this script is not native-ready: it can't launch while native launches are on"
     }
   ],
   "types": [
@@ -6558,6 +6786,18 @@
                 "name": "QuoteCutClaimed"
               }
             }
+          },
+          {
+            "name": "native_sol",
+            "docs": [
+              "Whether the companion's SOL is lamports on its creator address (`crate::instructions::native`)",
+              "rather than bridged SOL in the creator's holding."
+            ],
+            "type": {
+              "defined": {
+                "name": "NativeSol"
+              }
+            }
           }
         ]
       }
@@ -6626,6 +6866,35 @@
           {
             "name": "ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompanionNativeSet",
+      "docs": [
+        "A companion moved between bridged SOL (its creator's holding) and native SOL (its creator",
+        "address's lamports): `moved` the SOL that changed form, `spare` the creator address's spare",
+        "lamports booked to the beneficiary's part when it turned native."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "native",
+            "type": "bool"
+          },
+          {
+            "name": "moved",
+            "type": "u64"
+          },
+          {
+            "name": "spare",
+            "type": "u64"
           }
         ]
       }
@@ -8802,6 +9071,21 @@
               "off)."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NativeSol",
+      "docs": [
+        "A bool (1 byte); absent (read as false) in a companion not grown for it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "on",
+            "type": "bool"
           }
         ]
       }

@@ -151,6 +151,42 @@ pub mod bordrless_launch {
         claim::process_distribute_fees(ctx)
     }
 
+    /// `claim_creator_fees` for a native launch: its creator fees paid in SOL from the launch
+    /// account to the creator's wallet (and the author's and the partner's parts to theirs).
+    pub fn claim_creator_fees_sol<'info>(
+        ctx: Context<'info, ClaimCreatorFeesSol<'info>>,
+    ) -> Result<()> {
+        claim::process_claim_creator_fees_sol(ctx)
+    }
+
+    /// `claim_author_fees` for a native launch, in SOL.
+    pub fn claim_author_fees_sol<'info>(
+        ctx: Context<'info, ClaimAuthorFeesSol<'info>>,
+    ) -> Result<()> {
+        claim::process_claim_author_fees_sol(ctx)
+    }
+
+    /// `distribute_fees` for a native launch, in SOL.
+    pub fn distribute_fees_sol<'info>(ctx: Context<'info, DistributeFeesSol<'info>>) -> Result<()> {
+        claim::process_distribute_fees_sol(ctx)
+    }
+
+    /// Admin: whether launches made from now on are native.
+    pub fn set_native_launches(ctx: Context<SetNativeLaunches>, on: bool) -> Result<()> {
+        native::process_set_native_launches(ctx, on)
+    }
+
+    /// Admin, with the DEX paused and the launch's pool native: turns a launch native (its
+    /// creator fees and its kit's rewards to lamports). Idempotent.
+    pub fn migrate_launch_to_native(ctx: Context<LaunchForm>) -> Result<()> {
+        native::process_migrate_launch_to_native(ctx)
+    }
+
+    /// Admin, with the DEX paused: turns a native launch back to bridged SOL. Idempotent.
+    pub fn revert_launch_to_bridged(ctx: Context<LaunchForm>) -> Result<()> {
+        native::process_revert_launch_to_bridged(ctx)
+    }
+
     /// Pool hook: refuses pools with this hook that this program did not create.
     pub fn before_initialize(
         ctx: Context<RejectInitialize>,

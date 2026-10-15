@@ -216,10 +216,16 @@ fn on_steps(w: &mut World, mint: &Pubkey) {
     assert_eq!((sell.side, sell.on_step), (0, true));
     assert_eq!(sell.bounty, (sell.sol + sell.bounty) * 50 / 10_000);
     // The holding exists by now (the first buy made it, the cranker paying its rent): the bounty is paid in SOL.
-    assert_eq!(w.env.lamports(&cranker.pubkey()) + 5_000, before + sell.bounty);
+    assert_eq!(
+        w.env.lamports(&cranker.pubkey()) + 5_000,
+        before + sell.bounty
+    );
     assert_eq!(sell.tokens, buy.tokens * u64::from(SIZE) / 10_000);
     assert!(sell.sol > 0);
-    assert!(sell.price_after < sell.price_before, "a sell lowers the price");
+    assert!(
+        sell.price_after < sell.price_before,
+        "a sell lowers the price"
+    );
     let s = snowball_of(w, mint);
     assert_eq!(s.tokens_held, buy.tokens - sell.tokens);
     assert_eq!(s.reference_price, sell.price_after);
@@ -299,7 +305,10 @@ fn flat_trades_keep_the_pot_cycling_every_interval() {
     // Buys while its tokens are worth less than its SOL (a quarter at a time: three), then a sell
     // once they are worth more, and on around the balance.
     assert_eq!(&sides[..4], &[1, 1, 1, 0], "{sides:?}");
-    assert!(sides[4..].contains(&0) && sides[4..].contains(&1), "{sides:?}");
+    assert!(
+        sides[4..].contains(&0) && sides[4..].contains(&1),
+        "{sides:?}"
+    );
     let s = snowball_of(&w, &mint);
     assert_eq!(s.buys + s.sells, 8);
 }
@@ -430,4 +439,95 @@ fn what_a_snowball_refuses() {
     w.env
         .send_paid_by(&[again], &launcher, &[&classic])
         .expect_fail();
+}
+
+// ---- Native SOL (phase 3) ---------------------------------------------------------------------------
+
+/// A Snowball migrated in place mid-life, its pot full: its buys and sells run through `swap_v2`
+/// with the creator address trading its own lamports, and every step moves its lamports exactly as
+/// its pot (`pending_pot` and its other buckets always equal its SOL).
+#[test]
+fn a_snowball_migrated_mid_life_trades_its_lamports() {
+    let mut w = World::new();
+    let launcher = w.wallet_with_sol(5 * SOL);
+    let (mint, tx) = launch_snowball(&mut w, &launcher, terms(), LaunchRules::NONE);
+    tx.ok();
+    let (whale, cranker) = fill_pot(&mut w, &mint);
+    w.env.warp(60);
+    step(&mut w, &cranker, &mint).ok();
+    let pot = companion_of(&w, &mint).pending_pot;
+    w.migrate_companion_native(&mint).ok();
+    let c = companion_of(&w, &mint);
+    assert!(c.is_native());
+    assert_eq!(c.pending_pot, pot);
+    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
+    let creator = companion::creator_address(&mint);
+    let native_step = |w: &mut World| {
+        let ix = companion::native(
+            companion::snowball_step(cranker.pubkey(), &keys(w, &mint)),
+            &keys(w, &mint),
+        );
+        w.env.send_paid_by(&[ix], &cranker, &[])
+    };
+
+    // A dump: a buy, paid from the creator's lamports.
+    let held = w.env.holding(&mint, &whale.pubkey());
+    let payer = w.env.funded(10 * SOL);
+    let sell = launch::swap_v2(
+        &keys(&w, &mint),
+        whale.pubkey(),
+        whale.pubkey(),
+        0,
+        held / 2,
+        0,
+    );
+    w.env.send_paid_by(&[sell], &payer, &[&whale]).ok();
+    w.env.warp(60);
+    let (c0, p0) = (
+        w.env.lamports(&creator),
+        companion_of(&w, &mint).pending_pot,
+    );
+    let tx = native_step(&mut w);
+    tx.ok();
+    let buy: SnowballTraded = tx.event();
+    assert_eq!(buy.side, 1);
+    assert_eq!(c0 - w.env.lamports(&creator), buy.sol + buy.bounty);
+    assert_eq!(
+        p0 - companion_of(&w, &mint).pending_pot,
+        buy.sol + buy.bounty
+    );
+    assert_eq!(snowball_of(&w, &mint).tokens_held, buy.tokens);
+    assert_eq!(
+        companion_of(&w, &mint).set_aside().unwrap(),
+        w.creator_sol(&mint).1
+    );
+    w.assert_pool_invariant(&w.launch_pool_key(&mint));
+
+    // A pump: a sell, its SOL to the creator's lamports.
+    let pump = launch::swap_v2(
+        &keys(&w, &mint),
+        whale.pubkey(),
+        whale.pubkey(),
+        1,
+        3 * SOL,
+        0,
+    );
+    w.env.send_paid_by(&[pump], &payer, &[&whale]).ok();
+    w.env.warp(60);
+    let (c0, p0) = (
+        w.env.lamports(&creator),
+        companion_of(&w, &mint).pending_pot,
+    );
+    let tx = native_step(&mut w);
+    tx.ok();
+    let sell: SnowballTraded = tx.event();
+    assert_eq!(sell.side, 0);
+    assert_eq!(w.env.lamports(&creator) - c0, sell.sol);
+    assert_eq!(companion_of(&w, &mint).pending_pot - p0, sell.sol);
+    assert_eq!(
+        companion_of(&w, &mint).set_aside().unwrap(),
+        w.creator_sol(&mint).1
+    );
+    assert_eq!(w.creator_sol(&mint).0, 0, "no bridged SOL anywhere");
+    w.assert_pool_invariant(&w.launch_pool_key(&mint));
 }

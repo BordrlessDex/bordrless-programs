@@ -48,6 +48,7 @@ pub struct Share<'info> {
 /// the hour after the running stream when one runs ([`KitConfig::add_share`]): nothing already
 /// streaming ends later or earlier.
 pub fn process_share(ctx: Context<Share>, amount: u64) -> Result<()> {
+    require!(!ctx.accounts.kit_config.is_native(), KitError::NativeKit);
     let now = Clock::get()?.unix_timestamp;
     let before = holding_amount(&ctx.accounts.reward_vault)?;
     {

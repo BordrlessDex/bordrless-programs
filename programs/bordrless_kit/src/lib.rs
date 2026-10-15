@@ -82,6 +82,22 @@ pub mod bordrless_kit {
         share::process_share(ctx, amount)
     }
 
+    /// Moves the reward vault between bridged SOL (its holding) and lamports on the config
+    /// (`native`), the accounting untouched. Signed by the kit-caller PDA; idempotent.
+    pub fn set_native(ctx: Context<SetNative>, native: bool) -> Result<()> {
+        native::process_set_native(ctx, native)
+    }
+
+    /// A holder of a native kit claims the rewards it is owed, in SOL.
+    pub fn claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
+        native::process_claim_sol(ctx)
+    }
+
+    /// Shares `amount` lamports with the holders of a native kit, as `share` does.
+    pub fn share_sol(ctx: Context<ShareSol>, amount: u64) -> Result<()> {
+        native::process_share_sol(ctx, amount)
+    }
+
     /// Token hook: every transfer of a kit mint.
     pub fn before_transfer(ctx: Context<Callback>, args: TokenHookArgs) -> Result<HookReturn> {
         callbacks::process_before_transfer(ctx, args)

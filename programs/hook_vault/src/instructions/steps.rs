@@ -102,6 +102,7 @@ fn slot_sell(
     owner: Pubkey,
     amount_in: u64,
     min_out: u64,
+    native: bool,
 ) -> Result<Instruction> {
     let keys = launch_client::LaunchKeys::of(launch);
     let op = OpKeys {
@@ -112,14 +113,15 @@ fn slot_sell(
         destination_owner: launch.pool,
     };
     let extras = custom_extras(all, &hook, &launch.mint, &op)?;
+    let slice = launch_client::custom_hook_slice(hook, extras);
+    // A native vault sells through `swap_v2`, the SOL delivered to the slot's owner as lamports.
+    if native {
+        return Ok(launch_client::swap_v2_with_bridge(
+            &keys, owner, owner, 0, amount_in, min_out, slice, false,
+        ));
+    }
     Ok(launch_client::swap_with_base_slice(
-        &keys,
-        owner,
-        owner,
-        0,
-        amount_in,
-        min_out,
-        launch_client::custom_hook_slice(hook, extras),
+        &keys, owner, owner, 0, amount_in, min_out, slice,
     ))
 }
 
@@ -132,9 +134,22 @@ fn slot_buy(
     owner: Pubkey,
     amount_in: u64,
     min_out: u64,
+    v2: bool,
 ) -> Result<Instruction> {
     let keys = launch_client::LaunchKeys::of(launch);
     let Some(hook) = launch.custom_hook else {
+        if v2 {
+            return Ok(launch_client::swap_v2_with_bridge(
+                &keys,
+                owner,
+                owner,
+                1,
+                amount_in,
+                min_out,
+                launch_client::base_hook_slice(&keys.mint, &keys.quote_mint, keys.modules),
+                false,
+            ));
+        }
         return Ok(launch_client::swap(
             &keys, owner, owner, 1, amount_in, min_out,
         ));
@@ -147,14 +162,14 @@ fn slot_buy(
         destination_owner: owner,
     };
     let extras = custom_extras(all, &hook, &launch.mint, &op)?;
+    let slice = launch_client::custom_hook_slice(hook, extras);
+    if v2 {
+        return Ok(launch_client::swap_v2_with_bridge(
+            &keys, owner, owner, 1, amount_in, min_out, slice, false,
+        ));
+    }
     Ok(launch_client::swap_with_base_slice(
-        &keys,
-        owner,
-        owner,
-        1,
-        amount_in,
-        min_out,
-        launch_client::custom_hook_slice(hook, extras),
+        &keys, owner, owner, 1, amount_in, min_out, slice,
     ))
 }
 
@@ -305,10 +320,10 @@ pub fn process_execute<'info>(ctx: Context<'info, Step<'info>>, i: u8) -> Result
     .ok_or(VaultError::NoQuote)?;
     let min_out = bps_of(quote, BPS - SLIPPAGE_BPS);
     require!(min_out > 0, VaultError::NoQuote);
-    let before = balance(&all, &BRIDGED_SOL_MINT, &owner)?;
-    let sell = slot_sell(&all, launch, hook, owner, amount_in, min_out)?;
+    let before = sol_of(&all, &seeds, &owner)?;
+    let sell = slot_sell(&all, launch, hook, owner, amount_in, min_out, seeds.native)?;
     invoke_built(&sell, &all, &[&seeds.seeds()])?;
-    let got = balance(&all, &BRIDGED_SOL_MINT, &owner)?
+    let got = sol_of(&all, &seeds, &owner)?
         .checked_sub(before)
         .ok_or(VaultError::MathOverflow)?;
     let bounty = bps_of(got, u64::from(v.bounty_bps));
@@ -488,7 +503,18 @@ pub fn process_execute_buy<'info>(ctx: Context<'info, Step<'info>>, i: u8) -> Re
     .ok_or(VaultError::NoQuote)?;
     let min_out = bps_of(quote, BPS - SLIPPAGE_BPS);
     require!(min_out > 0, VaultError::NoQuote);
-    let buy = slot_buy(&all, &x_launch, owner, spend, min_out)?;
+    // A native vault buys a native pool with its lamports (`swap_v2`), and a bridged pool with
+    // them wrapped first by the slot's owner (a system account it signs for); a bridged vault buys
+    // with its bridged SOL (on a native pool, through the pool's buffer).
+    let v2 = seeds.native && pool.quote_native();
+    if seeds.native && !v2 {
+        invoke_built(
+            &bordrless_bridge::client::wrap_sol(owner, spend),
+            &all,
+            &[&seeds.seeds()],
+        )?;
+    }
+    let buy = slot_buy(&all, &x_launch, owner, spend, min_out, v2)?;
     invoke_built(&buy, &all, &[&seeds.seeds()])?;
     let bought = balance(&all, &x_mint, &owner)?;
     invoke_built(&burn_x(bought), &all, &[&seeds.seeds()])?;

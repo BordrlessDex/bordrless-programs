@@ -161,4 +161,59 @@ impl Pool {
     pub fn shares_cuts(&self) -> bool {
         self.fee_model == FEE_MODEL_SHARE
     }
+
+    /// Whether the pool holds its quote as lamports on its own account (a native pool). Its
+    /// `quote_mint` stays bridged SOL, so its address and seeds never change.
+    pub fn quote_native(&self) -> bool {
+        self.reserved[NATIVE_FLAG_OFFSET] == 1
+    }
+
+    /// Sets or clears the native flag.
+    pub fn set_quote_native(&mut self, native: bool) {
+        self.reserved[NATIVE_FLAG_OFFSET] = u8::from(native);
+    }
+
+    fn reserved_u64(&self, offset: usize) -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&self.reserved[offset..offset + 8]);
+        u64::from_le_bytes(b)
+    }
+
+    fn set_reserved_u64(&mut self, offset: usize, value: u64) {
+        self.reserved[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    /// A native pool's buffer: the bridged SOL in its quote vault that its books count (0 for a
+    /// bridged pool, whose whole quote is in the vault).
+    pub fn buffer_quote(&self) -> u64 {
+        self.reserved_u64(BUFFER_OFFSET)
+    }
+
+    /// Sets the buffer.
+    pub fn set_buffer_quote(&mut self, value: u64) {
+        self.set_reserved_u64(BUFFER_OFFSET, value)
+    }
+
+    /// The buffer `rebalance` moves a native pool toward.
+    pub fn buffer_target(&self) -> u64 {
+        self.reserved_u64(BUFFER_TARGET_OFFSET)
+    }
+
+    /// Sets the buffer target.
+    pub fn set_buffer_target(&mut self, value: u64) {
+        self.set_reserved_u64(BUFFER_TARGET_OFFSET, value)
+    }
+
+    /// The quote the pool's books hold: `quote_reserve + protocol_fees_quote`.
+    pub fn quote_books(&self) -> Option<u64> {
+        self.quote_reserve.checked_add(self.protocol_fees_quote)
+    }
+
+    /// A native pool's quote held as lamports on its account, above its rent-exempt minimum:
+    /// `quote_reserve + protocol_fees_quote - buffer`. The invariant of a native pool is
+    /// `lamports >= rent_exempt_minimum + lamports_quote` (equal unless someone sent the pool SOL
+    /// or rent fell), and `quote vault balance >= buffer`.
+    pub fn lamports_quote(&self) -> Option<u64> {
+        self.quote_books()?.checked_sub(self.buffer_quote())
+    }
 }

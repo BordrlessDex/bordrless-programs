@@ -68,6 +68,12 @@ fn bind(accounts: &Callback, args: &TokenHookArgs) -> Result<Option<u64>> {
     match (&accounts.reward_vault, config.rewards_on()) {
         (Some(vault), true) => {
             require_keys_eq!(vault.key(), config.reward_vault, KitError::WrongRewardVault);
+            // A native kit's vault is the config's own lamports above its base.
+            if config.is_native() {
+                return Ok(Some(
+                    config.native_vault(config.to_account_info().lamports()),
+                ));
+            }
             Ok(Some(holding_amount(vault)?))
         }
         (None, true) => err!(KitError::MissingRewardVault),

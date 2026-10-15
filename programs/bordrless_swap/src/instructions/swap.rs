@@ -37,6 +37,13 @@
 //! of zero, above the input, for a sell or on a pool that is not a curve is `BadFill`. The
 //! launchpad answers one when a buy reaches the end of its curve, which then sells out and can
 //! graduate in the same transaction.
+//!
+//! Native pools (`crate::native`): `swap_v2` trades a native pool's quote as lamports, the trader's
+//! wallet paying a buy by a system transfer to the pool and the pool's lamports paying a sell, and
+//! the quote-side cuts paid as lamports (or wrapped, to a holding of bridged SOL). The old `swap`
+//! keeps working on a native pool, with the same accounts, through the pool's buffer: a buy's
+//! bridged SOL joins it, a sell is paid from it as far as it goes and the rest as lamports to the
+//! trader (a writable signer; else `BufferShort`).
 
 use anchor_lang::prelude::*;
 use bordrless_core::{
@@ -50,8 +57,12 @@ use bordrless_hook::{
 use crate::constants::*;
 use crate::error::{swap_failure, SwapError};
 use crate::events::*;
-use crate::hooks::{split_extras, Cut, PoolHookCall};
+use crate::hooks::{split_extras, Cut, NativeCut, PoolHookCall};
 use crate::instructions::pool::PoolSeeds;
+use crate::native::{
+    buffer_in, buffer_out, check_credit_rent, check_native, move_lamports, top_level,
+    transfer_from_wallet, BridgeSol,
+};
 use crate::state::*;
 use crate::token::{balance, read_holding, TokenAccounts, TokenSide};
 
@@ -116,8 +127,191 @@ pub struct Swap<'info> {
     pub token_event_authority: UncheckedAccount<'info>,
 }
 
+/// Accounts of `swap_v2`, a swap on a native pool: as `swap`'s, without the quote vault, with
+/// the trader's wallet as `trader_quote` (on a buy the trader itself, which pays; on a sell any
+/// account to deliver the lamports to), the System Program, and the bridge's accounts, needed
+/// only when a quote-side cut names a holding of bridged SOL (then the quote mint is passed
+/// writable). The remaining accounts are as `swap`'s.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct SwapV2<'info> {
+    /// The trader: owner (or delegate) of the input holding; pays a buy's lamports.
+    #[account(mut)]
+    pub trader: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, constraint = pool.quote_native() @ SwapError::NotNativePool)]
+    pub pool: Account<'info, Pool>,
+    /// CHECK: address-checked; writable only for a burn of base.
+    #[account(address = pool.base_mint @ SwapError::WrongHolding)]
+    pub base_mint: UncheckedAccount<'info>,
+    /// CHECK: address-checked (bridged SOL); writable only to wrap a cut.
+    #[account(address = pool.quote_mint @ SwapError::WrongHolding)]
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: address-checked.
+    #[account(mut, address = pool.base_vault @ SwapError::WrongVault)]
+    pub base_vault: UncheckedAccount<'info>,
+    /// CHECK: the trader's base holding, or on a buy any holding of the base mint to deliver to
+    /// (checked by the token program).
+    #[account(mut)]
+    pub trader_base: UncheckedAccount<'info>,
+    /// CHECK: on a buy the trader (checked in the handler); on a sell any account to deliver the
+    /// lamports to.
+    #[account(mut)]
+    pub trader_quote: UncheckedAccount<'info>,
+    /// CHECK: the pool's hook program (checked in the handler).
+    pub hook_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: with a hook, this program's signer of its callbacks (checked in the handler).
+    pub hook_signer: Option<UncheckedAccount<'info>>,
+    /// CHECK: the token program.
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the token program's event authority.
+    pub token_event_authority: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+    /// CHECK: the bridge (checked when used).
+    pub bridge_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: the bridge's config (the bridge checks it).
+    pub bridge_config: Option<UncheckedAccount<'info>>,
+    /// CHECK: the SOL wrapper (the bridge checks it).
+    #[account(mut)]
+    pub sol_wrapper: Option<UncheckedAccount<'info>>,
+    /// CHECK: the bridge's SOL vault (the bridge checks it).
+    #[account(mut)]
+    pub sol_vault: Option<UncheckedAccount<'info>>,
+    /// CHECK: the bridge's event authority (the bridge checks it).
+    pub bridge_event_authority: Option<UncheckedAccount<'info>>,
+}
+
+/// The native leg of a `swap_v2`.
+pub struct NativeLeg<'info> {
+    /// The System Program.
+    pub system_program: AccountInfo<'info>,
+    /// The bridge, when its accounts were passed.
+    pub bridge: Option<BridgeSol<'info>>,
+}
+
+impl<'info> NativeLeg<'info> {
+    fn bridge(&self) -> Result<&BridgeSol<'info>> {
+        let bridge = self
+            .bridge
+            .as_ref()
+            .ok_or(SwapError::BridgeAccountsMissing)?;
+        bridge.check()?;
+        Ok(bridge)
+    }
+}
+
+/// What a swap is run on: the accounts of `swap` or of `swap_v2`.
+pub struct SwapCore<'a, 'info> {
+    pub trader: AccountInfo<'info>,
+    pub paused: bool,
+    pub pool: &'a mut Account<'info, Pool>,
+    pub base_mint: AccountInfo<'info>,
+    pub quote_mint: AccountInfo<'info>,
+    pub base_vault: AccountInfo<'info>,
+    /// `swap`: the quote vault. `swap_v2`: none (the quote is the pool's lamports).
+    pub quote_vault: Option<AccountInfo<'info>>,
+    pub trader_base: AccountInfo<'info>,
+    pub trader_quote: AccountInfo<'info>,
+    pub hook_program: Option<AccountInfo<'info>>,
+    pub hook_signer: Option<AccountInfo<'info>>,
+    pub token: TokenAccounts<'info>,
+    /// `swap_v2` only.
+    pub native: Option<NativeLeg<'info>>,
+    pub remaining: &'info [AccountInfo<'info>],
+}
+
 /// `swap`.
-pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> Result<()> {
+pub fn process_swap<'info>(mut ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> Result<()> {
+    let a = &mut ctx.accounts;
+    let core = SwapCore {
+        trader: a.trader.to_account_info(),
+        paused: a.config.paused,
+        pool: &mut a.pool,
+        base_mint: a.base_mint.to_account_info(),
+        quote_mint: a.quote_mint.to_account_info(),
+        base_vault: a.base_vault.to_account_info(),
+        quote_vault: Some(a.quote_vault.to_account_info()),
+        trader_base: a.trader_base.to_account_info(),
+        trader_quote: a.trader_quote.to_account_info(),
+        hook_program: a.hook_program.as_ref().map(|x| x.to_account_info()),
+        hook_signer: a.hook_signer.as_ref().map(|x| x.to_account_info()),
+        token: TokenAccounts {
+            program: a.token_program.to_account_info(),
+            event_authority: a.token_event_authority.to_account_info(),
+        },
+        native: None,
+        remaining: ctx.remaining_accounts,
+    };
+    let (swapped, _) = run_swap(core, args)?;
+    emit_cpi!(swapped);
+    Ok(())
+}
+
+/// `swap_v2`.
+pub fn process_swap_v2<'info>(
+    mut ctx: Context<'info, SwapV2<'info>>,
+    args: SwapArgs,
+) -> Result<()> {
+    let a = &mut ctx.accounts;
+    let info = |x: &Option<UncheckedAccount<'info>>| x.as_ref().map(|x| x.to_account_info());
+    let bridge = match (
+        info(&a.bridge_program),
+        info(&a.bridge_config),
+        info(&a.sol_wrapper),
+        info(&a.sol_vault),
+        info(&a.bridge_event_authority),
+    ) {
+        (Some(program), Some(config), Some(wrapper), Some(sol_vault), Some(event_authority)) => {
+            Some(BridgeSol {
+                program,
+                config,
+                wrapper,
+                sol_vault,
+                wrapped_mint: a.quote_mint.to_account_info(),
+                event_authority,
+                token_program: a.token_program.to_account_info(),
+                token_event_authority: a.token_event_authority.to_account_info(),
+                system_program: a.system_program.to_account_info(),
+            })
+        }
+        _ => None,
+    };
+    let core = SwapCore {
+        trader: a.trader.to_account_info(),
+        paused: a.config.paused,
+        pool: &mut a.pool,
+        base_mint: a.base_mint.to_account_info(),
+        quote_mint: a.quote_mint.to_account_info(),
+        base_vault: a.base_vault.to_account_info(),
+        quote_vault: None,
+        trader_base: a.trader_base.to_account_info(),
+        trader_quote: a.trader_quote.to_account_info(),
+        hook_program: info(&a.hook_program),
+        hook_signer: info(&a.hook_signer),
+        token: TokenAccounts {
+            program: a.token_program.to_account_info(),
+            event_authority: a.token_event_authority.to_account_info(),
+        },
+        native: Some(NativeLeg {
+            system_program: a.system_program.to_account_info(),
+            bridge,
+        }),
+        remaining: ctx.remaining_accounts,
+    };
+    let (swapped, native) = run_swap(core, args)?;
+    emit_cpi!(swapped);
+    if let Some(native) = native {
+        emit_cpi!(native);
+    }
+    Ok(())
+}
+
+/// A swap on `c` (see the module).
+pub fn run_swap<'info>(
+    c: SwapCore<'_, 'info>,
+    args: SwapArgs,
+) -> Result<(Swapped, Option<SwappedNative>)> {
     let clock = Clock::get()?;
     let SwapArgs {
         direction,
@@ -129,73 +323,102 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     } = args;
     // What the swap uses: the whole input, or the part a fill names.
     let mut amount_in = requested;
-    require!(!ctx.accounts.config.paused, SwapError::Paused);
+    require!(!c.paused, SwapError::Paused);
     require!(amount_in > 0, SwapError::ZeroAmount);
     require!(direction <= 1, SwapError::InvalidDirection);
     require!(hook_data.len() <= MAX_HOOK_DATA, SwapError::HookDataTooLong);
     let buy = direction == 1;
-    let token = TokenAccounts {
-        program: ctx.accounts.token_program.to_account_info(),
-        event_authority: ctx.accounts.token_event_authority.to_account_info(),
-    };
+    let token = c.token;
     token.check()?;
     let (in_extras, out_extras, pool_extras) =
-        split_extras(ctx.remaining_accounts, in_hook_accounts, out_hook_accounts)?;
+        split_extras(c.remaining, in_hook_accounts, out_hook_accounts)?;
+    let pool_acc = c.pool;
+    let pool_info = pool_acc.to_account_info();
+    let pool_key = pool_acc.key();
+    // `swap_v2`: the quote side is lamports (the pool's own account stands for its vault).
+    let native = c.native;
+    let native_in = native.is_some() && buy;
+    let native_out = native.is_some() && !buy;
+    // The old `swap` on a native pool: the quote side goes through the buffer.
+    let buffered = native.is_none() && pool_acc.quote_native();
+    // On a native pool the quote side's cuts may name any account (paid lamports) or a holding of
+    // bridged SOL (paid in bridged SOL), whichever swap trades it.
+    let nq_in = buy && pool_acc.quote_native();
+    let nq_out = !buy && pool_acc.quote_native();
+    // Lamport cuts of the old swap on a native pool, paid from the pool's lamports once every CPI
+    // has run (the runtime must see no direct move at a CPI that passes only one side of it).
+    let mut pending: Vec<(&AccountInfo<'info>, u64)> = Vec::new();
+    let quote_side = c.quote_vault.clone().unwrap_or_else(|| pool_info.clone());
+    // An old-path sell's delivery paid as lamports to the trader (see step 6).
+    let mut to_trader = 0u64;
 
     // The sides.
-    let base_mint = ctx.accounts.base_mint.to_account_info();
-    let quote_mint = ctx.accounts.quote_mint.to_account_info();
+    let base_mint = c.base_mint.clone();
+    let quote_mint = c.quote_mint.clone();
     let (in_mint, out_mint, vault_in, vault_out, trader_in, trader_out) = if buy {
         (
             quote_mint.clone(),
             base_mint.clone(),
-            ctx.accounts.quote_vault.to_account_info(),
-            ctx.accounts.base_vault.to_account_info(),
-            ctx.accounts.trader_quote.to_account_info(),
-            ctx.accounts.trader_base.to_account_info(),
+            quote_side.clone(),
+            c.base_vault.clone(),
+            c.trader_quote.clone(),
+            c.trader_base.clone(),
         )
     } else {
         (
             base_mint.clone(),
             quote_mint.clone(),
-            ctx.accounts.base_vault.to_account_info(),
-            ctx.accounts.quote_vault.to_account_info(),
-            ctx.accounts.trader_base.to_account_info(),
-            ctx.accounts.trader_quote.to_account_info(),
+            c.base_vault.clone(),
+            quote_side.clone(),
+            c.trader_base.clone(),
+            c.trader_quote.clone(),
         )
     };
     let in_hook = bordrless_token::client::read_mint(&in_mint)?.hook_program;
     let out_hook = bordrless_token::client::read_mint(&out_mint)?.hook_program;
-    let recipient = read_holding(&trader_out)?.owner;
-    // No delta may go to a vault or to either of the trader's holdings.
-    let forbidden = [
+    // A native sell delivers to an account, not a holding: the account is the recipient.
+    let recipient = if native_out {
+        *trader_out.key
+    } else {
+        read_holding(&trader_out)?.owner
+    };
+    // A native buy is paid by the trader's own wallet.
+    if native_in {
+        require_keys_eq!(*trader_in.key, *c.trader.key, SwapError::WrongNativeAccount);
+    }
+    // A native sell delivers lamports: never to the pool or its vaults, nor to any account of the
+    // token program (a holding of bridged SOL passed out of habit would keep them as lamports,
+    // stranded, not as bridged SOL).
+    if native_out {
+        require!(
+            *trader_out.key != pool_key
+                && *trader_out.key != pool_acc.base_vault
+                && *trader_out.key != pool_acc.quote_vault
+                && *trader_out.owner != bordrless_token::ID,
+            SwapError::WrongNativeAccount
+        );
+    }
+    // No delta may go to a vault or to either of the trader's holdings (on a native swap, nor to
+    // the pool, its quote vault or the trader).
+    let mut forbidden = vec![
         *vault_in.key,
         *vault_out.key,
         *trader_in.key,
         *trader_out.key,
     ];
+    if pool_acc.quote_native() {
+        forbidden.extend([pool_key, pool_acc.quote_vault, *c.trader.key]);
+    }
 
-    let pool_key = ctx.accounts.pool.key();
     let call = PoolHookCall::of(
-        ctx.accounts.pool.hook_program,
-        ctx.accounts.pool.hook_signer_bump,
-        ctx.accounts
-            .hook_program
-            .as_ref()
-            .map(|a| a.to_account_info()),
-        ctx.accounts
-            .hook_signer
-            .as_ref()
-            .map(|a| a.to_account_info()),
-        [
-            ctx.accounts.pool.to_account_info(),
-            base_mint,
-            quote_mint,
-            ctx.accounts.trader.to_account_info(),
-        ],
+        pool_acc.hook_program,
+        pool_acc.hook_signer_bump,
+        c.hook_program,
+        c.hook_signer,
+        [pool_info.clone(), base_mint, quote_mint, c.trader.clone()],
         pool_extras,
     )?;
-    let pool = &ctx.accounts.pool;
+    let pool: &Pool = pool_acc;
     let flags = pool.hook_flags;
     let mut hook_args = PoolHookArgs {
         op: PoolOp::Swap,
@@ -203,7 +426,7 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
         pool: pool_key,
         base_mint: pool.base_mint,
         quote_mint: pool.quote_mint,
-        actor: ctx.accounts.trader.key(),
+        actor: c.trader.key(),
         recipient,
         direction,
         amount_in,
@@ -225,6 +448,7 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     //    that part); the answer is checked before anything moves.
     let mut lp_fee_bps = pool.lp_fee_bps;
     let mut cut_in = Cut::none();
+    let mut ncut_in = NativeCut::none();
     let mut filled = false;
     if let Some(call) = &call {
         if pool.runs(pool_flags::BEFORE_SWAP) {
@@ -258,47 +482,112 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
                     amount_in = fill;
                     filled = true;
                 }
-                cut_in = call.cut(&ret, taken, amount_in, &in_mint, &forbidden)?;
+                if nq_in {
+                    ncut_in = call.native_cut(&ret, taken, amount_in, &forbidden)?;
+                } else {
+                    cut_in = call.cut(&ret, taken, amount_in, &in_mint, &forbidden)?;
+                }
             }
         }
     }
+    let (cut_in_taken, cut_in_burn) = if nq_in {
+        (ncut_in.taken, 0)
+    } else {
+        (cut_in.taken, cut_in.burn)
+    };
 
     // 2. The input: the cut from the trader's holding (each delta, then the burn), then the rest
-    //    to the vault, measured there.
-    let trader = ctx.accounts.trader.to_account_info();
-    let in_side = TokenSide::of(in_extras, in_hook.is_some());
-    for (holding, amount) in &cut_in.deltas {
+    //    to the vault, measured there. A native buy: each delta from the trader's wallet (as
+    //    lamports, or wrapped into a holding of bridged SOL), then the rest to the pool.
+    let trader = c.trader.clone();
+    let mut buffer_extra = 0u64;
+    let received = if let (true, Some(leg)) = (native_in, native.as_ref()) {
+        for (to, amount, wrapped) in &ncut_in.deltas {
+            if *wrapped {
+                leg.bridge()?.wrap_from_wallet(&trader, to, *amount)?;
+            } else {
+                check_credit_rent(to, *amount)?;
+                transfer_from_wallet(&leg.system_program, &trader, to, *amount)?;
+            }
+        }
+        let before = pool_info.lamports();
+        transfer_from_wallet(
+            &leg.system_program,
+            &trader,
+            &pool_info,
+            amount_in - cut_in_taken,
+        )?;
+        pool_info
+            .lamports()
+            .checked_sub(before)
+            .ok_or(SwapError::MathOverflow)?
+    } else {
+        let in_side = TokenSide::of(in_extras, in_hook.is_some());
+        // The old swap's buy on a native pool: a cut to a holding of bridged SOL is paid in it; a
+        // cut to any other account is paid lamports by the pool, which takes the trader's bridged
+        // SOL into its buffer instead.
+        for (to, amount, wrapped) in &ncut_in.deltas {
+            let dest = if *wrapped { *to } else { &vault_in };
+            token.transfer(&trader, &trader_in, dest, &in_mint, &in_side, *amount, &[])?;
+            if !*wrapped {
+                check_credit_rent(to, *amount)?;
+                pending.push((*to, *amount));
+                buffer_extra = buffer_extra
+                    .checked_add(*amount)
+                    .ok_or(SwapError::MathOverflow)?;
+            }
+        }
+        for (holding, amount) in &cut_in.deltas {
+            token.transfer(
+                &trader,
+                &trader_in,
+                holding,
+                &in_mint,
+                &in_side,
+                *amount,
+                &[],
+            )?;
+        }
+        if cut_in.burn > 0 {
+            token.burn(&trader, &trader_in, &in_mint, &in_side, cut_in.burn, &[])?;
+        }
+        let vault_in_before = balance(&vault_in)?;
         token.transfer(
             &trader,
             &trader_in,
-            holding,
+            &vault_in,
             &in_mint,
             &in_side,
-            *amount,
+            amount_in - cut_in_taken,
             &[],
         )?;
-    }
-    if cut_in.burn > 0 {
-        token.burn(&trader, &trader_in, &in_mint, &in_side, cut_in.burn, &[])?;
-    }
-    let vault_in_before = balance(&vault_in)?;
-    token.transfer(
-        &trader,
-        &trader_in,
-        &vault_in,
-        &in_mint,
-        &in_side,
-        amount_in - cut_in.taken,
-        &[],
-    )?;
-    let received = balance(&vault_in)?
-        .checked_sub(vault_in_before)
-        .ok_or(SwapError::MathOverflow)?;
+        balance(&vault_in)?
+            .checked_sub(vault_in_before)
+            .ok_or(SwapError::MathOverflow)?
+    };
     require!(received > 0, SwapError::NothingReceived);
+    // The old swap's buy on a native pool: a lamport cut whose account the output token's hook is
+    // also passed (a native kit's config: the holder fee) is paid now, before the output transfer
+    // runs that hook, as `swap_v2` pays it, so the buyer is settled before the fee lands and never
+    // shares in it (audit N-2). Every later CPI (the `after_swap` call, which gets the pool and all
+    // its extras, and the output transfers, which get the pool and the output hook's extras)
+    // passes both sides of the move, as the runtime requires. Other cuts still wait to the end.
+    if buffered && buy {
+        let mut i = 0;
+        while i < pending.len() {
+            let (to, amount) = pending[i];
+            if out_extras.iter().any(|x| x.key == to.key && x.is_writable) {
+                move_lamports(&pool_info, to, amount)?;
+                pending.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
     // What the hooks took from the input and someone received: the pool hook's deltas and any
     // cut the input mint's own hook took from those transfers (measured, in the input token).
     let cuts_in = amount_in
-        .checked_sub(cut_in.burn)
+        .checked_sub(cut_in_burn)
         .and_then(|rest| rest.checked_sub(received))
         .ok_or(SwapError::MathOverflow)?;
 
@@ -336,7 +625,7 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     //    whole output leaves the output reserve (the hook's cut, the sell's protocol fee and the
     //    delivery all come out of it); the protocol fee is set aside in the quote vault.
     {
-        let pool = &mut ctx.accounts.pool;
+        let pool: &mut Pool = pool_acc;
         if buy {
             pool.quote_reserve = pool
                 .quote_reserve
@@ -354,6 +643,15 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
                 .base_volume
                 .checked_add(u128::from(amounts.out_gross))
                 .ok_or(SwapError::MathOverflow)?;
+            // The old swap on a native pool: the bridged SOL joined the buffer.
+            if buffered {
+                buffer_in(
+                    pool,
+                    received
+                        .checked_add(buffer_extra)
+                        .ok_or(SwapError::MathOverflow)?,
+                )?;
+            }
         } else {
             pool.base_reserve = pool
                 .base_reserve
@@ -386,78 +684,160 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     // 5. After: the hook sees the result (the pool written as it now stands) and may cut the
     //    output it is told: the curve's output, less a sell's protocol fee.
     let mut cut_out = Cut::none();
+    let mut ncut_out = NativeCut::none();
     if let Some(call) = &call {
-        if ctx.accounts.pool.runs(pool_flags::AFTER_SWAP) {
-            ctx.accounts.pool.exit(&crate::ID)?;
-            let pool = &ctx.accounts.pool;
+        if pool_acc.runs(pool_flags::AFTER_SWAP) {
+            pool_acc.exit(&crate::ID)?;
             hook_args.phase = Phase::After;
             hook_args.amount_in = received;
             hook_args.amount_out = amounts.amount_out;
-            hook_args.base_reserve = pool.base_reserve;
-            hook_args.quote_reserve = pool.quote_reserve;
+            hook_args.base_reserve = pool_acc.base_reserve;
+            hook_args.quote_reserve = pool_acc.quote_reserve;
             hook_args.lp_fee_bps = lp_fee_bps;
             let allowed = Allowed::pool(PoolOp::Swap, Phase::After, flags);
             if let Some((ret, taken)) =
                 call.invoke(discriminators::AFTER_SWAP, &hook_args, allowed)?
             {
-                cut_out = call.cut(&ret, taken, amounts.amount_out, &out_mint, &forbidden)?;
+                if nq_out {
+                    ncut_out = call.native_cut(&ret, taken, amounts.amount_out, &forbidden)?;
+                } else {
+                    cut_out = call.cut(&ret, taken, amounts.amount_out, &out_mint, &forbidden)?;
+                }
             }
         }
     }
+    let (cut_out_taken, cut_out_burn) = if nq_out {
+        (ncut_out.taken, 0)
+    } else {
+        (cut_out.taken, cut_out.burn)
+    };
 
     // 6. The output: the cut from the vault (each delta, then the burn; the pool signs), then the
     //    rest to the recipient, measured there. Under the share model a sell holds back the pool's
-    //    share of the hook's quote deltas from the delivery (the trader pays it).
+    //    share of the hook's quote deltas from the delivery (the trader pays it). A native sell:
+    //    each delta and the delivery from the pool's lamports.
     let held_back = if shared && !buy {
-        let deltas_sum = cut_out.taken - cut_out.burn;
+        let deltas_sum = cut_out_taken - cut_out_burn;
         protocol_share(deltas_sum, share_bps).ok_or(SwapError::MathOverflow)?
     } else {
         0
     };
     let to_deliver = amounts
         .amount_out
-        .checked_sub(cut_out.taken)
+        .checked_sub(cut_out_taken)
         .and_then(|rest| rest.checked_sub(held_back))
         .filter(|rest| *rest > 0)
         .ok_or(SwapError::FeeExceedsOutput)?;
-    let pool_info = ctx.accounts.pool.to_account_info();
-    let seeds = PoolSeeds::of(&ctx.accounts.pool);
+    let seeds = PoolSeeds::of(pool_acc);
     let pool_seeds = seeds.seeds();
-    let out_side = TokenSide::of(out_extras, out_hook.is_some());
-    for (holding, amount) in &cut_out.deltas {
-        token.transfer(
-            &pool_info,
-            &vault_out,
-            holding,
-            &out_mint,
-            &out_side,
-            *amount,
-            &[&pool_seeds],
-        )?;
-    }
-    if cut_out.burn > 0 {
-        token.burn(
-            &pool_info,
-            &vault_out,
-            &out_mint,
-            &out_side,
-            cut_out.burn,
-            &[&pool_seeds],
-        )?;
-    }
-    let trader_out_before = balance(&trader_out)?;
-    token.transfer(
-        &pool_info,
-        &vault_out,
-        &trader_out,
-        &out_mint,
-        &out_side,
-        to_deliver,
-        &[&pool_seeds],
-    )?;
-    let delivered = balance(&trader_out)?
-        .checked_sub(trader_out_before)
-        .ok_or(SwapError::MathOverflow)?;
+    let delivered = if let (true, Some(leg)) = (native_out, native.as_ref()) {
+        // The wrapped deltas first: each is a CPI, at which the runtime must see every lamport
+        // this program has moved so far on accounts it passes, so no direct move precedes them.
+        for (to, amount, _) in ncut_out.deltas.iter().filter(|d| d.2) {
+            leg.bridge()?
+                .wrap_from_pool(&pool_info, &trader, to, *amount)?;
+        }
+        for (to, amount, _) in ncut_out.deltas.iter().filter(|d| !d.2) {
+            check_credit_rent(to, *amount)?;
+            move_lamports(&pool_info, to, *amount)?;
+        }
+        let before = trader_out.lamports();
+        check_credit_rent(&trader_out, to_deliver)?;
+        move_lamports(&pool_info, &trader_out, to_deliver)?;
+        trader_out
+            .lamports()
+            .checked_sub(before)
+            .ok_or(SwapError::MathOverflow)?
+    } else {
+        // The old swap's sell on a native pool is paid from the buffer as far as it goes (the
+        // wrapped cuts first, which only bridged SOL can pay); what it cannot cover of the
+        // delivery is paid as lamports to the trader (a writable signer: the owner of the input,
+        // or its delegate, which chose the delivery holding anyway), after the last CPI. So a
+        // rebalance that empties the buffer can no longer fail an old-path sell (audit N-5).
+        let lamport_cuts: u64 = ncut_out.deltas.iter().filter(|d| !d.2).map(|d| d.1).sum();
+        let buffer_before = if buffered && !buy {
+            let wrapped_cuts = cut_out_taken - lamport_cuts;
+            let buffer = pool_acc.buffer_quote();
+            require!(buffer >= wrapped_cuts, SwapError::BufferShort);
+            let from_buffer = to_deliver.min(buffer - wrapped_cuts);
+            to_trader = to_deliver - from_buffer;
+            if to_trader > 0 {
+                // Only at the top level, and only to the delivery holding's owner (re-audit R-1):
+                // a program calling the old swap counts the delivery as bridged SOL alone, and a
+                // delegate is not the one owed it. Those keep failing safe, as before.
+                require!(
+                    c.trader.is_writable && *c.trader.key == recipient && top_level(),
+                    SwapError::BufferShort
+                );
+                check_credit_rent(&c.trader, to_trader)?;
+            }
+            Some(balance(&vault_out)?)
+        } else {
+            None
+        };
+        let out_side = TokenSide::of(out_extras, out_hook.is_some());
+        // The old swap's sell on a native pool: a cut to a holding of bridged SOL leaves the
+        // buffer; a cut to any other account is paid lamports by the pool.
+        for (to, amount, wrapped) in &ncut_out.deltas {
+            if *wrapped {
+                token.transfer(
+                    &pool_info,
+                    &vault_out,
+                    to,
+                    &out_mint,
+                    &out_side,
+                    *amount,
+                    &[&pool_seeds],
+                )?;
+            } else {
+                check_credit_rent(to, *amount)?;
+                pending.push((*to, *amount));
+            }
+        }
+        for (holding, amount) in &cut_out.deltas {
+            token.transfer(
+                &pool_info,
+                &vault_out,
+                holding,
+                &out_mint,
+                &out_side,
+                *amount,
+                &[&pool_seeds],
+            )?;
+        }
+        if cut_out.burn > 0 {
+            token.burn(
+                &pool_info,
+                &vault_out,
+                &out_mint,
+                &out_side,
+                cut_out.burn,
+                &[&pool_seeds],
+            )?;
+        }
+        let trader_out_before = balance(&trader_out)?;
+        if to_deliver > to_trader {
+            token.transfer(
+                &pool_info,
+                &vault_out,
+                &trader_out,
+                &out_mint,
+                &out_side,
+                to_deliver - to_trader,
+                &[&pool_seeds],
+            )?;
+        }
+        if let Some(before) = buffer_before {
+            let left = before
+                .checked_sub(balance(&vault_out)?)
+                .ok_or(SwapError::MathOverflow)?;
+            buffer_out(pool_acc, left)?;
+        }
+        balance(&trader_out)?
+            .checked_sub(trader_out_before)
+            .and_then(|got| got.checked_add(to_trader))
+            .ok_or(SwapError::MathOverflow)?
+    };
     // A fill holds the minimum to pro rata: what the trader accepted for the whole input, for the
     // part the swap used.
     let min_out = if amount_in < requested {
@@ -475,7 +855,7 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
     // What the hooks took from the output and someone received (measured, in the output token).
     let cuts_out = amounts
         .amount_out
-        .checked_sub(cut_out.burn)
+        .checked_sub(cut_out_burn)
         .and_then(|rest| rest.checked_sub(held_back))
         .and_then(|rest| rest.checked_sub(delivered))
         .ok_or(SwapError::MathOverflow)?;
@@ -494,7 +874,7 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
         .checked_sub(held_back)
         .ok_or(SwapError::MathOverflow)?;
     {
-        let pool = &mut ctx.accounts.pool;
+        let pool: &mut Pool = pool_acc;
         pool.quote_reserve = pool
             .quote_reserve
             .checked_sub(from_reserve)
@@ -508,24 +888,52 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
         .protocol_fee
         .checked_add(protocol_out)
         .ok_or(SwapError::MathOverflow)?;
+    // The old swap's lamport cuts on a native pool, now that every CPI has run.
+    for (to, amount) in &pending {
+        move_lamports(&pool_info, to, *amount)?;
+    }
+    // An old-path sell's delivery the buffer could not cover.
+    move_lamports(&pool_info, &c.trader, to_trader)?;
+    // A native pool's books against its lamports and buffer.
+    check_native(&pool_info, pool_acc, c.quote_vault.as_ref())?;
 
-    let pool = &ctx.accounts.pool;
-    emit_cpi!(Swapped {
+    let pool: &Pool = pool_acc;
+    let (deltas_in, deltas_out) = (
+        if nq_in { ncut_in.paid() } else { cut_in.paid() },
+        if nq_out {
+            ncut_out.paid()
+        } else {
+            cut_out.paid()
+        },
+    );
+    let native_event = native.as_ref().map(|_| SwappedNative {
         pool: pool_key,
-        trader: ctx.accounts.trader.key(),
+        direction,
+        quote_lamports: if buy { received } else { delivered },
+        quote_deltas: if buy {
+            ncut_in.native_paid()
+        } else {
+            ncut_out.native_paid()
+        },
+        buffer_quote: pool.buffer_quote(),
+        pool_lamports: pool_info.lamports(),
+    });
+    let swapped = Swapped {
+        pool: pool_key,
+        trader: c.trader.key(),
         recipient,
         direction,
         amount_in,
-        deltas_in: cut_in.paid(),
-        burn_in: cut_in.burn,
+        deltas_in,
+        burn_in: cut_in_burn,
         cuts_in,
         received_in: received,
         lp_fee: amounts.lp_fee,
         protocol_fee,
         lp_fee_bps,
         amount_out: amounts.out_gross,
-        deltas_out: cut_out.paid(),
-        burn_out: cut_out.burn,
+        deltas_out,
+        burn_out: cut_out_burn,
         cuts_out,
         delivered_out: delivered,
         base_reserve: pool.base_reserve,
@@ -535,6 +943,6 @@ pub fn process_swap<'info>(ctx: Context<'info, Swap<'info>>, args: SwapArgs) -> 
         swap_count: pool.swap_count,
         slot: clock.slot,
         ts: clock.unix_timestamp,
-    });
-    Ok(())
+    };
+    Ok((swapped, native_event))
 }

@@ -8,7 +8,8 @@ use bordrless_hook::{
 };
 
 use crate::error::{answer_error, SwapError};
-use crate::events::DeltaPaid;
+use crate::events::{DeltaPaid, NativeDeltaPaid};
+use crate::native::wraps_into;
 use crate::token::read_holding;
 
 /// What a pool hook's answer takes from one side of a swap: deltas, each sent to the holding it
@@ -39,6 +40,49 @@ impl<'a, 'info> Cut<'a, 'info> {
             .map(|(holding, amount)| DeltaPaid {
                 holding: *holding.key,
                 amount: *amount,
+            })
+            .collect()
+    }
+}
+
+/// What a pool hook's answer takes from the native (lamports) side of a swap on a native pool:
+/// deltas only (lamports cannot be burned), each paid to the account it names as lamports or, to a
+/// holding of bridged SOL, wrapped. Built by [`PoolHookCall::native_cut`].
+pub struct NativeCut<'a, 'info> {
+    /// Each delta's account, amount and whether it is paid wrapped, in the answer's order.
+    pub deltas: Vec<(&'a AccountInfo<'info>, u64, bool)>,
+    /// The deltas together.
+    pub taken: u64,
+}
+
+impl<'a, 'info> NativeCut<'a, 'info> {
+    /// No cut.
+    pub fn none() -> Self {
+        Self {
+            deltas: Vec::new(),
+            taken: 0,
+        }
+    }
+
+    /// The deltas as the `Swapped` event carries them.
+    pub fn paid(&self) -> Vec<DeltaPaid> {
+        self.deltas
+            .iter()
+            .map(|(account, amount, _)| DeltaPaid {
+                holding: *account.key,
+                amount: *amount,
+            })
+            .collect()
+    }
+
+    /// The deltas as the `SwappedNative` event carries them.
+    pub fn native_paid(&self) -> Vec<NativeDeltaPaid> {
+        self.deltas
+            .iter()
+            .map(|(account, amount, wrapped)| NativeDeltaPaid {
+                account: *account.key,
+                amount: *amount,
+                wrapped: *wrapped,
             })
             .collect()
     }
@@ -218,6 +262,46 @@ impl<'a, 'info> PoolHookCall<'a, 'info> {
             burn: answer.burn,
             taken,
         })
+    }
+}
+
+impl<'a, 'info> PoolHookCall<'a, 'info> {
+    /// The cut a swap callback's answer takes from `amount` lamports, the native side of a swap on
+    /// a native pool, checked as [`Self::cut`] checks a token side, except that each delta account
+    /// is any writable account that is not executable and none of `forbidden` (paid lamports), or
+    /// a holding of bridged SOL (paid wrapped); a holding of any other mint is
+    /// `InvalidDeltaAccount`, and a burn is `NativeBurn`.
+    pub fn native_cut(
+        &self,
+        answer: &HookReturn,
+        taken: u64,
+        amount: u64,
+        forbidden: &[Pubkey],
+    ) -> Result<NativeCut<'a, 'info>> {
+        require!(taken < amount, SwapError::DeltaTooLarge);
+        require!(answer.burn == 0, SwapError::NativeBurn);
+        let mut deltas: Vec<(&'a AccountInfo<'info>, u64, bool)> =
+            Vec::with_capacity(answer.deltas.len());
+        for delta in &answer.deltas {
+            let i = usize::from(delta.account);
+            require!(i >= POOL_PREFIX_ACCOUNTS, SwapError::InvalidDeltaAccount);
+            let info = self
+                .extras
+                .get(i - POOL_PREFIX_ACCOUNTS)
+                .ok_or(SwapError::InvalidDeltaAccount)?;
+            require!(info.is_writable, SwapError::InvalidDeltaAccount);
+            require!(
+                !forbidden.contains(info.key),
+                SwapError::InvalidDeltaAccount
+            );
+            require!(
+                !deltas.iter().any(|(named, _, _)| named.key == info.key),
+                SwapError::InvalidDeltaAccount
+            );
+            let wrapped = wraps_into(info)?;
+            deltas.push((info, delta.amount, wrapped));
+        }
+        Ok(NativeCut { deltas, taken })
     }
 }
 

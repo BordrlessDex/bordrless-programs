@@ -322,4 +322,20 @@ pub mod bordrless_companion {
     pub fn allow_wallet_payouts(ctx: Context<AllowWalletPayouts>) -> Result<()> {
         instructions::payout::process_allow_wallet_payouts(ctx)
     }
+
+    /// The upgrade authority, with the DEX paused, the companion's launch native: turns the
+    /// companion native (its SOL to its creator address's lamports). Idempotent.
+    pub fn migrate_companion_to_native<'info>(
+        ctx: Context<'info, CompanionForm<'info>>,
+    ) -> Result<()> {
+        native::process_migrate_companion_to_native(ctx)
+    }
+
+    /// The upgrade authority, with the DEX paused: turns a native companion back to bridged SOL.
+    /// Idempotent.
+    pub fn revert_companion_to_bridged<'info>(
+        ctx: Context<'info, CompanionForm<'info>>,
+    ) -> Result<()> {
+        native::process_revert_companion_to_bridged(ctx)
+    }
 }

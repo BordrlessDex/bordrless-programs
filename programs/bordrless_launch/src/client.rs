@@ -801,6 +801,283 @@ pub fn swap_with_base_slice(
     )
 }
 
+/// A `swap_v2` on a native launch pool (`bordrless_swap::native`), as [`swap_with_base_slice`]:
+/// a buy pays SOL from `trader`'s wallet and delivers the token to `recipient`'s holding; a sell
+/// delivers SOL to `recipient`'s wallet. No bridge accounts: a native launch's cuts are lamports,
+/// and passing them would write-lock the bridge's global SOL accounts on every trade (audit O-1).
+/// For a launch not yet native on a native pool (its cuts wrapped into bridged-SOL holdings), use
+/// [`swap_v2_with_bridge`] with `with_bridge`.
+#[allow(clippy::too_many_arguments)]
+pub fn swap_v2_with_base_slice(
+    keys: &LaunchKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+    base_slice: Vec<AccountMeta>,
+) -> Instruction {
+    swap_v2_with_bridge(
+        keys,
+        trader,
+        recipient,
+        direction,
+        amount_in,
+        min_amount_out,
+        base_slice,
+        false,
+    )
+}
+
+/// [`swap_v2_with_base_slice`], the bridge's accounts passed only `with_bridge` (a native
+/// launch's cuts are lamports and need none; a program trading as a PDA can't wrap anyway).
+#[allow(clippy::too_many_arguments)]
+pub fn swap_v2_with_bridge(
+    keys: &LaunchKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+    base_slice: Vec<AccountMeta>,
+    with_bridge: bool,
+) -> Instruction {
+    let buy = direction == 1;
+    let (trader_base, trader_quote) = if buy {
+        (
+            token_client::holding_address(&keys.mint, &recipient),
+            trader,
+        )
+    } else {
+        (
+            token_client::holding_address(&keys.mint, &trader),
+            recipient,
+        )
+    };
+    let (in_hook_accounts, out_hook_accounts) = if buy {
+        (0, base_slice.len() as u8)
+    } else {
+        (base_slice.len() as u8, 0)
+    };
+    let mut extras = base_slice;
+    extras.extend(hook_extras(&keys.mint, &keys.quote_mint));
+    swap_client::swap_v2(
+        &swap_client::SwapV2Keys {
+            trader,
+            pool: keys.pool(),
+            base_mint: keys.mint,
+            trader_base,
+            trader_quote,
+            hook_program: Some(crate::ID),
+            base_mint_writable: keys.burns,
+            with_bridge,
+        },
+        SwapArgs {
+            direction,
+            amount_in,
+            min_amount_out,
+            in_hook_accounts,
+            out_hook_accounts,
+            hook_data: vec![],
+        },
+        extras,
+    )
+}
+
+/// [`swap_v2_with_base_slice`] for a token whose hook is the kit or none.
+pub fn swap_v2(
+    keys: &LaunchKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+) -> Instruction {
+    assert!(
+        keys.custom_hook.is_none(),
+        "a custom-hook token's swap needs its hook slice: use swap_v2_with_base_slice"
+    );
+    swap_v2_with_base_slice(
+        keys,
+        trader,
+        recipient,
+        direction,
+        amount_in,
+        min_amount_out,
+        base_hook_slice(&keys.mint, &keys.quote_mint, keys.modules),
+    )
+}
+
+/// `claim_creator_fees_sol` of a native launch: `author` (the listed config and its author) when
+/// the launch pays one, `partner` (the partner config and its partner) when it pays one; every
+/// party is paid to its wallet.
+pub fn claim_creator_fees_sol(
+    creator: Pubkey,
+    mint: Pubkey,
+    author: Option<(Pubkey, Pubkey)>,
+    partner: Option<(Pubkey, Pubkey)>,
+) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(creator, true),
+        AccountMeta::new(launch_address(&mint), false),
+    ]);
+    if let Some((config, author)) = author {
+        accounts.push(AccountMeta::new_readonly(config, false));
+        accounts.push(AccountMeta::new(author, false));
+    }
+    if let Some((config, partner)) = partner {
+        accounts.push(AccountMeta::new(partner_fee_address(&config), false));
+        accounts.push(AccountMeta::new(partner, false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::ClaimCreatorFeesSol {}.data(),
+    }
+}
+
+/// `claim_author_fees_sol` of a native launch; `partner` when it pays one.
+pub fn claim_author_fees_sol(
+    author: Pubkey,
+    mint: Pubkey,
+    launch_config: Pubkey,
+    creator: Pubkey,
+    partner: Option<Pubkey>,
+) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(author, true),
+        AccountMeta::new(launch_address(&mint), false),
+        AccountMeta::new_readonly(launch_config, false),
+        AccountMeta::new(creator, false),
+    ]);
+    if let Some(partner) = partner {
+        accounts.push(AccountMeta::new(partner_fee_address(&launch_config), false));
+        accounts.push(AccountMeta::new(partner, false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::ClaimAuthorFeesSol {}.data(),
+    }
+}
+
+/// `distribute_fees_sol` of a native partner launch; `author` when it pays one.
+pub fn distribute_fees_sol(
+    mint: Pubkey,
+    launch_config: Pubkey,
+    creator: Pubkey,
+    partner: Pubkey,
+    author: Option<Pubkey>,
+) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(launch_address(&mint), false),
+        AccountMeta::new(partner_fee_address(&launch_config), false),
+        AccountMeta::new(creator, false),
+        AccountMeta::new(partner, false),
+    ]);
+    if let Some(author) = author {
+        accounts.push(AccountMeta::new_readonly(launch_config, false));
+        accounts.push(AccountMeta::new(author, false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::DistributeFeesSol {}.data(),
+    }
+}
+
+/// `set_native_launches(on)`, by the admin.
+pub fn set_native_launches(admin: Pubkey, on: bool) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new_readonly(admin, true),
+            AccountMeta::new(config_address(), false),
+        ]),
+        data: crate::instruction::SetNativeLaunches { on }.data(),
+    }
+}
+
+fn launch_form(admin: Pubkey, mint: Pubkey, quote_mint: Pubkey, modules: u8) -> Vec<AccountMeta> {
+    let launch = launch_address(&mint);
+    let bridge = kit_client::set_native_bridge_accounts(quote_mint);
+    let mut accounts = vec![
+        AccountMeta::new(admin, true),
+        AccountMeta::new_readonly(config_address(), false),
+        AccountMeta::new_readonly(DEX_CONFIG, false),
+        AccountMeta::new(launch, false),
+        AccountMeta::new_readonly(
+            pool_address(&mint, &quote_mint, bordrless_core::policy::LP_FEE_BPS),
+            false,
+        ),
+        AccountMeta::new(token_client::holding_address(&quote_mint, &launch), false),
+        AccountMeta::new(quote_mint, false),
+        bridge[0].clone(),
+        bridge[1].clone(),
+        bridge[2].clone(),
+        bridge[3].clone(),
+        bridge[5].clone(),
+        AccountMeta::new_readonly(bordrless_token::ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ];
+    if modules == 0 {
+        accounts.extend((0..5).map(|_| AccountMeta::new_readonly(crate::ID, false)));
+    } else {
+        let rewards = modules & bordrless_kit::modules::HOLDER_REWARDS != 0;
+        accounts.extend([
+            AccountMeta::new_readonly(KIT_ID, false),
+            AccountMeta::new(kit_config_address(&mint), false),
+            if rewards {
+                AccountMeta::new(holder_vault_address(&mint, &quote_mint), false)
+            } else {
+                AccountMeta::new_readonly(KIT_ID, false)
+            },
+            AccountMeta::new_readonly(kit_caller_address(&mint).0, false),
+            AccountMeta::new_readonly(kit_client::event_authority(), false),
+        ]);
+    }
+    with_events(accounts)
+}
+
+/// `migrate_launch_to_native` of the launch of `mint` (its kit `modules`, `Launch.modules`), by
+/// the admin, with the DEX paused and the pool already native. The pool's LP fee is the policy's.
+pub fn migrate_launch_to_native(
+    admin: Pubkey,
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    modules: u8,
+) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: launch_form(admin, mint, quote_mint, modules),
+        data: crate::instruction::MigrateLaunchToNative {}.data(),
+    }
+}
+
+/// `revert_launch_to_bridged`, as [`migrate_launch_to_native`].
+pub fn revert_launch_to_bridged(
+    admin: Pubkey,
+    mint: Pubkey,
+    quote_mint: Pubkey,
+    modules: u8,
+) -> Instruction {
+    // The coin's hook vault and companion addresses (read): the launch reverts only after them.
+    let mut accounts = launch_form(admin, mint, quote_mint, modules);
+    for (seed, program) in [
+        (HOOK_VAULT_SEED, HOOK_VAULT_ID),
+        (COMPANION_SEED, bordrless_kit::constants::COMPANION_ID),
+    ] {
+        let (key, _) = Pubkey::find_program_address(&[seed, mint.as_ref()], &program);
+        accounts.push(AccountMeta::new_readonly(key, false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::RevertLaunchToBridged {}.data(),
+    }
+}
+
 /// Reads a launch from its account data.
 pub fn read_launch(info: &AccountInfo) -> Result<Launch> {
     require_keys_eq!(

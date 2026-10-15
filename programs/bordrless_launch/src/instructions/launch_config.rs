@@ -343,6 +343,11 @@ pub fn process_create_partner_config(
     partner_share_bps: u16,
 ) -> Result<()> {
     require!(partner != Pubkey::default(), LaunchError::InvalidPartner);
+    // A key no transaction can make writable can't be paid lamports (audit N-7).
+    require!(
+        !RESERVED_ACCOUNT_KEYS.contains(&partner),
+        LaunchError::InvalidPartner
+    );
     require!(
         author_share_bps <= MAX_AUTHOR_SHARE_BPS,
         LaunchError::InvalidAuthorShare

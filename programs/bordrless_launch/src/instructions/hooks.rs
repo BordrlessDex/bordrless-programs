@@ -126,17 +126,25 @@ fn answer(launch: &mut Launch, cut: &HookCut, lp_fee_bps: Option<u16>) -> HookRe
         burn: cut.burn,
         ..HookReturn::default()
     };
+    // A native launch is paid lamports: its creator fees on the launch account itself, its holder
+    // fees on the kit config (which the kit's own slice passes writable in every launch-pool
+    // swap); the DEX pays them in SOL whichever swap trades the pool.
+    let (creator_index, holder_index) = if launch.is_native() {
+        (LAUNCH_INDEX, KIT_CONFIG_INDEX)
+    } else {
+        (QUOTE_HOLDING_INDEX, HOLDER_VAULT_INDEX)
+    };
     if cut.creator_fee > 0 {
         ret.deltas.push(Delta {
             amount: cut.creator_fee,
-            account: QUOTE_HOLDING_INDEX,
+            account: creator_index,
         });
         launch.creator_fees_accrued = launch.creator_fees_accrued.saturating_add(cut.creator_fee);
     }
     if cut.holder_fee > 0 {
         ret.deltas.push(Delta {
             amount: cut.holder_fee,
-            account: HOLDER_VAULT_INDEX,
+            account: holder_index,
         });
         launch.holder_fees_accrued = launch.holder_fees_accrued.saturating_add(cut.holder_fee);
     }

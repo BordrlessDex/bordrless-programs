@@ -344,6 +344,12 @@ pub fn process_open_vault<'info>(ctx: Context<'info, OpenVault<'info>>) -> Resul
     }
     let v = &mut ctx.accounts.vault;
     v.slots = slots;
+    // A coin launched native (the launchpad's native launches) gets a native vault from the
+    // start: nothing is pending before the open, so nothing moves (audit N-3; without it every
+    // sale went through the old swap and failed on the empty buffer).
+    if launch.is_native() {
+        v.set_native(true);
+    }
     v.opened = true;
     v.opened_at = now;
     v.last_activity_at = now;

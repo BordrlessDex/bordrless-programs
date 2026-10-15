@@ -31,7 +31,7 @@ use crate::constants::*;
 use crate::error::CompanionError;
 use crate::events::*;
 use crate::instructions::game::{apply_status, rolled_over, ClaimPrize, GameStep};
-use crate::instructions::steps::{available, balance, find, pay_sol};
+use crate::instructions::steps::{available, fees_waiting, find, pay_sol, sol_held};
 use crate::instructions::CreatorSeeds;
 use crate::state::*;
 
@@ -113,10 +113,11 @@ fn jackpot_prize_due(state: &AccountInfo, header: &GameHeader, g: &Game, now: i6
 /// what is set aside (both of which `claim_fees` splits), counted before any bounty or cap (an
 /// upper bound: it errs on a winner's side). Both holdings must be passed.
 fn fundable(all: &[AccountInfo], c: &Companion, launch: &Pubkey) -> Result<u64> {
-    let unclaimed = balance(all, &BRIDGED_SOL_MINT, launch)?;
+    let seeds = CreatorSeeds::of(c);
+    let unclaimed = fees_waiting(all, &seeds, launch)?;
     let creator = Companion::creator(&c.mint).0;
-    let surplus = balance(all, &BRIDGED_SOL_MINT, &creator)?
-        .saturating_sub(c.set_aside().unwrap_or(u64::MAX));
+    let surplus =
+        sol_held(all, &seeds, &creator)?.saturating_sub(c.set_aside().unwrap_or(u64::MAX));
     Ok(c.pending_pot.saturating_add(bps_of(
         unclaimed.saturating_add(surplus),
         u64::from(c.pot_bps),
@@ -289,7 +290,7 @@ pub fn process_settle<'info>(ctx: Context<'info, ClaimPrize<'info>>) -> Result<(
     }
     let bounty = bps_of(prize, u64::from(c.bounty_bps));
     let paid = prize - bounty;
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     pay_sol(&all, &seeds, creator, &winner, paid)?;
     pay_sol(
         &all,
@@ -611,7 +612,7 @@ pub fn process_claim_share<'info>(
     require!(share > 0, CompanionError::NothingToDo);
     let bounty = bps_of(share, u64::from(c.bounty_bps));
     let paid = share - bounty;
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let to = ctx.accounts.owner.to_account_info();
     pay_sol(&all, &seeds, creator, &to, paid)?;

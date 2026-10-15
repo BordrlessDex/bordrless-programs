@@ -762,3 +762,14 @@ pub struct WalletPayoutsAllowed {
     pub companion: Pubkey,
     pub program: Pubkey,
 }
+
+/// A companion moved between bridged SOL (its creator's holding) and native SOL (its creator
+/// address's lamports): `moved` the SOL that changed form, `spare` the creator address's spare
+/// lamports booked to the beneficiary's part when it turned native.
+#[event]
+pub struct CompanionNativeSet {
+    pub companion: Pubkey,
+    pub native: bool,
+    pub moved: u64,
+    pub spare: u64,
+}

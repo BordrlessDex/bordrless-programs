@@ -118,4 +118,16 @@ pub mod hook_vault {
         log_heap();
         Ok(())
     }
+
+    /// The upgrade authority, with the DEX paused and the coin's launch native: turns the vault
+    /// native (each slot's pending SOL unwrapped onto its owner). Idempotent.
+    pub fn migrate_vault_to_native<'info>(ctx: Context<'info, VaultForm<'info>>) -> Result<()> {
+        instructions::native::process_set_vault_native(ctx, true)
+    }
+
+    /// The upgrade authority, with the DEX paused: turns a native vault back (each slot's pending
+    /// SOL wrapped into its holding). Idempotent.
+    pub fn revert_vault_to_bridged<'info>(ctx: Context<'info, VaultForm<'info>>) -> Result<()> {
+        instructions::native::process_set_vault_native(ctx, false)
+    }
 }

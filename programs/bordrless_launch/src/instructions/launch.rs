@@ -359,6 +359,9 @@ struct Plan<'info> {
     /// The partner's share of the creator fee and its account's bump, from a partner config
     /// (`docs/partner-fee.md`); none otherwise.
     partner: Option<(u16, u8)>,
+    /// A native launch (`crate::instructions::native`): native launches on (a companion coin's
+    /// companion turns native with it, at its launch).
+    native: bool,
 }
 
 impl<'info> Plan<'info> {
@@ -677,6 +680,7 @@ fn plan<'info>(
         custom,
         quote_cut,
         partner,
+        native: config.native_launches(),
     }))
 }
 
@@ -950,6 +954,43 @@ fn install_kit<'info>(ctx: &Context<'info, CreateLaunch<'info>>, plan: &Plan<'in
     Ok(())
 }
 
+/// 5b. A native launch's kit keeps its rewards as lamports on its config from the start (its vault
+///     is empty: no bridge needed), signed by the kit-caller PDA, the creator its wallet.
+#[inline(never)]
+fn kit_native<'info>(ctx: &Context<'info, CreateLaunch<'info>>, plan: &Plan<'info>) -> Result<()> {
+    let program = present(&ctx.accounts.kit_program)?;
+    let caller = present(&ctx.accounts.kit_caller)?;
+    let vault = match plan.reward_vault() {
+        Some(_) => present(&ctx.accounts.reward_vault)?,
+        None => program.clone(),
+    };
+    let ix = cpi::kit_set_native(
+        caller.key(),
+        ctx.accounts.creator.key(),
+        plan.kit_config,
+        plan.reward_vault(),
+        None,
+        true,
+    );
+    let caller_seeds = KitCallerSeeds::new(plan.mint, plan.kit_caller_bump);
+    let mut infos = vec![
+        caller,
+        ctx.accounts.creator.to_account_info(),
+        present(&ctx.accounts.kit_config)?,
+        vault,
+    ];
+    infos.extend((0..6).map(|_| program.clone()));
+    infos.extend([
+        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_event_authority.to_account_info(),
+        ctx.accounts.system_program.to_account_info(),
+        present(&ctx.accounts.kit_event_authority)?,
+        program,
+    ]);
+    invoke_signed(&ix, &infos, &[&caller_seeds.seeds()])?;
+    Ok(())
+}
+
 /// 6. The curve pool, created by this program as its hook: the DEX skips the initialize
 ///    callbacks and lets a curve through because our hook authority signs. The base token-hook
 ///    slice (the kit, the token program's signer for it, its config, the reward vault or the
@@ -993,6 +1034,7 @@ fn create_curve_pool<'info>(
             hook_data: vec![],
         },
         slice.metas.clone(),
+        plan.native,
     );
     let mut infos = vec![
         ctx.accounts.creator.to_account_info(),
@@ -1122,6 +1164,7 @@ fn record_launch<'info>(
     if let Some((share_bps, bump)) = plan.partner {
         launch.set_partner(share_bps, bump);
     }
+    launch.set_native(plan.native);
     Ok(())
 }
 
@@ -1211,6 +1254,9 @@ pub fn process_create_launch<'info>(
     mint_supply(&ctx, &plan)?;
     if plan.modules != 0 {
         install_kit(&ctx, &plan)?;
+        if plan.native {
+            kit_native(&ctx, &plan)?;
+        }
     }
     create_curve_pool(&ctx, &plan)?;
     write_pool_registry(&ctx, &plan)?;

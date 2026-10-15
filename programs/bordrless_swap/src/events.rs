@@ -158,3 +158,46 @@ pub struct ProtocolFeesCollected {
     pub collector: Pubkey,
     pub ts: i64,
 }
+
+/// One cut a pool hook took from the native (lamports) side of a swap: the account it was paid to,
+/// the lamports, and whether it was paid as bridged SOL (wrapped into a holding of bridged SOL, an
+/// old-style destination) rather than as lamports.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct NativeDeltaPaid {
+    pub account: Pubkey,
+    pub amount: u64,
+    pub wrapped: bool,
+}
+
+/// The native details of a `swap_v2` (emitted right after its `Swapped`): the lamports that left
+/// the trader (a buy) or the pool (a sell), each quote-side cut, and the pool's quote after it.
+#[event]
+pub struct SwappedNative {
+    pub pool: Pubkey,
+    pub direction: u8,
+    /// A buy: the lamports the trader paid the pool. A sell: the lamports delivered.
+    pub quote_lamports: u64,
+    /// The quote-side cuts (a buy's `deltas_in`, a sell's `deltas_out`).
+    pub quote_deltas: Vec<NativeDeltaPaid>,
+    pub buffer_quote: u64,
+    pub pool_lamports: u64,
+}
+
+/// A pool moved between bridged SOL in its quote vault and lamports on its account.
+#[event]
+pub struct PoolQuoteFormChanged {
+    pub pool: Pubkey,
+    /// 0 migrated to native, 1 reverted to bridged, 2 rebalanced, 3 buffer target set.
+    pub kind: u8,
+    pub native: bool,
+    /// Lamports unwrapped from the buffer onto the pool.
+    pub unwrapped: u64,
+    /// Lamports wrapped from the pool into the buffer.
+    pub wrapped: u64,
+    pub buffer_quote: u64,
+    pub buffer_target: u64,
+    pub quote_reserve: u64,
+    pub protocol_fees_quote: u64,
+    pub pool_lamports: u64,
+    pub ts: i64,
+}

@@ -31,6 +31,19 @@ pub const LAUNCHPAD_ID: anchor_lang::prelude::Pubkey =
     anchor_lang::prelude::Pubkey::from_str_const("1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC");
 /// Discriminator length.
 pub const DISCRIMINATOR_LEN: usize = 8;
+/// The launchpad's launch seed (`bordrless_launch::constants::LAUNCH_SEED`; the test suite checks
+/// it): `revert_pool_to_bridged` reads a launch pool's launch.
+pub const LAUNCH_SEED: &[u8] = b"launch";
+/// Byte offset of `bordrless_launch::state::Launch::custom_hook`'s option tag in a launch account.
+/// The fields after it are fixed: the hook (32 bytes when some), `custom_hook_flags` (2),
+/// `author_share_bps` (2), `author_fees_paid` (8), then `reserved`, whose byte 17 is the native
+/// flag. The test suite checks this against `Launch::is_native` for both tags.
+pub const LAUNCH_CUSTOM_HOOK_OFFSET: usize = 498;
+/// The one bridged-SOL pool that must never go native (its hook, `AwAvBe…`, is a third party's;
+/// audit N-9). The hook rule of `migrate_pool_to_native` already refuses it; named as well.
+pub const EXCLUDED_POOL: anchor_lang::prelude::Pubkey =
+    anchor_lang::prelude::Pubkey::from_str_const("4PvPnTByfrnhA1nNmsaou7GrdQsqJNrkinqLHp2JHFX7");
+
 /// Name of every LP mint.
 pub const LP_NAME: &str = "Bordrless LP";
 /// Symbol of every LP mint.
@@ -48,6 +61,17 @@ pub const BRIDGED_SOL_MINT: anchor_lang::prelude::Pubkey =
     anchor_lang::prelude::Pubkey::from_str_const("A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i");
 /// The bridge's `unwrap_sol` instruction discriminator.
 pub const UNWRAP_SOL_DISCRIMINATOR: [u8; 8] = [99, 40, 14, 105, 45, 107, 172, 201];
+/// The bridge's `wrap_sol` instruction discriminator.
+pub const WRAP_SOL_DISCRIMINATOR: [u8; 8] = [47, 62, 155, 172, 131, 205, 37, 201];
+
+/// `Pool.reserved[NATIVE_FLAG_OFFSET]`: 1 when the pool holds its quote (bridged SOL by its mint
+/// and seeds) as lamports on the pool account itself (a native pool, `crate::native`).
+pub const NATIVE_FLAG_OFFSET: usize = 0;
+/// `Pool.reserved[BUFFER_OFFSET..+8]` (u64 LE): a native pool's buffer, the bridged SOL in its
+/// quote vault that its books count (the rest of the quote is lamports on the pool).
+pub const BUFFER_OFFSET: usize = 1;
+/// `Pool.reserved[BUFFER_TARGET_OFFSET..+8]` (u64 LE): the buffer `rebalance` moves toward.
+pub const BUFFER_TARGET_OFFSET: usize = 9;
 
 #[cfg(test)]
 mod bridge_tests {
@@ -66,6 +90,10 @@ mod bridge_tests {
         assert_eq!(
             super::UNWRAP_SOL_DISCRIMINATOR,
             bordrless_bridge::instruction::UnwrapSol::DISCRIMINATOR
+        );
+        assert_eq!(
+            super::WRAP_SOL_DISCRIMINATOR,
+            bordrless_bridge::instruction::WrapSol::DISCRIMINATOR
         );
     }
 }

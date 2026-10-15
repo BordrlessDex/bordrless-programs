@@ -157,6 +157,17 @@ pub struct Config {
 impl Config {
     /// Account size.
     pub const LEN: usize = DISCRIMINATOR_LEN + Self::INIT_SPACE;
+
+    /// Whether new launches are native (`reserved[0]`, set by `set_native_launches`); 0 for the
+    /// config as it was made.
+    pub fn native_launches(&self) -> bool {
+        self.reserved[0] == 1
+    }
+
+    /// Sets it.
+    pub fn set_native_launches(&mut self, on: bool) {
+        self.reserved[0] = u8::from(on);
+    }
 }
 
 /// A launch config (`docs/hooks-v2.md` §5.7): the rules, the creator fee and, for a
@@ -514,5 +525,18 @@ impl Launch {
     pub fn set_partner(&mut self, share_bps: u16, bump: u8) {
         self.reserved[14..16].copy_from_slice(&share_bps.to_le_bytes());
         self.reserved[16] = bump;
+    }
+
+    /// Whether the launch is native (`reserved[17]`, `crate::instructions::native`): its pool
+    /// holds SOL, the pool hook pays its creator fees (with any SOL cut) as lamports to the launch
+    /// account itself and its holder fees as lamports to the kit config, and the `_sol` claims pay
+    /// them. 0 for every launch made before.
+    pub fn is_native(&self) -> bool {
+        self.reserved[17] == 1
+    }
+
+    /// Sets or clears the native flag.
+    pub fn set_native(&mut self, native: bool) {
+        self.reserved[17] = u8::from(native);
     }
 }

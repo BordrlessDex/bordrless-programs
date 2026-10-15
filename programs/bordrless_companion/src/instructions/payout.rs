@@ -304,8 +304,12 @@ fn pay_wallets<'info>(p: &StepPayouts<'_, 'info>, answer: &WalletPayoutAnswer) -
         Pubkey::default(),
     ];
     let rent = Rent::get()?;
+    // Each payout, and whether it goes in bridged SOL: an account that is a holding of bridged SOL
+    // (an old-style destination, a holder's or a keeper's) is paid in it, never lamports (which
+    // would sit on the holding, stranded).
     let mut payouts: Vec<(&AccountInfo<'info>, u64, u32)> =
         Vec::with_capacity(answer.entries.len());
+    let mut wrapped: Vec<bool> = Vec::with_capacity(answer.entries.len());
     let mut total = 0u64;
     for (i, e) in answer.entries.iter().enumerate() {
         if e.lamports == 0 || payouts.iter().any(|(q, _, _)| *q.key == e.to) {
@@ -329,27 +333,47 @@ fn pay_wallets<'info>(p: &StepPayouts<'_, 'info>, answer: &WalletPayoutAnswer) -
             msg!("wallet payout {}: {} was not passed", i, e.to);
             return err!(CompanionError::WalletPayoutTarget);
         };
+        // A holding of bridged SOL is paid in it only when its owner could be paid as a wallet:
+        // not one of the accounts above, passed among the remaining accounts, and owned by none of
+        // the protocol's programs (so never the creator's, the launch's, a vault's or a pool's).
+        let bridged_holding = *to.owner == TOKEN_ID
+            && token_client::read_holding(to).is_ok_and(|h| {
+                h.mint == BRIDGED_SOL_MINT
+                    && !excluded.contains(&h.owner)
+                    && p.remaining.iter().any(|o| {
+                        *o.key == h.owner && !PROTOCOL_OWNERS.contains(o.owner) && payable(o)
+                    })
+            });
         let funded = to
             .lamports()
             .checked_add(e.lamports)
             .is_some_and(|l| l >= rent.minimum_balance(to.data_len()));
         if excluded.contains(to.key)
-            || PROTOCOL_OWNERS.contains(to.owner)
             || !to.is_writable
-            || !payable(to)
-            || !funded
+            || (!bridged_holding && (PROTOCOL_OWNERS.contains(to.owner) || !payable(to) || !funded))
         {
             msg!("wallet payout {}: account {} can't be paid", i, to.key);
             return err!(CompanionError::WalletPayoutTarget);
         }
         payouts.push((to, e.lamports, e.tag));
+        wrapped.push(bridged_holding);
     }
+    // What leaves the pot: every payout and the bounty. Only the part paid as SOL is unwrapped
+    // (a bridged companion); the part paid in bridged SOL moves as it is, or (a native companion)
+    // is wrapped by the creator address into the holding.
     let unwrapped = total
         .checked_add(p.bounty)
         .ok_or(CompanionError::MathOverflow)?;
-    if unwrapped > 0 {
+    let in_bridged: u64 = payouts
+        .iter()
+        .zip(&wrapped)
+        .filter(|(_, w)| **w)
+        .map(|((_, l, _), _)| *l)
+        .sum();
+    let as_sol = unwrapped - in_bridged;
+    if as_sol > 0 && !p.seeds.native {
         invoke_built(
-            &bordrless_bridge::client::unwrap_sol(p.creator, unwrapped),
+            &bordrless_bridge::client::unwrap_sol(p.creator, as_sol),
             p.all,
             &[&p.seeds.seeds()],
         )?;
@@ -369,8 +393,30 @@ fn pay_wallets<'info>(p: &StepPayouts<'_, 'info>, answer: &WalletPayoutAnswer) -
             lamports,
         )
     };
-    for (to, lamports, _) in &payouts {
-        send(to, *lamports)?;
+    for ((to, lamports, _), w) in payouts.iter().zip(&wrapped) {
+        if !*w {
+            send(to, *lamports)?;
+        } else if p.seeds.native {
+            // The bridge's `wrap_sol` with the creator address its user, minting into the
+            // holding (the bridge mints into any holding of bridged SOL it is given).
+            let mut ix = bordrless_bridge::client::wrap_sol(p.creator, *lamports);
+            ix.accounts[WRAP_SOL_HOLDING_INDEX] = AccountMeta::new(*to.key, false);
+            invoke_built(&ix, p.all, &[&p.seeds.seeds()])?;
+        } else {
+            invoke_built(
+                &token_client::transfer(
+                    p.creator,
+                    token_client::holding_address(&BRIDGED_SOL_MINT, &p.creator),
+                    *to.key,
+                    BRIDGED_SOL_MINT,
+                    None,
+                    vec![],
+                    *lamports,
+                ),
+                p.all,
+                &[&p.seeds.seeds()],
+            )?;
+        }
     }
     if p.bounty > 0 {
         send(p.cranker, p.bounty)?;
@@ -421,6 +467,9 @@ fn pay_wallets<'info>(p: &StepPayouts<'_, 'info>, answer: &WalletPayoutAnswer) -
     t.try_serialize(&mut writer)?;
     Ok(total)
 }
+
+/// The index of the user's holding of bridged SOL in the bridge's `wrap_sol` accounts.
+const WRAP_SOL_HOLDING_INDEX: usize = 5;
 
 /// One checked entry: the holding, its owner, the owner's account when paid, what it gets, the
 /// tag.
@@ -571,7 +620,7 @@ fn pay_holdings<'info>(p: &StepPayouts<'_, 'info>, answer: &PayoutAnswer) -> Res
     let unwrapped = total
         .checked_add(p.bounty)
         .ok_or(CompanionError::MathOverflow)?;
-    if unwrapped > 0 {
+    if unwrapped > 0 && !p.seeds.native {
         invoke_built(
             &bordrless_bridge::client::unwrap_sol(p.creator, unwrapped),
             p.all,

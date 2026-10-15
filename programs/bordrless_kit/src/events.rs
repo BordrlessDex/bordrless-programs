@@ -54,3 +54,14 @@ pub struct RewardsShared {
     pub amount: u64,
     pub total_shared: u64,
 }
+
+/// The kit's reward vault moved between bridged SOL (its holding) and lamports on its config.
+#[event]
+pub struct KitNativeSet {
+    pub mint: Pubkey,
+    pub native: bool,
+    /// The rewards moved (unwrapped into lamports, or wrapped back into the holding).
+    pub moved: u64,
+    pub lamports_base: u64,
+    pub ts: i64,
+}

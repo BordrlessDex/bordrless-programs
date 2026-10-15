@@ -204,6 +204,22 @@ pub fn execute(
             &mut extra,
             &launch_client::swap_with_base_slice(coin, owner, owner, 0, 0, 0, hook.slice()),
         );
+        // A native vault sells through `swap_v2`.
+        if vault.is_native() {
+            add(
+                &mut extra,
+                &launch_client::swap_v2_with_bridge(
+                    coin,
+                    owner,
+                    owner,
+                    0,
+                    0,
+                    0,
+                    hook.slice(),
+                    false,
+                ),
+            );
+        }
         unwrap_accounts(&mut extra, owner);
         if slot.policy == policy::SELL_FOR_SOL {
             push(&mut extra, slot.target, true);
@@ -248,6 +264,33 @@ pub fn execute_buy(
         }
     };
     add(&mut extra, &buy);
+    // A native vault buys a native pool through `swap_v2` (a bridged one after a wrap, whose
+    // accounts are the unwrap's).
+    if vault.is_native() {
+        let v2 = match &hook {
+            BuyHook::Kit { .. } => launch_client::swap_v2_with_bridge(
+                x,
+                owner,
+                owner,
+                1,
+                0,
+                0,
+                launch_client::base_hook_slice(&x.mint, &x.quote_mint, x.modules),
+                false,
+            ),
+            BuyHook::Custom { transfer, .. } => launch_client::swap_v2_with_bridge(
+                x,
+                owner,
+                owner,
+                1,
+                0,
+                0,
+                transfer.slice(),
+                false,
+            ),
+        };
+        add(&mut extra, &v2);
+    }
     push(&mut extra, launch_client::launch_address(&x.mint), false);
     add(
         &mut extra,
@@ -311,6 +354,50 @@ pub fn retire(
         extra,
         crate::instruction::Retire { i, burn_coin }.data(),
     )
+}
+
+/// `migrate_vault_to_native` of `vault` (`native`) or `revert_vault_to_bridged`, signed by the
+/// program's upgrade authority: each slot in use with pending SOL, its owner and its holding of
+/// bridged SOL, then the bridge's accounts.
+pub fn set_vault_native(admin: Pubkey, vault: &Vault, native: bool) -> Instruction {
+    let mint = vault.mint;
+    let program_data = Pubkey::find_program_address(
+        &[crate::ID.as_ref()],
+        &bordrless_swap::constants::BPF_LOADER_UPGRADEABLE_ID,
+    )
+    .0;
+    let mut accounts = vec![
+        AccountMeta::new(admin, true),
+        AccountMeta::new_readonly(program_data, false),
+        AccountMeta::new_readonly(bordrless_swap::client::config_address(), false),
+        AccountMeta::new(vault_address(&mint), false),
+        AccountMeta::new_readonly(launch_client::launch_address(&mint), false),
+        AccountMeta::new_readonly(anchor_lang::system_program::ID, false),
+    ];
+    let mut extra = Vec::new();
+    for i in 0..vault.n_slots {
+        if vault.slots[usize::from(i)].pending_sol == 0 {
+            continue;
+        }
+        let owner = slot_owner(&mint, i);
+        push(&mut extra, owner, true);
+        push(
+            &mut extra,
+            token_client::holding_address(&BRIDGED_SOL_MINT, &owner),
+            true,
+        );
+        unwrap_accounts(&mut extra, owner);
+    }
+    accounts.extend(extra);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: if native {
+            crate::instruction::MigrateVaultToNative {}.data()
+        } else {
+            crate::instruction::RevertVaultToBridged {}.data()
+        },
+    }
 }
 
 #[cfg(test)]

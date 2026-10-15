@@ -61,6 +61,9 @@ pub const LAUNCH_HOOK_FLAGS: u16 = pool_flags::BEFORE_INITIALIZE
 /// Index, in a pool callback's account list, of the launch's quote holding (prefix of 5, then the
 /// launch, then the holding): creator fees go there.
 pub const QUOTE_HOLDING_INDEX: u8 = 6;
+/// Index, in a pool callback's account list, of the launch itself (after the prefix of 5): a
+/// native launch's creator fees go there, as lamports.
+pub const LAUNCH_INDEX: u8 = 5;
 /// Index of the holder vault (the kit config's holding of the quote): holder fees go there.
 pub const HOLDER_VAULT_INDEX: u8 = 7;
 /// Index of the kit config, read for the holder-fee threshold.
@@ -158,3 +161,69 @@ pub mod ceilings {
     /// The largest launch supply the kit installs on, which bounds its reward math.
     pub const MAX_SUPPLY: u64 = bordrless_kit::constants::MAX_SUPPLY;
 }
+
+/// The bridge (`bordrless_bridge`), whose `wrap_sol` and `unwrap_sol` move a launch's creator fees
+/// between bridged SOL and lamports.
+pub const BRIDGE_ID: Pubkey = bordrless_kit::constants::BRIDGE_ID;
+
+/// The companion's seed (`bordrless_companion::constants::COMPANION_SEED`) and the byte past
+/// `Companion::LEN` that holds its native flag when the account has room for it
+/// (`bordrless_companion::state::NativeSol`); the test suite checks both.
+pub const COMPANION_SEED: &[u8] = b"companion";
+pub const COMPANION_NATIVE_OFFSET: usize = 308;
+/// hook_vault's vault seed and the offset of `Vault.reserved[0]`, its native flag (checked by the
+/// test suite).
+pub const HOOK_VAULT_SEED: &[u8] = b"vault";
+pub const HOOK_VAULT_NATIVE_OFFSET: usize = 638;
+
+/// Whether `creator` is the companion creator address of `mint` (`PDA(["creator", mint],
+/// COMPANION_ID)`): a companion coin. `revert_launch_to_bridged` uses it to know a launch has a
+/// companion that must revert first.
+pub fn is_companion_creator(creator: &Pubkey, mint: &Pubkey) -> bool {
+    Pubkey::find_program_address(
+        &[
+            bordrless_kit::constants::COMPANION_CREATOR_SEED,
+            mint.as_ref(),
+        ],
+        &bordrless_kit::constants::COMPANION_ID,
+    )
+    .0 == *creator
+}
+
+/// Keys a transaction always demotes to read-only (the runtime's reserved account keys: the
+/// builtin programs and the sysvars). Such a key can never be credited lamports, so a partner config
+/// naming one would lock every native claim of its launches (audit N-7): `create_partner_config`
+/// refuses them.
+pub const RESERVED_ACCOUNT_KEYS: [Pubkey; 31] = [
+    Pubkey::from_str_const("AddressLookupTab1e1111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoader1111111111111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoader2111111111111111111111111111111111"),
+    Pubkey::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111"),
+    Pubkey::from_str_const("LoaderV411111111111111111111111111111111111"),
+    Pubkey::from_str_const("ComputeBudget111111111111111111111111111111"),
+    Pubkey::from_str_const("Config1111111111111111111111111111111111111"),
+    Pubkey::from_str_const("Ed25519SigVerify111111111111111111111111111"),
+    Pubkey::from_str_const("Feature111111111111111111111111111111111111"),
+    Pubkey::from_str_const("NativeLoader1111111111111111111111111111111"),
+    Pubkey::from_str_const("KeccakSecp256k11111111111111111111111111111"),
+    Pubkey::from_str_const("Secp256r1SigVerify1111111111111111111111111"),
+    Pubkey::from_str_const("Stake11111111111111111111111111111111111111"),
+    Pubkey::from_str_const("StakeConfig11111111111111111111111111111111"),
+    Pubkey::from_str_const("11111111111111111111111111111111"),
+    Pubkey::from_str_const("Vote111111111111111111111111111111111111111"),
+    Pubkey::from_str_const("ZkE1Gama1Proof11111111111111111111111111111"),
+    Pubkey::from_str_const("ZkTokenProof1111111111111111111111111111111"),
+    Pubkey::from_str_const("Sysvar1111111111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarC1ock11111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarEpochRewards1111111111111111111111111"),
+    Pubkey::from_str_const("SysvarEpochSchedu1e111111111111111111111111"),
+    Pubkey::from_str_const("SysvarFees111111111111111111111111111111111"),
+    Pubkey::from_str_const("Sysvar1nstructions1111111111111111111111111"),
+    Pubkey::from_str_const("SysvarLastRestartS1ot1111111111111111111111"),
+    Pubkey::from_str_const("SysvarRecentB1ockHashes11111111111111111111"),
+    Pubkey::from_str_const("SysvarRent111111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarRewards111111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarS1otHashes111111111111111111111111111"),
+    Pubkey::from_str_const("SysvarS1otHistory11111111111111111111111111"),
+    Pubkey::from_str_const("SysvarStakeHistory1111111111111111111111111"),
+];

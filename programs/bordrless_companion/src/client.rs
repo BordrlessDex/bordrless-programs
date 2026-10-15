@@ -128,6 +128,74 @@ fn creator_buy(
     }
 }
 
+/// The accounts a native companion's steps call besides a bridged one's: the launchpad's
+/// `claim_creator_fees_sol` (the launch writable), the creator address's `swap_v2` on the launch
+/// pool (the System Program and the DEX), and the kit's `share_sol`. Every step looks its accounts
+/// up by key, so appending these to any step serves a native companion; a bridged one ignores them.
+pub fn native_accounts(keys: &LaunchKeys) -> Vec<AccountMeta> {
+    let creator = creator_address(&keys.mint);
+    let mut extra = remaining(
+        &launch_client::claim_creator_fees_sol(creator, keys.mint, None, None),
+        &[],
+    );
+    extra.extend(remaining(
+        &launch_client::swap_v2_with_bridge(
+            keys,
+            creator,
+            creator,
+            1,
+            0,
+            0,
+            launch_client::base_hook_slice(&keys.mint, &keys.quote_mint, keys.modules),
+            false,
+        ),
+        &[],
+    ));
+    extra.extend(remaining(
+        &bordrless_kit::client::share_sol(creator, keys.mint, 0),
+        &[],
+    ));
+    extra
+}
+
+/// `ix` (a step of a native companion) with [`native_accounts`] appended.
+pub fn native(mut ix: Instruction, keys: &LaunchKeys) -> Instruction {
+    ix.accounts.extend(native_accounts(keys));
+    ix
+}
+
+/// `migrate_companion_to_native` of `mint`'s companion, signed by the program's upgrade authority.
+pub fn migrate_companion_to_native(admin: Pubkey, mint: Pubkey) -> Instruction {
+    companion_form(
+        admin,
+        mint,
+        crate::instruction::MigrateCompanionToNative {}.data(),
+    )
+}
+
+/// `revert_companion_to_bridged`, as [`migrate_companion_to_native`].
+pub fn revert_companion_to_bridged(admin: Pubkey, mint: Pubkey) -> Instruction {
+    companion_form(
+        admin,
+        mint,
+        crate::instruction::RevertCompanionToBridged {}.data(),
+    )
+}
+
+fn companion_form(admin: Pubkey, mint: Pubkey, data: Vec<u8>) -> Instruction {
+    let creator = creator_address(&mint);
+    let named = vec![
+        AccountMeta::new(admin, true),
+        AccountMeta::new_readonly(program_data_address(), false),
+        AccountMeta::new_readonly(bordrless_swap::client::config_address(), false),
+        AccountMeta::new(companion_address(&mint), false),
+        AccountMeta::new(creator, false),
+        AccountMeta::new_readonly(launch_client::launch_address(&mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ];
+    build(named, unwrap_accounts(creator), data)
+}
+
 /// `create`: a companion for `mint` (whose keypair signs), `payer` paying its rent and `args.fund`.
 pub fn create(payer: Pubkey, beneficiary: Pubkey, mint: Pubkey, args: CreateArgs) -> Instruction {
     let creator = creator_address(&mint);
@@ -178,6 +246,21 @@ pub fn launch(
         })
         .collect();
     build(named, inner, crate::instruction::Launch { args }.data())
+}
+
+/// [`launch`] of a script companion: its script's address appended last, which the companion
+/// reads (a script that is not native-ready can't launch native) and never forwards. A script
+/// companion's launch while native launches are on needs it.
+pub fn launch_script(
+    launcher: Pubkey,
+    mint: Pubkey,
+    create_launch: &Instruction,
+    args: CreateLaunchArgs,
+) -> Instruction {
+    let mut ix = launch(launcher, mint, create_launch, args);
+    ix.accounts
+        .push(AccountMeta::new_readonly(script_address(&mint), false));
+    ix
 }
 
 fn step(cranker: Pubkey, mint: Pubkey) -> Vec<AccountMeta> {

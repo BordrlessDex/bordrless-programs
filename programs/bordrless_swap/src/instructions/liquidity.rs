@@ -11,6 +11,7 @@ use crate::error::SwapError;
 use crate::events::*;
 use crate::hooks::{split_extras, PoolHookCall};
 use crate::instructions::pool::PoolSeeds;
+use crate::native::{buffer_in, buffer_out, check_credit_rent, check_native, move_lamports};
 use crate::state::*;
 use crate::token::{balance, read_holding, TokenAccounts, TokenSide};
 
@@ -337,6 +338,12 @@ pub fn process_add_liquidity<'info>(
             .checked_add(quote_received)
             .ok_or(SwapError::MathOverflow)?;
         pool.lp_supply = new_supply;
+        // A native pool: the bridged SOL deposited joins its buffer.
+        if pool.quote_native() {
+            buffer_in(pool, quote_received)?;
+        }
+        let pool_info = pool.to_account_info();
+        check_native(&pool_info, pool, Some(&ctx.accounts.quote_vault))?;
     }
     if let Some(call) = &p.call {
         if ctx.accounts.pool.runs(pool_flags::AFTER_ADD_LIQUIDITY) {
@@ -425,6 +432,26 @@ pub fn process_remove_liquidity<'info>(
         args.lp_amount,
         &[],
     )?;
+    // A native pool pays the quote in bridged SOL from its buffer as far as it goes, and the rest
+    // as lamports to the provider's wallet (a writable signer), moved after the last CPI (audit
+    // N-4: a rebalance toward a target of 0 can no longer lock a provider in).
+    let (quote_held, quote_lamports) = if ctx.accounts.pool.quote_native() {
+        let held = quote_out.min(ctx.accounts.pool.buffer_quote());
+        buffer_out(&mut ctx.accounts.pool, held)?;
+        let rest = quote_out - held;
+        if rest > 0 {
+            // Only at the top level, and only to the quote holding's owner (re-audit R-1).
+            require!(
+                provider.is_writable
+                    && read_holding(&ctx.accounts.provider_quote)?.owner == *provider.key
+                    && crate::native::top_level(),
+                SwapError::BufferShort
+            );
+        }
+        (held, rest)
+    } else {
+        (quote_out, 0)
+    };
     let pool_info = ctx.accounts.pool.to_account_info();
     let seeds = PoolSeeds::of(&ctx.accounts.pool);
     let pool_seeds = seeds.seeds();
@@ -442,14 +469,14 @@ pub fn process_remove_liquidity<'info>(
             &[&pool_seeds],
         )?;
     }
-    if quote_out > 0 {
+    if quote_held > 0 {
         p.token.transfer(
             &pool_info,
             &ctx.accounts.quote_vault.to_account_info(),
             &ctx.accounts.provider_quote.to_account_info(),
             &ctx.accounts.quote_mint.to_account_info(),
             &TokenSide::of(p.quote_extras, quote_mint_hook.is_some()),
-            quote_out,
+            quote_held,
             &[&pool_seeds],
         )?;
     }
@@ -477,6 +504,16 @@ pub fn process_remove_liquidity<'info>(
             call.invoke(discriminators::AFTER_REMOVE_LIQUIDITY, &a, Allowed::NONE)?;
         }
     }
+    // The part of a native pool's quote the buffer did not cover, now that every CPI has run.
+    if quote_lamports > 0 {
+        check_credit_rent(&provider, quote_lamports)?;
+        move_lamports(&pool_info, &provider, quote_lamports)?;
+    }
+    check_native(
+        &pool_info,
+        &ctx.accounts.pool,
+        Some(&ctx.accounts.quote_vault),
+    )?;
     let pool = &ctx.accounts.pool;
     emit_cpi!(LiquidityRemoved {
         pool: pool_key,

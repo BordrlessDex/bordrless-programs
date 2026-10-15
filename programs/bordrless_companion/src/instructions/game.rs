@@ -768,7 +768,7 @@ fn request_seed<'info>(
         top_up,
         bounty,
     } = pay;
-    let seeds = CreatorSeeds::new(c.mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     pay_sol(all, &seeds, creator, oracle_payer, top_up)?;
     let ix = oracle::request_ix(*oracle_payer.key, &terms, g.seed);
     let bump = [g.oracle_bump];
@@ -1079,7 +1079,7 @@ pub fn process_claim_prize<'info>(
     require!(prize > 0, CompanionError::NothingToDo);
     let bounty = bps_of(prize, u64::from(c.bounty_bps));
     let paid = prize - bounty;
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let seeds = CreatorSeeds::of(c);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
     let winner = find(&all, &holding.owner)?.clone();
     pay_sol(&all, &seeds, creator, &winner, paid)?;
@@ -1338,8 +1338,8 @@ pub fn process_burn_stranded<'info>(ctx: Context<'info, BurnStranded<'info>>) ->
         now >= c.stranded_at(status.updated_at),
         CompanionError::NotDue
     );
-    let (mint, creator, companion_key) = (c.mint, ctx.accounts.creator.key(), c.key());
-    let seeds = CreatorSeeds::new(mint, c.creator_bump);
+    let (_mint, creator, companion_key) = (c.mint, ctx.accounts.creator.key(), c.key());
+    let seeds = CreatorSeeds::of(c);
     let c = &mut ctx.accounts.companion;
     // A pot no step had moved: moved now, which restarts the wait (`enforce_terms`), and never
     // burned in the call that moved it.

@@ -1730,3 +1730,43 @@ fn unclaimed_fees_that_could_fund_a_prize_are_claimed_first() {
     let paid: JackpotPaid = tx.event();
     assert_eq!(paid.winner, b.pubkey());
 }
+
+// =============================================================================== native SOL
+
+/// A jackpot migrated in place mid-life (its pot funded, a round forfeited): the next round's
+/// prize is paid from the creator address's lamports, exactly what its winner and the cranker
+/// gain; the pot always equals its SOL.
+#[test]
+fn a_jackpot_migrated_mid_life_pays_its_prize_in_lamports() {
+    let mut c = Coin::new(GameKind::Jackpot);
+    fund(&mut c);
+    let last = c.header().last_buyer;
+    c.warp_to(c.header().last_buy_at + i64::from(TIMER));
+    c.settle(&last).ok();
+    let mint = c.mint;
+    let pot = c.companion().pending_pot;
+    c.w.migrate_companion_native(&mint).ok();
+    let co = c.companion();
+    assert!(co.is_native());
+    assert_eq!(co.pending_pot, pot);
+    assert_eq!(co.set_aside().unwrap(), c.w.creator_sol(&mint).1);
+
+    let b = c.buyer(SOL);
+    c.warp_to(c.header().last_buy_at + i64::from(TIMER));
+    let creator = companion::creator_address(&mint);
+    let pot = c.companion().pending_pot;
+    let (w0, c0) = (c.w.env.lamports(&b.pubkey()), c.w.env.lamports(&creator));
+    let k0 = c.w.env.lamports(&c.cranker.pubkey());
+    let tx = c.settle(&b.pubkey());
+    tx.ok();
+    let paid: JackpotPaid = tx.event();
+    assert_eq!(c.w.env.lamports(&b.pubkey()) - w0, paid.prize);
+    assert_eq!(
+        c.w.env.lamports(&c.cranker.pubkey()) + 5_000 - k0,
+        paid.bounty
+    );
+    assert_eq!(c0 - c.w.env.lamports(&creator), paid.prize + paid.bounty);
+    let co = c.companion();
+    assert_eq!(co.pending_pot, pot - paid.prize - paid.bounty);
+    assert_eq!(co.set_aside().unwrap(), c.w.creator_sol(&mint).1);
+}

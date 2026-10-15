@@ -65,6 +65,7 @@ pub struct Claim<'info> {
 /// through `write_hook_data`, keeping bytes 24..64 exactly as read (a claim never unlocks an
 /// early buyer).
 pub fn process_claim(ctx: Context<Claim>) -> Result<()> {
+    require!(!ctx.accounts.kit_config.is_native(), KitError::NativeKit);
     let owner = ctx.accounts.owner.key();
     let now = Clock::get()?.unix_timestamp;
     let vault_amount = holding_amount(&ctx.accounts.reward_vault)?;

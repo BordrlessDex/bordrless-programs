@@ -3,6 +3,7 @@ pub mod attest;
 pub mod create;
 pub mod game;
 pub mod kinds;
+pub mod native;
 pub mod payees;
 pub mod payout;
 pub mod script;
@@ -15,6 +16,7 @@ pub use attest::*;
 pub use create::*;
 pub use game::*;
 pub use kinds::*;
+pub use native::*;
 pub use payees::*;
 pub use payout::*;
 pub use script::*;
@@ -30,11 +32,26 @@ use crate::constants::CREATOR_SEED;
 pub struct CreatorSeeds {
     mint: Pubkey,
     bump: [u8; 1],
+    /// The companion is native: its SOL is the creator address's lamports, not bridged SOL.
+    pub native: bool,
 }
 
 impl CreatorSeeds {
     pub fn new(mint: Pubkey, bump: u8) -> Self {
-        Self { mint, bump: [bump] }
+        Self {
+            mint,
+            bump: [bump],
+            native: false,
+        }
+    }
+
+    /// The seeds of `c`'s creator address, with its native flag.
+    pub fn of(c: &crate::state::Companion) -> Self {
+        Self {
+            mint: c.mint,
+            bump: [c.creator_bump],
+            native: c.is_native(),
+        }
     }
 
     pub fn seeds(&self) -> [&[u8]; 3] {
