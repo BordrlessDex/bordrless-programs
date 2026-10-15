@@ -207,3 +207,21 @@ pub struct PartnerFeesPaid {
     pub slot: u64,
     pub ts: i64,
 }
+
+/// A launch moved between bridged SOL and native SOL: its creator fees (`moved`, unwrapped onto
+/// the launch or wrapped back into its holding) and its kit's reward vault with it.
+#[event]
+pub struct LaunchNativeSet {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub native: bool,
+    pub moved: u64,
+    pub ts: i64,
+}
+
+/// The admin turned native launches on or off for launches made from now on.
+#[event]
+pub struct NativeLaunchesSet {
+    pub on: bool,
+    pub ts: i64,
+}

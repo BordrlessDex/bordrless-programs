@@ -120,4 +120,15 @@ pub enum LaunchError {
     NoPartnerShare,
     #[msg("a companion coin can't launch from a partner config: its creator fees are the companion's to split (share them with payees instead)")]
     PartnerOnCompanion,
+    // ---- Native SOL. Appended, so every code above keeps its number. ----
+    #[msg("this launch is not native: its fees are claimed in bridged SOL")]
+    NotNativeLaunch,
+    #[msg("the DEX must be paused for this")]
+    DexNotPaused,
+    #[msg("the launch's pool is not native yet: migrate the pool first")]
+    PoolNotNative,
+    #[msg("a recipient would be left below the rent-exempt minimum")]
+    RecipientBelowRent,
+    #[msg("a companion coin stays on bridged SOL until its companion is paid in SOL")]
+    CompanionLaunch,
 }

@@ -214,6 +214,7 @@ pub fn dex_create_pool(
     keys: &CreatePoolKeys,
     args: CreatePoolArgs,
     extras: Vec<AccountMeta>,
+    native: bool,
 ) -> Instruction {
     let mut accounts = vec![
         AccountMeta::new(keys.payer, true),
@@ -242,7 +243,12 @@ pub fn dex_create_pool(
     Instruction {
         program_id: bordrless_swap::ID,
         accounts,
-        data: bordrless_swap::instruction::CreatePool { args }.data(),
+        // A native launch's pool holds SOL (`create_native_pool`, the same accounts).
+        data: if native {
+            bordrless_swap::instruction::CreateNativePool { args }.data()
+        } else {
+            bordrless_swap::instruction::CreatePool { args }.data()
+        },
     }
 }
 
@@ -357,4 +363,43 @@ pub fn custom_slice(hook: TokenHook, extras: &[AccountMeta]) -> Vec<AccountMeta>
     let mut slice = vec![ro(hook.0), ro(hook.1)];
     slice.extend_from_slice(extras);
     slice
+}
+
+/// The kit's `set_native(native)`, signed by the mint's kit-caller PDA, with `wallet` (a signer)
+/// wrapping on the way back; `reward_vault` with holder rewards (the kit's id without); `bridge`
+/// the bridge's six accounts (`bordrless_kit::client::set_native_bridge_accounts`), or none while
+/// the vault is empty (the kit's id for each).
+pub fn kit_set_native(
+    kit_caller: Pubkey,
+    wallet: Pubkey,
+    kit_config: Pubkey,
+    reward_vault: Option<Pubkey>,
+    bridge: Option<[AccountMeta; 6]>,
+    native: bool,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(kit_caller, true),
+        AccountMeta::new(wallet, true),
+        rw(kit_config),
+        match reward_vault {
+            Some(v) => rw(v),
+            None => ro(KIT_ID),
+        },
+    ];
+    match bridge {
+        Some(b) => accounts.extend(b),
+        None => accounts.extend((0..6).map(|_| ro(KIT_ID))),
+    }
+    accounts.extend([
+        ro(bordrless_token::ID),
+        ro(TOKEN_EVENT_AUTHORITY),
+        ro(system_program::ID),
+        ro(KIT_EVENT_AUTHORITY),
+        ro(KIT_ID),
+    ]);
+    Instruction {
+        program_id: KIT_ID,
+        accounts,
+        data: bordrless_kit::instruction::SetNative { native }.data(),
+    }
 }

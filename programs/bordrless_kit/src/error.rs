@@ -63,4 +63,12 @@ pub enum KitError {
     WrongProgram,
     #[msg("math overflow")]
     MathOverflow,
+    #[msg("this kit pays rewards in SOL: use claim_sol and share_sol")]
+    NativeKit,
+    #[msg("this kit pays rewards in bridged SOL: use claim and share")]
+    NotNativeKit,
+    #[msg("the recipient would be left below the rent-exempt minimum")]
+    RecipientBelowRent,
+    #[msg("the bridge accounts are missing or wrong")]
+    BridgeAccountsMissing,
 }

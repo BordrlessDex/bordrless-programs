@@ -128,6 +128,90 @@ pub fn claim(owner: Pubkey, mint: Pubkey, reward_mint: Pubkey) -> Instruction {
     }
 }
 
+/// `claim_sol` of a native kit: the owner's rewards paid to its wallet in SOL.
+pub fn claim_sol(owner: Pubkey, mint: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new(owner, true),
+            AccountMeta::new(kit_config_address(&mint), false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(token_client::holding_address(&mint, &owner), false),
+            AccountMeta::new_readonly(HOOK_AUTHORITY, false),
+            AccountMeta::new_readonly(TOKEN_ID, false),
+            AccountMeta::new_readonly(TOKEN_EVENT_AUTHORITY, false),
+        ]),
+        data: crate::instruction::ClaimSol {}.data(),
+    }
+}
+
+/// `share_sol(amount)` by `sharer` (its SOL) with the holders of a native kit's `mint`.
+pub fn share_sol(sharer: Pubkey, mint: Pubkey, amount: u64) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new(sharer, true),
+            AccountMeta::new(kit_config_address(&mint), false),
+            AccountMeta::new_readonly(anchor_lang::system_program::ID, false),
+        ]),
+        data: crate::instruction::ShareSol { amount }.data(),
+    }
+}
+
+/// The bridge's accounts of `wrap_sol` / `unwrap_sol` as `set_native` takes them after the reward
+/// vault: the bridge, its config, the SOL wrapper, the SOL vault, `reward_mint` (writable) and the
+/// bridge's event authority.
+pub fn set_native_bridge_accounts(reward_mint: Pubkey) -> [AccountMeta; 6] {
+    let native = Pubkey::from_str_const("So11111111111111111111111111111111111111112");
+    let bridge = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &BRIDGE_ID).0;
+    [
+        AccountMeta::new_readonly(BRIDGE_ID, false),
+        AccountMeta::new_readonly(bridge(&[b"config"]), false),
+        AccountMeta::new(bridge(&[b"wrapper", native.as_ref()]), false),
+        AccountMeta::new(bridge(&[b"sol-vault"]), false),
+        AccountMeta::new(reward_mint, false),
+        AccountMeta::new_readonly(bridge(&[b"__event_authority"]), false),
+    ]
+}
+
+/// `set_native(native)` of `mint`'s kit, signed by its kit-caller PDA (only the launchpad signs
+/// it) with `wallet` wrapping on the way back; `reward_vault` with holder rewards; the bridge's
+/// accounts when `with_bridge` (none needed while the vault is empty).
+pub fn set_native(
+    kit_caller: Pubkey,
+    wallet: Pubkey,
+    mint: Pubkey,
+    reward_vault: Option<Pubkey>,
+    reward_mint: Pubkey,
+    with_bridge: bool,
+    native: bool,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(kit_caller, true),
+        AccountMeta::new(wallet, true),
+        AccountMeta::new(kit_config_address(&mint), false),
+        match reward_vault {
+            Some(v) => AccountMeta::new(v, false),
+            None => AccountMeta::new_readonly(crate::ID, false),
+        },
+    ];
+    if with_bridge {
+        accounts.extend(set_native_bridge_accounts(reward_mint));
+    } else {
+        accounts.extend((0..6).map(|_| AccountMeta::new_readonly(crate::ID, false)));
+    }
+    accounts.extend([
+        AccountMeta::new_readonly(TOKEN_ID, false),
+        AccountMeta::new_readonly(TOKEN_EVENT_AUTHORITY, false),
+        AccountMeta::new_readonly(anchor_lang::system_program::ID, false),
+    ]);
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(accounts),
+        data: crate::instruction::SetNative { native }.data(),
+    }
+}
+
 /// `share(amount)` by `sharer` from `source` (a holding of `reward_mint` it may spend) with the
 /// holders of `mint`.
 pub fn share(

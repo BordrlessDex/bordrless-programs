@@ -61,6 +61,9 @@ pub const LAUNCH_HOOK_FLAGS: u16 = pool_flags::BEFORE_INITIALIZE
 /// Index, in a pool callback's account list, of the launch's quote holding (prefix of 5, then the
 /// launch, then the holding): creator fees go there.
 pub const QUOTE_HOLDING_INDEX: u8 = 6;
+/// Index, in a pool callback's account list, of the launch itself (after the prefix of 5): a
+/// native launch's creator fees go there, as lamports.
+pub const LAUNCH_INDEX: u8 = 5;
 /// Index of the holder vault (the kit config's holding of the quote): holder fees go there.
 pub const HOLDER_VAULT_INDEX: u8 = 7;
 /// Index of the kit config, read for the holder-fee threshold.
@@ -157,4 +160,21 @@ pub mod ceilings {
     pub const MIN_SUPPLY: u64 = bordrless_kit::constants::MIN_SUPPLY;
     /// The largest launch supply the kit installs on, which bounds its reward math.
     pub const MAX_SUPPLY: u64 = bordrless_kit::constants::MAX_SUPPLY;
+}
+
+/// The bridge (`bordrless_bridge`), whose `wrap_sol` and `unwrap_sol` move a launch's creator fees
+/// between bridged SOL and lamports.
+pub const BRIDGE_ID: Pubkey = bordrless_kit::constants::BRIDGE_ID;
+
+/// Whether `creator` is the companion creator address of `mint` (`PDA(["creator", mint],
+/// COMPANION_ID)`): a companion coin, which stays bridged until the companion pays in SOL.
+pub fn is_companion_creator(creator: &Pubkey, mint: &Pubkey) -> bool {
+    Pubkey::find_program_address(
+        &[
+            bordrless_kit::constants::COMPANION_CREATOR_SEED,
+            mint.as_ref(),
+        ],
+        &bordrless_kit::constants::COMPANION_ID,
+    )
+    .0 == *creator
 }

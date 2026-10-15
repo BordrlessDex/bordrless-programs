@@ -550,3 +550,351 @@ pub fn process_distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>
     );
     Ok(())
 }
+
+// ---- Native launches: the same claims, paid in SOL from the launch account. ----
+
+/// What a native launch holds for its claims: its lamports above the rent-exempt minimum (its
+/// creator fees and any SOL cut, paid there by the pool hook's deltas).
+fn claimable_sol(launch: &AccountInfo) -> Result<u64> {
+    let rent = Rent::get()?.minimum_balance(launch.data_len());
+    let amount = launch.lamports().saturating_sub(rent);
+    require!(amount > 0, LaunchError::NothingToClaim);
+    Ok(amount)
+}
+
+/// Pays `amount` lamports from the launch (this program owns it) to `to`, which must end at or
+/// above the rent-exempt minimum of its size (`RecipientBelowRent`).
+fn pay_sol(launch: &AccountInfo, to: &AccountInfo, amount: u64) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+    let after = to
+        .lamports()
+        .checked_add(amount)
+        .ok_or(LaunchError::MathOverflow)?;
+    require!(
+        after >= Rent::get()?.minimum_balance(to.data_len()),
+        LaunchError::RecipientBelowRent
+    );
+    require!(to.is_writable, LaunchError::WrongHolding);
+    let from = launch.lamports();
+    **launch.try_borrow_mut_lamports()? =
+        from.checked_sub(amount).ok_or(LaunchError::MathOverflow)?;
+    **to.try_borrow_mut_lamports()? = after;
+    Ok(())
+}
+
+/// The author of a native launch that pays one, from the remaining accounts `[config,
+/// author_wallet]`: the author's key and wallet.
+fn author_wallet_of<'info>(
+    launch: &Launch,
+    config_info: Option<&'info AccountInfo<'info>>,
+    author_wallet: Option<&'info AccountInfo<'info>>,
+) -> Result<(Pubkey, AccountInfo<'info>)> {
+    let (Some(config_info), Some(author_wallet)) = (config_info, author_wallet) else {
+        return err!(LaunchError::AuthorAccountsMissing);
+    };
+    require_keys_eq!(
+        config_info.key(),
+        launch.config,
+        LaunchError::AuthorAccountsMissing
+    );
+    let config = Account::<LaunchConfig>::try_from(config_info)?;
+    require_keys_eq!(
+        author_wallet.key(),
+        config.creator,
+        LaunchError::WrongHolding
+    );
+    Ok((config.creator, author_wallet.clone()))
+}
+
+/// The partner of a native launch that pays one, from the remaining accounts `[partner_fee,
+/// partner_wallet]`.
+fn partner_wallet_of<'info>(
+    launch: &Launch,
+    partner_fee: Option<&'info AccountInfo<'info>>,
+    partner_wallet: Option<&'info AccountInfo<'info>>,
+) -> Result<(Account<'info, PartnerFee>, AccountInfo<'info>)> {
+    let (Some(partner_fee), Some(partner_wallet)) = (partner_fee, partner_wallet) else {
+        return err!(LaunchError::PartnerAccountsMissing);
+    };
+    let expected = Pubkey::create_program_address(
+        &[
+            PARTNER_SEED,
+            launch.config.as_ref(),
+            &[launch.partner_bump()],
+        ],
+        &crate::ID,
+    )
+    .map_err(|_| error!(LaunchError::PartnerAccountsMissing))?;
+    require_keys_eq!(
+        partner_fee.key(),
+        expected,
+        LaunchError::PartnerAccountsMissing
+    );
+    require!(
+        partner_fee.is_writable && partner_wallet.is_writable,
+        LaunchError::PartnerAccountsMissing
+    );
+    let pf = Account::<PartnerFee>::try_from(partner_fee)?;
+    require_keys_eq!(
+        pf.config,
+        launch.config,
+        LaunchError::PartnerAccountsMissing
+    );
+    require_keys_eq!(partner_wallet.key(), pf.partner, LaunchError::WrongHolding);
+    Ok((pf, partner_wallet.clone()))
+}
+
+/// [`settle`] in SOL: the partner's part, the author's, then the creator's, each from the launch's
+/// lamports to the party's wallet. A partner that is the launch itself is paid nothing (its part
+/// would only stay where it is).
+fn settle_sol<'info>(
+    launch_info: &AccountInfo<'info>,
+    launch: &mut Launch,
+    amount: u64,
+    creator_wallet: &AccountInfo<'info>,
+    author_wallet: Option<&AccountInfo<'info>>,
+    partner: Option<(&mut PartnerFee, &AccountInfo<'info>)>,
+) -> Result<Paid> {
+    let author_bps = if author_wallet.is_some() {
+        launch.author_share_bps
+    } else {
+        0
+    };
+    let partner_bps = match &partner {
+        Some((_, wallet)) if wallet.key != launch_info.key => launch.partner_share_bps(),
+        _ => 0,
+    };
+    let (to_creator, to_author, to_partner) = fee_split(amount, author_bps, partner_bps)?;
+    if let Some((pf, wallet)) = partner {
+        pay_sol(launch_info, wallet, to_partner)?;
+        pf.paid_total = pf
+            .paid_total
+            .checked_add(to_partner)
+            .ok_or(LaunchError::MathOverflow)?;
+    }
+    if let Some(wallet) = author_wallet {
+        pay_sol(launch_info, wallet, to_author)?;
+    }
+    pay_sol(launch_info, creator_wallet, to_creator)?;
+    launch.creator_fees_claimed = launch
+        .creator_fees_claimed
+        .checked_add(to_creator)
+        .ok_or(LaunchError::MathOverflow)?;
+    launch.author_fees_paid = launch
+        .author_fees_paid
+        .checked_add(to_author)
+        .ok_or(LaunchError::MathOverflow)?;
+    Ok(Paid {
+        creator: to_creator,
+        author: to_author,
+        partner: to_partner,
+    })
+}
+
+/// Accounts of `claim_creator_fees_sol`: the creator (its wallet receives the SOL) and the native
+/// launch. A launch that pays its config's author also takes, as the remaining accounts, the
+/// `LaunchConfig` and the author's wallet (writable); a launch that pays a partner then takes its
+/// `PartnerFee` (writable) and the partner's wallet (writable).
+#[event_cpi]
+#[derive(Accounts)]
+pub struct ClaimCreatorFeesSol<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [LAUNCH_SEED, launch.mint.as_ref()],
+        bump = launch.bump,
+        has_one = creator @ LaunchError::NotCreator,
+        constraint = launch.is_native() @ LaunchError::NotNativeLaunch
+    )]
+    pub launch: Account<'info, Launch>,
+}
+
+/// `claim_creator_fees_sol`.
+pub fn process_claim_creator_fees_sol<'info>(
+    ctx: Context<'info, ClaimCreatorFeesSol<'info>>,
+) -> Result<()> {
+    let clock = Clock::get()?;
+    let launch_key = ctx.accounts.launch.key();
+    let launch_info = ctx.accounts.launch.to_account_info();
+    let amount = claimable_sol(&launch_info)?;
+    let mut rest = ctx.remaining_accounts.iter();
+    let author = if ctx.accounts.launch.author_share_bps > 0 {
+        Some(author_wallet_of(
+            &ctx.accounts.launch,
+            rest.next(),
+            rest.next(),
+        )?)
+    } else {
+        None
+    };
+    let mut partner = if ctx.accounts.launch.partner_share_bps() > 0 {
+        Some(partner_wallet_of(
+            &ctx.accounts.launch,
+            rest.next(),
+            rest.next(),
+        )?)
+    } else {
+        None
+    };
+    let creator = ctx.accounts.creator.to_account_info();
+    let paid = settle_sol(
+        &launch_info,
+        &mut ctx.accounts.launch,
+        amount,
+        &creator,
+        author.as_ref().map(|(_, w)| w),
+        partner.as_mut().map(|(pf, w)| (&mut **pf, &*w)),
+    )?;
+    let partner_ev = match partner {
+        Some((pf, _)) => {
+            pf.exit(&crate::ID)?;
+            Some((pf.partner, pf.paid_total))
+        }
+        None => None,
+    };
+    emit_claim!(
+        ctx,
+        launch_key,
+        paid,
+        author.map(|(a, _)| a),
+        partner_ev,
+        clock
+    );
+    Ok(())
+}
+
+/// Accounts of `claim_author_fees_sol`: the author (its wallet receives its share), the native
+/// launch, the listed config and the creator's wallet. A launch that pays a partner also takes,
+/// as the remaining accounts, its `PartnerFee` (writable) and the partner's wallet (writable).
+#[event_cpi]
+#[derive(Accounts)]
+pub struct ClaimAuthorFeesSol<'info> {
+    #[account(mut)]
+    pub author: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [LAUNCH_SEED, launch.mint.as_ref()],
+        bump = launch.bump,
+        constraint = launch.is_native() @ LaunchError::NotNativeLaunch
+    )]
+    pub launch: Account<'info, Launch>,
+    #[account(address = launch.config @ LaunchError::NoAuthorShare, constraint = launch_config.creator == author.key() @ LaunchError::NotAuthor)]
+    pub launch_config: Account<'info, LaunchConfig>,
+    /// CHECK: address-checked: the launch's creator, paid its part.
+    #[account(mut, address = launch.creator @ LaunchError::WrongHolding)]
+    pub creator_wallet: UncheckedAccount<'info>,
+}
+
+/// `claim_author_fees_sol`.
+pub fn process_claim_author_fees_sol<'info>(
+    ctx: Context<'info, ClaimAuthorFeesSol<'info>>,
+) -> Result<()> {
+    let clock = Clock::get()?;
+    let launch_key = ctx.accounts.launch.key();
+    require!(
+        ctx.accounts.launch.author_share_bps > 0,
+        LaunchError::NoAuthorShare
+    );
+    let launch_info = ctx.accounts.launch.to_account_info();
+    let amount = claimable_sol(&launch_info)?;
+    let mut rest = ctx.remaining_accounts.iter();
+    let mut partner = if ctx.accounts.launch.partner_share_bps() > 0 {
+        Some(partner_wallet_of(
+            &ctx.accounts.launch,
+            rest.next(),
+            rest.next(),
+        )?)
+    } else {
+        None
+    };
+    let author = ctx.accounts.author.to_account_info();
+    let creator = ctx.accounts.creator_wallet.to_account_info();
+    let paid = settle_sol(
+        &launch_info,
+        &mut ctx.accounts.launch,
+        amount,
+        &creator,
+        Some(&author),
+        partner.as_mut().map(|(pf, w)| (&mut **pf, &*w)),
+    )?;
+    let partner_ev = match partner {
+        Some((pf, _)) => {
+            pf.exit(&crate::ID)?;
+            Some((pf.partner, pf.paid_total))
+        }
+        None => None,
+    };
+    let author_key = ctx.accounts.author.key();
+    emit_claim!(ctx, launch_key, paid, Some(author_key), partner_ev, clock);
+    Ok(())
+}
+
+/// Accounts of `distribute_fees_sol`: anyone pays out a native partner launch's creator fees to
+/// every party's wallet. A launch that also pays its config's author takes, as the remaining
+/// accounts, the `LaunchConfig` and the author's wallet (writable).
+#[event_cpi]
+#[derive(Accounts)]
+pub struct DistributeFeesSol<'info> {
+    #[account(
+        mut,
+        seeds = [LAUNCH_SEED, launch.mint.as_ref()],
+        bump = launch.bump,
+        constraint = launch.partner_share_bps() > 0 @ LaunchError::NoPartnerShare,
+        constraint = launch.is_native() @ LaunchError::NotNativeLaunch
+    )]
+    pub launch: Account<'info, Launch>,
+    #[account(mut, seeds = [PARTNER_SEED, launch.config.as_ref()], bump = partner_fee.bump)]
+    pub partner_fee: Account<'info, PartnerFee>,
+    /// CHECK: address-checked: the launch's creator.
+    #[account(mut, address = launch.creator @ LaunchError::WrongHolding)]
+    pub creator_wallet: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the partner.
+    #[account(mut, address = partner_fee.partner @ LaunchError::WrongHolding)]
+    pub partner_wallet: UncheckedAccount<'info>,
+}
+
+/// `distribute_fees_sol`.
+pub fn process_distribute_fees_sol<'info>(
+    ctx: Context<'info, DistributeFeesSol<'info>>,
+) -> Result<()> {
+    let clock = Clock::get()?;
+    let launch_key = ctx.accounts.launch.key();
+    let launch_info = ctx.accounts.launch.to_account_info();
+    let amount = claimable_sol(&launch_info)?;
+    let mut rest = ctx.remaining_accounts.iter();
+    let author = if ctx.accounts.launch.author_share_bps > 0 {
+        Some(author_wallet_of(
+            &ctx.accounts.launch,
+            rest.next(),
+            rest.next(),
+        )?)
+    } else {
+        None
+    };
+    let creator = ctx.accounts.creator_wallet.to_account_info();
+    let partner_wallet = ctx.accounts.partner_wallet.to_account_info();
+    let paid = settle_sol(
+        &launch_info,
+        &mut ctx.accounts.launch,
+        amount,
+        &creator,
+        author.as_ref().map(|(_, w)| w),
+        Some((&mut *ctx.accounts.partner_fee, &partner_wallet)),
+    )?;
+    let partner_ev = Some((
+        ctx.accounts.partner_fee.partner,
+        ctx.accounts.partner_fee.paid_total,
+    ));
+    emit_claim!(
+        ctx,
+        launch_key,
+        paid,
+        author.map(|(a, _)| a),
+        partner_ev,
+        clock
+    );
+    Ok(())
+}
