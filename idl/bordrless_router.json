@@ -68,6 +68,70 @@
           }
         }
       ]
+    },
+    {
+      "name": "swap_v2",
+      "docs": [
+        "`swap` on a native pool, through the DEX's `swap_v2`: the trader pays a buy's fee from its",
+        "wallet, and a sell, delivered to the trader's wallet, pays it from what arrived; the",
+        "integrator and the DEX treasury are paid SOL to their wallets. Remaining accounts: the DEX",
+        "`swap_v2`'s own, exactly as `bordrless_swap::client::swap_v2` lists them."
+      ],
+      "discriminator": [
+        43,
+        4,
+        237,
+        11,
+        26,
+        201,
+        30,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "trader",
+          "docs": [
+            "The trader: signs the DEX swap and pays the fee from its wallet."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "integrator",
+          "docs": [
+            "above the rent-exempt minimum)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "dex_program",
+          "address": "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RouterSwapArgs"
+            }
+          }
+        }
+      ]
     }
   ],
   "events": [
@@ -125,6 +189,11 @@
       "code": 6007,
       "name": "WrongProgram",
       "msg": "a program account is not the expected program"
+    },
+    {
+      "code": 6008,
+      "name": "RecipientBelowRent",
+      "msg": "a fee recipient would be left below the rent-exempt minimum"
     }
   ],
   "types": [

@@ -796,3 +796,74 @@ fn a_refund_before_the_launch_needs_no_payees_account() {
     let ix = companion::refund(launcher.pubkey(), m, launcher.pubkey());
     w.env.send_paid_by(&[ix], &launcher, &[&mint]).ok();
 }
+
+// ---- Native SOL (phase 3) ---------------------------------------------------------------------------
+
+/// A wallet payout may name a holding of bridged SOL (an old-style destination, a holder's or a
+/// keeper's `ownerQuoteHolding`) whose owner could be paid as a wallet, its owner passed too: it is
+/// paid in bridged SOL, from the creator's holding on a bridged companion and wrapped by the
+/// creator address on a native one (migrated mid-life). Without its owner, refused.
+#[test]
+fn wallet_payouts_into_bridged_sol_holdings_are_paid_in_bridged_sol() {
+    for native in [false, true] {
+        let mut w = script_world();
+        let (_launcher, mint) = script_coin(&mut w, terms(5_000, 5_000));
+        if native {
+            w.migrate_companion_native(&mint).ok();
+            assert!(companion_of(&w, &mint).is_native());
+        }
+        let alice = Keypair::new();
+        w.env.fund(alice.pubkey(), SOL);
+        let payer = w.env.funded(SOL);
+        let sol = w.sol;
+        w.holdings(&payer, sol, &[alice.pubkey()]);
+        let holding = bordrless_token::client::holding_address(&sol, &alice.pubkey());
+        let cranker = w.wallet_with_sol(SOL);
+        let pot = companion_of(&w, &mint).pending_pot;
+        let x = pot / 10;
+
+        // Its owner not passed: refused.
+        let tx = wallet_step(
+            &mut w,
+            &cranker,
+            &mint,
+            &wallets_answer(vec![(holding, x, 1)]),
+            vec![AccountMeta::new(holding, false)],
+        );
+        refused(&tx, CompanionError::WalletPayoutTarget);
+
+        let supply = w.env.read::<bordrless_token::state::Mint>(&sol).supply;
+        let (held, lamports) = w.creator_sol(&mint);
+        let tx = wallet_step(
+            &mut w,
+            &cranker,
+            &mint,
+            &wallets_answer(vec![(holding, x, 1)]),
+            vec![
+                AccountMeta::new(holding, false),
+                AccountMeta::new_readonly(alice.pubkey(), false),
+            ],
+        );
+        tx.ok();
+        assert_eq!(w.env.holding(&sol, &alice.pubkey()), x);
+        assert_eq!(w.env.lamports(&alice.pubkey()), SOL);
+        let c = companion_of(&w, &mint);
+        let out = pot - c.pending_pot;
+        let bounty = out - x;
+        let (held_after, lamports_after) = w.creator_sol(&mint);
+        let supply_after = w.env.read::<bordrless_token::state::Mint>(&sol).supply;
+        if native {
+            // Wrapped from the creator's lamports: the pot's lamports paid it and the bounty.
+            assert_eq!(lamports - lamports_after, out);
+            assert_eq!(held_after, 0);
+            assert_eq!(supply_after, supply + x);
+            assert_eq!(c.set_aside().unwrap(), lamports_after);
+        } else {
+            // Moved as bridged SOL; only the bounty unwrapped.
+            assert_eq!(held - held_after, out);
+            assert_eq!(supply_after, supply - bounty);
+            assert_eq!(c.set_aside().unwrap(), held_after);
+        }
+        w.env.warp(61);
+    }
+}

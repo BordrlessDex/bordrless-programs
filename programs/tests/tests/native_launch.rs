@@ -666,10 +666,10 @@ fn an_old_buy_on_a_fresh_native_launch_waits_for_lamports() {
     pool_inv(&w, &pool_of(&w, &mint));
 }
 
-/// A companion coin is never native (its companion claims in bridged SOL until phase 3), and a
-/// launch made before native launches were on stays bridged until migrated.
+/// A launch made before native launches were on stays bridged until migrated (a companion coin's
+/// companion, phase 3, follows its launch: `companion.rs`); the launchpad's companion check.
 #[test]
-fn companion_coins_stay_bridged() {
+fn a_launch_made_before_native_launches_stays_bridged() {
     let mut w = World::new();
     let ad = admin(&w).pubkey();
     let creator = w.wallet_with_sol(20 * SOL);
@@ -796,4 +796,133 @@ fn the_sol_cut_works_on_a_native_launch() {
     )
     .ok();
     assert_eq!(w.env.lamports(&creator.pubkey()), cl + fees);
+}
+
+/// A native launch from a partner config that also pays its listed author: every SOL claim (the
+/// creator's, the author's, anyone's `distribute_fees_sol`) pays each party its exact part as
+/// lamports to its wallet, the parts summing to what the launch held; a party whose wallet would be
+/// left below the rent-exempt minimum is refused clearly.
+#[test]
+fn author_and_partner_claims_pay_sol_to_every_wallet() {
+    let mut w = World::new();
+    let payer = w.env.funded(100 * SOL);
+    let ad = admin(&w).pubkey();
+    as_admin(&mut w, &[launch::set_native_launches(ad, true)]).ok();
+    let author = w.wallet_with_sol(5 * SOL);
+    let partner = Keypair::new();
+    let config = Keypair::new();
+    let (author_bps, partner_bps) = (2_000u16, 3_000u16);
+    let ix = launch::create_partner_config(
+        author.pubkey(),
+        config.pubkey(),
+        CreateConfigArgs {
+            rules: LaunchRules::NONE,
+            creator_fee_bps: 200,
+            custom_hook: None,
+            custom_hook_flags: 0,
+            label: "Partnered".to_string(),
+        },
+        author_bps,
+        QuoteCut::default(),
+        partner.pubkey(),
+        partner_bps,
+    );
+    w.env.send_paid_by(&[ix], &author, &[&config]).ok();
+    let creator = w.wallet_with_sol(5 * SOL);
+    let mint = Keypair::new();
+    let ix = w.create_launch_from_config_ix(
+        &creator.pubkey(),
+        &mint.pubkey(),
+        "PRT",
+        VQ,
+        &config.pubkey(),
+    );
+    w.env.send_paid_by(&[ix], &creator, &[&mint]).ok();
+    let mint = mint.pubkey();
+    let l = w.launch(&mint);
+    assert!(l.is_native());
+    assert_eq!(
+        (l.author_share_bps, l.partner_share_bps()),
+        (author_bps, partner_bps)
+    );
+    w.env.warp(31);
+    let t = w.env.funded(50 * SOL);
+    w.holdings(&t, mint, &[t.pubkey()]);
+    let buy = |w: &mut World, amount: u64| {
+        let ix = v2_ix(w, &t.pubkey(), &mint, 1, amount);
+        send(w, &payer, ix, &t).ok();
+    };
+    let wallets = [creator.pubkey(), author.pubkey(), partner.pubkey()];
+    let lamports = |w: &World| wallets.map(|k| w.env.lamports(&k));
+    let split = |amount: u64| {
+        let a = amount * u64::from(author_bps) / 10_000;
+        let p = amount * u64::from(partner_bps) / 10_000;
+        [amount - a - p, a, p]
+    };
+    let (cfg, au, pa) = (config.pubkey(), author.pubkey(), partner.pubkey());
+
+    // A small claim: the partner's wallet does not exist and its part can't open it.
+    buy(&mut w, SOL / 100);
+    send(
+        &mut w,
+        &payer,
+        launch::claim_creator_fees_sol(creator.pubkey(), mint, Some((cfg, au)), Some((cfg, pa))),
+        &creator,
+    )
+    .expect_code(u32::from(LaunchError::RecipientBelowRent));
+
+    // The creator's claim: each its part.
+    buy(&mut w, 5 * SOL);
+    let (fees, _) = launch_fees(&w, &mint);
+    let before = lamports(&w);
+    send(
+        &mut w,
+        &payer,
+        launch::claim_creator_fees_sol(creator.pubkey(), mint, Some((cfg, au)), Some((cfg, pa))),
+        &creator,
+    )
+    .ok();
+    let after = lamports(&w);
+    assert_eq!(
+        [0, 1, 2].map(|i| after[i] - before[i]),
+        split(fees),
+        "creator, author, partner"
+    );
+    assert_eq!(launch_fees(&w, &mint), (0, 0));
+    let l = w.launch(&mint);
+    assert_eq!(l.author_fees_paid, split(fees)[1]);
+
+    // The author's claim, then anyone's distribution.
+    buy(&mut w, 3 * SOL);
+    let (fees, _) = launch_fees(&w, &mint);
+    let before = lamports(&w);
+    send(
+        &mut w,
+        &payer,
+        launch::claim_author_fees_sol(au, mint, cfg, creator.pubkey(), Some(pa)),
+        &author,
+    )
+    .ok();
+    let after = lamports(&w);
+    assert_eq!([0, 1, 2].map(|i| after[i] - before[i]), split(fees));
+    buy(&mut w, 3 * SOL);
+    let (fees, _) = launch_fees(&w, &mint);
+    let before = lamports(&w);
+    let anyone = w.env.funded(SOL);
+    w.env
+        .send_paid_by(
+            &[launch::distribute_fees_sol(
+                mint,
+                cfg,
+                creator.pubkey(),
+                pa,
+                Some(au),
+            )],
+            &anyone,
+            &[],
+        )
+        .ok();
+    let after = lamports(&w);
+    assert_eq!([0, 1, 2].map(|i| after[i] - before[i]), split(fees));
+    assert_eq!(launch_fees(&w, &mint), (0, 0));
 }

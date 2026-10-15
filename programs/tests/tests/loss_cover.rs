@@ -1116,3 +1116,56 @@ fn the_state_and_the_terms_are_where_the_keeper_reads_them() {
         .expect_code(script_code(LossCoverScriptError::NoTerms));
     let _ = CompanionError::MissingAccount;
 }
+
+// ---- Native SOL (phase 3) ---------------------------------------------------------------------------
+
+/// A Lossback coin migrated in place mid-life (between its measuring round and its paying round):
+/// the paying round pays every holder its fraction in SOL from the creator address's lamports (no
+/// unwrap), the hook records each payment as before, and the lamports the creator loses are exactly
+/// what the holders and the cranker gain; the pot always equals its SOL.
+#[test]
+fn a_lossback_coin_migrated_mid_life_pays_in_lamports() {
+    let mut w = world();
+    let launcher = w.wallet_with_sol(10 * SOL);
+    let mint = launch_coin(&mut w, &launcher, open_terms());
+    let (holders, cranker, _whale) = under_water(&mut w, &mint, &[SOL, 2 * SOL, SOL / 2]);
+    let hs: Vec<Pubkey> = holders.iter().map(|h| h.pubkey()).collect();
+    next_round(&mut w);
+    let list: Vec<(Pubkey, bool)> = hs.iter().map(|h| (*h, false)).collect();
+    step(&mut w, &cranker, &mint, &list).ok();
+
+    let pot = companion_of(&w, &mint).pending_pot;
+    w.migrate_companion_native(&mint).ok();
+    let c = companion_of(&w, &mint);
+    assert!(c.is_native());
+    assert_eq!(c.pending_pot, pot);
+    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
+
+    next_round(&mut w);
+    let creator = companion::creator_address(&mint);
+    let list: Vec<(Pubkey, bool)> = hs.iter().map(|h| (*h, true)).collect();
+    let before: Vec<u64> = hs.iter().map(|h| w.env.lamports(h)).collect();
+    let (c0, k0) = (w.env.lamports(&creator), w.env.lamports(&cranker.pubkey()));
+    let ix = step_ix(&w, cranker.pubkey(), &mint, &list);
+    let payer = w.env.funded(SOL);
+    let tx = w.env.send_paid_by(&[ix], &payer, &[&cranker]);
+    tx.ok();
+    let payouts = tx.events::<ScriptPayout>();
+    let mut paid = 0;
+    for ((h, ev), b) in hs.iter().zip(&payouts).zip(&before) {
+        assert!(ev.lamports > 0);
+        assert_eq!(w.env.lamports(h) - b, ev.lamports);
+        assert_eq!(record(&w, &mint, h).paid, ev.lamports);
+        paid += ev.lamports;
+    }
+    let bounty = w.env.lamports(&cranker.pubkey()) - k0;
+    assert_eq!(
+        c0 - w.env.lamports(&creator),
+        paid + bounty,
+        "lamports conserved"
+    );
+    let c = companion_of(&w, &mint);
+    assert_eq!(c.pending_pot, pot - paid - bounty);
+    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
+    assert_eq!(w.creator_sol(&mint).0, 0);
+}

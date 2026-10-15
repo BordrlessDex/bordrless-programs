@@ -531,3 +531,288 @@ fn a_companion_launch_fits_mainnet_limits() {
     assert!(tx.max_height() <= 5);
     assert_eq!(w.launch(&mint.pubkey()).creator, creator);
 }
+
+// ---- Native SOL (phase 3) ---------------------------------------------------------------------------
+
+/// Holder rewards 1% both sides, nothing else: a kit token whose holders the companion can pay.
+fn rewards() -> LaunchRules {
+    bordrless_program_tests::launch::rules(100, 100, 0, 0, 0, 0, 0, 0)
+}
+
+/// A companion that buys back, shares with holders and pays its launcher, migrated in place
+/// mid-life (pool, launch, companion, the DEX paused): every bucket keeps its meaning, the
+/// creator's bridged SOL becomes its lamports one for one, its spare lamports go to the
+/// beneficiary's part; then a claim (in SOL), a holders' share (the kit's `share_sol`), a buyback
+/// (`swap_v2`, the creator address trading) and the beneficiary's withdraw all move exactly the
+/// lamports they say; the old claim path is refused; and it reverts.
+#[test]
+fn a_companion_migrates_mid_life_and_keeps_every_lamport() {
+    let mut w = World::new();
+    let launcher = w.wallet_with_sol(5 * SOL);
+    let split = Split {
+        buyback_bps: 5_000,
+        holders_bps: 3_000,
+        beneficiary_bps: 2_000,
+    };
+    let (mint, tx) = launch_through(&mut w, &launcher, split, 0, rewards());
+    tx.ok();
+    w.env.warp(31);
+    trade(&mut w, &mint, 4, 2 * SOL);
+    let payer = w.env.funded(10 * SOL);
+    let cranker = w.wallet_with_sol(SOL);
+    w.env
+        .send_paid_by(
+            &[companion::claim_fees(cranker.pubkey(), mint, None)],
+            &payer,
+            &[&cranker],
+        )
+        .ok();
+    // More fees, left in the launch for the migration to move.
+    trade(&mut w, &mint, 2, SOL);
+    let before = companion_of(&w, &mint);
+    let set_aside = before.set_aside().unwrap();
+    let (held, spare) = w.creator_sol(&mint);
+    assert_eq!(
+        held, set_aside,
+        "the holding holds exactly what is set aside"
+    );
+    assert!(spare > 0, "the funding the launch did not spend");
+    let creator = companion::creator_address(&mint);
+    let creator_lamports = w.env.lamports(&creator);
+    let launch_key = launch::launch_address(&mint);
+    let launch_fees = w.env.holding(&w.sol, &launch_key);
+    assert!(launch_fees > 0);
+
+    // Not while the DEX trades, not before its launch is native, not by anyone else.
+    let a = w.admin().pubkey();
+    w.as_admin(companion::migrate_companion_to_native(a, mint))
+        .expect_code(code(CompanionError::DexNotPaused));
+    w.pause_dex(true);
+    w.as_admin(companion::migrate_companion_to_native(a, mint))
+        .expect_code(code(CompanionError::LaunchNotNative));
+    let stranger = w.env.funded(SOL);
+    w.env
+        .send(
+            &[companion::migrate_companion_to_native(
+                stranger.pubkey(),
+                mint,
+            )],
+            &[&stranger],
+        )
+        .expect_code(code(CompanionError::NotProtocolAuthority));
+    w.pause_dex(false);
+
+    let tx = w.migrate_companion_native(&mint);
+    tx.ok();
+    let ev: bordrless_companion::events::CompanionNativeSet = tx.event();
+    assert_eq!((ev.native, ev.moved, ev.spare), (true, held, spare));
+    let c = companion_of(&w, &mint);
+    assert!(c.is_native());
+    assert_eq!(
+        w.env
+            .account(&companion::companion_address(&mint))
+            .unwrap()
+            .data
+            .len(),
+        Companion::LEN + bordrless_companion::state::NATIVE_SOL_LEN
+    );
+    assert_eq!(w.creator_sol(&mint), (0, held + spare));
+    assert_eq!(w.env.lamports(&creator), creator_lamports + held);
+    assert_eq!(c.pending_beneficiary, before.pending_beneficiary + spare);
+    assert_eq!(
+        (c.pending_buyback, c.pending_holders, c.pending_pot),
+        (
+            before.pending_buyback,
+            before.pending_holders,
+            before.pending_pot
+        )
+    );
+    assert_eq!(c.set_aside().unwrap(), held + spare);
+    // The launch's fees moved to its lamports with it.
+    assert_eq!(
+        w.env.lamports(&launch_key) - w.env.rent(bordrless_launch::state::Launch::LEN),
+        launch_fees
+    );
+    w.assert_pool_invariant(&w.launch_pool_key(&mint));
+    let keys = keys(&w, &mint);
+
+    // A claim: the launch's lamports to the creator address, the bounty to the cranker.
+    let cl = w.env.lamports(&cranker.pubkey());
+    let (l0, c0) = (w.env.lamports(&launch_key), w.env.lamports(&creator));
+    let tx = w.env.send_paid_by(
+        &[companion::native(
+            companion::claim_fees(cranker.pubkey(), mint, None),
+            &keys,
+        )],
+        &payer,
+        &[&cranker],
+    );
+    tx.ok();
+    let fees: FeesClaimed = tx.event();
+    assert_eq!(fees.claimed, launch_fees);
+    assert_eq!(l0 - w.env.lamports(&launch_key), launch_fees);
+    assert_eq!(w.env.lamports(&cranker.pubkey()) - cl, fees.bounty);
+    assert_eq!(
+        w.env.lamports(&creator) - c0,
+        launch_fees - fees.bounty,
+        "lamports conserved"
+    );
+    let c = companion_of(&w, &mint);
+    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
+    w.env.warp(1);
+
+    // The holders' share: the kit's lamports.
+    let kit = launch::kit_config_address(&mint);
+    let (k0, c0) = (w.env.lamports(&kit), w.env.lamports(&creator));
+    let pending = c.pending_holders;
+    let tx = w.env.send_paid_by(
+        &[companion::native(
+            companion::share(cranker.pubkey(), mint),
+            &keys,
+        )],
+        &payer,
+        &[&cranker],
+    );
+    tx.ok();
+    let shared: bordrless_companion::events::SharedWithHolders = tx.event();
+    assert_eq!(shared.amount + shared.bounty, pending);
+    assert_eq!(w.env.lamports(&kit) - k0, shared.amount);
+    assert_eq!(c0 - w.env.lamports(&creator), pending);
+    assert_eq!(
+        companion_of(&w, &mint).set_aside().unwrap(),
+        w.creator_sol(&mint).1
+    );
+    w.env.warp(1);
+
+    // A buyback through swap_v2, once the reference has caught up.
+    let mut bought = None;
+    for _ in 0..80 {
+        w.env.warp(61);
+        let c0 = w.env.lamports(&creator);
+        let pending = companion_of(&w, &mint).pending_buyback;
+        let tx = w.env.send_paid_by(
+            &[companion::native(
+                companion::buyback(cranker.pubkey(), &keys, true),
+                &keys,
+            )],
+            &payer,
+            &[&cranker],
+        );
+        tx.ok();
+        if let Some(ev) = tx.events::<BoughtBack>().into_iter().next() {
+            assert_eq!(c0 - w.env.lamports(&creator), ev.spent + ev.bounty);
+            assert_eq!(
+                companion_of(&w, &mint).pending_buyback,
+                pending - ev.spent - ev.bounty
+            );
+            bought = Some(ev);
+            break;
+        }
+    }
+    assert!(bought.is_some_and(|b| b.burned > 0));
+    w.assert_pool_invariant(&w.launch_pool_key(&mint));
+
+    // The beneficiary's part, the spare included, paid as SOL.
+    let pending = companion_of(&w, &mint).pending_beneficiary;
+    let bl = w.env.lamports(&launcher.pubkey());
+    w.env
+        .send_paid_by(
+            &[companion::withdraw(payer.pubkey(), mint, launcher.pubkey())],
+            &payer,
+            &[],
+        )
+        .ok();
+    assert_eq!(w.env.lamports(&launcher.pubkey()) - bl, pending);
+    assert_eq!(
+        companion_of(&w, &mint).set_aside().unwrap(),
+        w.creator_sol(&mint).1
+    );
+    w.env.warp(1);
+
+    // A claim built as before (no native accounts) serves a native companion too: its accounts
+    // already name the launch, the creator and the launchpad, all the SOL claim needs.
+    trade(&mut w, &mint, 1, SOL);
+    w.env
+        .send_paid_by(
+            &[companion::claim_fees(cranker.pubkey(), mint, None)],
+            &payer,
+            &[&cranker],
+        )
+        .ok();
+    assert_eq!(
+        companion_of(&w, &mint).set_aside().unwrap(),
+        w.creator_sol(&mint).1
+    );
+
+    // Revert: the creator's lamports above the minimum wrapped back; the old paths again.
+    let (_, sol) = w.creator_sol(&mint);
+    let tx = w.revert_companion_native(&mint);
+    tx.ok();
+    assert!(!companion_of(&w, &mint).is_native());
+    assert_eq!(w.creator_sol(&mint), (sol, 0));
+    trade(&mut w, &mint, 1, SOL);
+    w.env
+        .send_paid_by(
+            &[companion::claim_fees(cranker.pubkey(), mint, None)],
+            &payer,
+            &[&cranker],
+        )
+        .ok();
+    let c = companion_of(&w, &mint);
+    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).0);
+}
+
+/// With native launches on, a companion coin is native from its launch: its launch, its pool and
+/// its companion (the spare funding booked to the beneficiary), and its first claim pays SOL.
+#[test]
+fn a_companion_coin_is_native_from_its_launch() {
+    let mut w = World::new();
+    let a = w.admin().pubkey();
+    w.as_admin(launch::set_native_launches(a, true)).ok();
+    let launcher = w.wallet_with_sol(5 * SOL);
+    let split = Split {
+        buyback_bps: 0,
+        holders_bps: 0,
+        beneficiary_bps: 10_000,
+    };
+    let (mint, tx) = launch_through(&mut w, &launcher, split, 0, LaunchRules::NONE);
+    tx.ok();
+    assert!(w.launch(&mint).is_native());
+    let c = companion_of(&w, &mint);
+    assert!(c.is_native());
+    let (held, sol) = w.creator_sol(&mint);
+    assert_eq!((held, c.pending_beneficiary), (0, sol));
+    w.env.warp(31);
+    let payer = w.env.funded(10 * SOL);
+    let t = w.env.funded(10 * SOL);
+    w.holdings(&t, mint, &[t.pubkey()]);
+    let keys = keys(&w, &mint);
+    let buy = launch::swap_v2(&keys, t.pubkey(), t.pubkey(), 1, 2 * SOL, 0);
+    w.env.send_paid_by(&[buy], &payer, &[&t]).ok();
+    let cranker = w.env.funded(SOL);
+    let tx = w.env.send_paid_by(
+        &[companion::native(
+            companion::claim_fees(cranker.pubkey(), mint, None),
+            &keys,
+        )],
+        &payer,
+        &[&cranker],
+    );
+    tx.ok();
+    let ev: FeesClaimed = tx.event();
+    assert_eq!(ev.claimed, 2 * SOL * u64::from(CREATOR_FEE) / 10_000);
+    let c = companion_of(&w, &mint);
+    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
+    let bl = w.env.lamports(&launcher.pubkey());
+    w.env
+        .send_paid_by(
+            &[companion::withdraw(payer.pubkey(), mint, launcher.pubkey())],
+            &payer,
+            &[],
+        )
+        .ok();
+    assert_eq!(
+        w.env.lamports(&launcher.pubkey()) - bl,
+        c.pending_beneficiary
+    );
+}

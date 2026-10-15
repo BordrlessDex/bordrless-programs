@@ -107,7 +107,7 @@ pub(crate) fn native_at_launch<'info>(
 pub fn process_migrate_companion_to_native<'info>(
     ctx: Context<'info, CompanionForm<'info>>,
 ) -> Result<()> {
-    check_form(&ctx.accounts)?;
+    check_form(ctx.accounts)?;
     if ctx.accounts.companion.is_native() {
         return Ok(());
     }
@@ -156,7 +156,7 @@ pub fn process_migrate_companion_to_native<'info>(
 pub fn process_revert_companion_to_bridged<'info>(
     ctx: Context<'info, CompanionForm<'info>>,
 ) -> Result<()> {
-    check_form(&ctx.accounts)?;
+    check_form(ctx.accounts)?;
     if !ctx.accounts.companion.is_native() {
         return Ok(());
     }

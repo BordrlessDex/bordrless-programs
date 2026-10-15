@@ -1700,3 +1700,129 @@ fn the_guards_are_the_companions() {
         );
     }
 }
+
+// ---- Native SOL (phase 3) ---------------------------------------------------------------------------
+
+/// The vault's migration (or revert), the DEX paused around it, by the upgrade authority.
+fn set_vault_native(w: &mut World, mint: &Pubkey, native: bool) -> Tx {
+    let a = w.admin().pubkey();
+    let v = w.vault(mint);
+    w.pause_dex(true);
+    let tx = w.as_admin(vault_client::set_vault_native(a, &v, native));
+    w.pause_dex(false);
+    tx
+}
+
+/// A sell-for-SOL slot whose wallet can't take its first payment holds it back as bridged SOL; the
+/// coin (pool, launch) and then the vault migrate mid-life: the pending SOL becomes the slot owner's
+/// lamports one for one; the next sale runs through `swap_v2` and pays the wallet the pending SOL
+/// and the sale in lamports, exactly; the vault reverts. Not before the coin's launch is native.
+#[test]
+fn a_vault_migrated_mid_life_sells_and_pays_in_lamports() {
+    let mut w = World::new();
+    let to = Keypair::new().pubkey();
+    let c = w.vault_coin(vault_args(vec![sell_for_sol(to)]), &[], true);
+    let m = c.mint;
+    w.churn(&m, 1, SOL / 50);
+    w.env.warp(61);
+    let cranker = w.wallet_with_sol(SOL);
+    let pending = w.execute(&cranker, &m, 0).event::<SlotSold>().pending_sol;
+    assert!(pending > 0);
+    let owner = slot_owner(&m, 0);
+    assert_eq!(w.slot_sol(&m, 0), pending);
+
+    // Not before the coin is native.
+    w.pause_dex(true);
+    let a = w.admin().pubkey();
+    let v = w.vault(&m);
+    w.as_admin(vault_client::set_vault_native(a, &v, true))
+        .expect_code(code(VaultError::LaunchNotNative));
+    w.pause_dex(false);
+
+    w.migrate_launch_native(&m).ok();
+    let owner_lamports = w.env.lamports(&owner);
+    set_vault_native(&mut w, &m, true).ok();
+    assert!(w.vault(&m).is_native());
+    assert_eq!(w.slot_sol(&m, 0), 0);
+    assert_eq!(w.env.lamports(&owner), owner_lamports + pending);
+    assert_eq!(w.vault(&m).slots[0].pending_sol, pending);
+    // Idempotent.
+    set_vault_native(&mut w, &m, true).ok();
+    assert_eq!(w.env.lamports(&owner), owner_lamports + pending);
+
+    // The next sale: swap_v2, the wallet paid what waited and the sale, the crank its bounty.
+    w.churn(&m, 2, SOL / 5);
+    w.env.warp(61);
+    let (o0, c0) = (w.env.lamports(&owner), w.env.lamports(&cranker.pubkey()));
+    let tx = w.execute(&cranker, &m, 0);
+    tx.ok();
+    let ev = tx.event::<SlotSold>();
+    assert_eq!(ev.paid, pending + ev.got - ev.bounty);
+    assert_eq!(w.env.lamports(&to), ev.paid);
+    assert_eq!(w.env.lamports(&cranker.pubkey()) + FEE, c0 + ev.bounty);
+    assert_eq!(
+        o0 - w.env.lamports(&owner),
+        pending,
+        "the owner keeps its rent"
+    );
+    assert_eq!(w.env.lamports(&owner), w.env.rent(0).max(owner_lamports));
+    assert_eq!(w.slot_sol(&m, 0), 0, "no bridged SOL");
+    w.assert_pool_invariant(&w.launch_pool_key(&m));
+
+    // Revert: nothing pending, nothing moves; the old sale path again.
+    set_vault_native(&mut w, &m, false).ok();
+    assert!(!w.vault(&m).is_native());
+    w.churn(&m, 2, SOL / 5);
+    w.env.warp(61);
+    w.execute(&cranker, &m, 0).ok();
+}
+
+/// A buy-burn slot of a native vault: on a bridged pool it wraps its lamports first, on a native one
+/// it buys through `swap_v2`; each spends exactly the pending SOL it says.
+#[test]
+fn a_native_vault_buys_bridged_and_native_pools() {
+    let (mut w, c, x, x_pool) = buy_burn(LaunchRules::NONE);
+    let m = c.mint;
+    let owner = slot_owner(&m, 0);
+    w.churn(&m, 5, 2 * SOL);
+    w.env.warp(61);
+    let cranker = w.wallet_with_sol(SOL);
+    w.execute(&cranker, &m, 0).ok();
+    let pending = w.vault(&m).slots[0].pending_sol;
+    w.migrate_launch_native(&m).ok();
+    set_vault_native(&mut w, &m, true).ok();
+    assert_eq!(w.slot_sol(&m, 0), 0);
+
+    // The other token's pool is still bridged: wrap, then the old buy.
+    let x_supply = supply(&w, &x);
+    let o0 = w.env.lamports(&owner);
+    let tx = w.execute_buy(&cranker, &m, 0);
+    tx.ok();
+    let ev = tx.event::<SlotBought>();
+    assert!(ev.burned > 0);
+    assert_eq!(supply(&w, &x), x_supply - ev.burned);
+    assert_eq!(o0 - w.env.lamports(&owner), ev.spent + ev.bounty);
+    assert_eq!(ev.pending_sol, pending - ev.spent - ev.bounty);
+    assert_eq!(w.slot_sol(&m, 0), 0);
+
+    // More sales; the other token's pool turns native: the buy goes through swap_v2.
+    w.churn(&m, 5, 2 * SOL);
+    w.env.warp(61);
+    w.execute(&cranker, &m, 0).ok();
+    w.migrate_launch_native(&x).ok();
+    w.env.warp(61);
+    let pending = w.vault(&m).slots[0].pending_sol;
+    let o0 = w.env.lamports(&owner);
+    let x_lamports = w.env.lamports(&x_pool);
+    let tx = w.execute_buy(&cranker, &m, 0);
+    tx.ok();
+    let ev = tx.event::<SlotBought>();
+    assert!(ev.burned > 0);
+    assert_eq!(o0 - w.env.lamports(&owner), ev.spent + ev.bounty);
+    assert_eq!(ev.pending_sol, pending - ev.spent - ev.bounty);
+    assert!(
+        w.env.lamports(&x_pool) > x_lamports,
+        "paid the native pool in SOL"
+    );
+    w.assert_pool_invariant(&x_pool);
+}

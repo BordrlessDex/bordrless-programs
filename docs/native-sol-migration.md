@@ -1,0 +1,114 @@
+# Native SOL migration checklist
+
+Moving Bordrless from bridged SOL (`A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i`) to native SOL
+(lamports) across the DEX, the launchpad, the kit, companions, `hook_vault` and the router. Built on
+branch `native-sol` (phases 1 to 3). Nothing here changes the token program or the bridge, and no
+account address changes: a pool keeps bridged SOL as its `quote_mint` and in its seeds.
+
+## What changes form
+
+| Account | Bridged form | Native form | Flag |
+| --- | --- | --- | --- |
+| DEX pool | quote vault (bridged SOL) | pool lamports above rent, plus a bridged-SOL **buffer** in the vault | `Pool.reserved[0]`; buffer `[1..9]`, target `[9..17]` |
+| Launch | `holding(bridged, launch)` | launch lamports above rent | `Launch.reserved[17]` |
+| Kit reward vault | `holding(bridged, kit_config)` | kit config lamports above `lamports_base` | `KitConfig.reserved[0]`, base `[1..9]` |
+| Companion | `holding(bridged, creator)` | creator PDA lamports above rent(0) | `Companion.native_sol` (1 byte past `quote_cut_claimed`; the account grows to 309) |
+| hook_vault slot | `holding(bridged, slot owner)` | slot owner lamports above rent(0) | `Vault.reserved[0]` |
+| Launchpad config | | new launches native | `Config.reserved[0]` (`set_native_launches`) |
+
+Invariant of a native pool, checked on chain after every instruction that moves its quote:
+`lamports >= rent + quote_reserve + protocol_fees_quote - buffer` and `quote vault >= buffer`
+(equalities unless someone sent SOL from outside, which is never counted or paid out).
+
+## Excluded
+
+- **Pool `4PvPnTByfrnhA1nNmsaou7GrdQsqJNrkinqLHp2JHFX7`** (the P29KQ5 coin, unknown hook program
+  `AwAvBeMRJLaprMPCQ85rpQtm5U9JTobjNFP2f4mQCExK`, a curve on the flat fee, about 0.005 SOL): stays on
+  bridged SOL and is **never** migrated. Nobody knows what its hook does with SOL-side cuts.
+- The hook-less KTEST pool `Bo2q3soUrKb2kH95aFNiMXfUf3UDhVC8JBe1YTKbHGq3` (dust) may stay bridged;
+  migrating it is harmless.
+
+Before the window, re-list every pool's `hook_program` (`getProgramAccounts` on the DEX,
+`dataSize 411`, Option tag at byte 171, key at 172..204) and confirm every other pool's hook is the
+launchpad `1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC`.
+
+## Order
+
+### 0. Upgrade, everything paused
+
+1. Pause the DEX (`set_config`, `paused: true`). Every swap and liquidity change stops. Claims,
+   payouts and companion steps that do not swap still run.
+2. Upgrade the programs: **DEX first**, then the **kit**, the **launchpad**, the **companion**,
+   **hook_vault** and the **router**. Verified builds, then re-upload each IDL through
+   program-metadata.
+3. Make sure no launchpad-native default is on yet (`Config.reserved[0] == 0`).
+
+### 1. For every launch-pool coin (all pools except the excluded one)
+
+In this order, all while the DEX is paused (each step is idempotent and can be re-sent):
+
+1. `bordrless_swap::migrate_pool_to_native(pool, buffer_target)`: the DEX admin. The pool unwraps its
+   books onto its account and keeps `min(buffer_target, books)` in the vault as the buffer.
+   A target of 0 is recommended, with a keeper running `rebalance_pool` (below).
+2. `bordrless_launch::migrate_launch_to_native(launch)`: the launchpad admin, a plain wallet. It
+   needs the pool native. The launch's fee holding is unwrapped onto the launch account. The kit's
+   reward vault (when there is a kit) moves to lamports on the kit config through the kit's
+   `set_native`, which the launchpad's kit-caller PDA signs. `acc_per_share`, `seen` and every
+   holder's bytes stay unchanged.
+3. Only for a **companion coin**: `bordrless_companion::migrate_companion_to_native(companion)`,
+   signed by the companion program's upgrade authority. It needs the launch native. The account
+   grows by one byte (by nine for one made before `quote_cut_claimed`); the admin pays the rent.
+   The creator's spare lamports (unspent launch funding) are booked to `pending_beneficiary`, and
+   the creator's bridged SOL is unwrapped onto the creator PDA.
+4. Only for a coin with a **hook vault**: `hook_vault::migrate_vault_to_native(vault)`, signed by
+   hook_vault's upgrade authority. It needs the coin's launch native. Each slot's `pending_sol` is
+   unwrapped onto its owner.
+
+The ordinary (non-launch) pools need only step 1.
+
+### 2. Reopen
+
+1. Verify every migrated account: pool invariant, launch lamports above rent equal to the old holding,
+   kit `seen` unchanged, companion `set_aside() == creator lamports - rent(0)`, vault slots'
+   `pending_sol` equal to the owner lamports above rent(0).
+2. `bordrless_launch::set_native_launches(true)`: new launches (companion coins included) are native
+   from creation.
+3. Unpause the DEX.
+4. Start the keeper: `rebalance_pool` on any native pool whose buffer is away from its target (old-path
+   buys grow it). Old-path buys on a pool with no lamports yet fail with `LamportsShort` until a
+   `swap_v2` trade or a rebalance gives the pool some.
+
+### Rollback (before reopening, or later under a pause)
+
+Reverse order per coin, each idempotent:
+
+1. `hook_vault::revert_vault_to_bridged`.
+2. `bordrless_companion::revert_companion_to_bridged`. The spare booked to the beneficiary stays
+   booked; it is the beneficiary's either way.
+3. `bordrless_launch::revert_launch_to_bridged` (the admin wallet wraps; it ends where it started),
+   which reverts the kit too.
+4. `bordrless_swap::revert_pool_to_bridged` (the admin wallet wraps).
+5. `set_native_launches(false)`.
+
+## What keeps working unchanged
+
+- The DEX's old `swap`, `add_liquidity`, `remove_liquidity` and `collect_protocol_fees`, on bridged and
+  native pools alike (a native pool moves bridged SOL through its buffer; `BufferShort` when it can't
+  cover). On a native pool, quote-side cuts may name lamport destinations, which the pool pays.
+- The launchpad's old claims (they pay whatever sits in the old holding), and the kit's `claim` and
+  `share` on bridged kits.
+- The router's old `swap`.
+- Every companion step's old client builder: a native companion's steps look their accounts up by
+  key; `bordrless_companion::client::native` appends the extra accounts its native paths call.
+
+## New entry points (for the SDK)
+
+- DEX: `swap_v2`, `create_native_pool`, `migrate_pool_to_native`, `revert_pool_to_bridged`,
+  `rebalance_pool`, `set_buffer_target`; events `SwappedNative`, `PoolQuoteFormChanged`.
+- Launchpad: `claim_creator_fees_sol`, `claim_author_fees_sol`, `distribute_fees_sol`,
+  `set_native_launches`, `migrate_launch_to_native`, `revert_launch_to_bridged`; client `swap_v2`.
+- Kit: `claim_sol`, `share_sol`, `set_native` (launchpad only).
+- Companion: `migrate_companion_to_native`, `revert_companion_to_bridged`; wallet payouts may name a
+  holding of bridged SOL (its owner passed, paid in bridged SOL).
+- hook_vault: `migrate_vault_to_native`, `revert_vault_to_bridged`.
+- Router: `swap_v2` (fees in SOL to the integrator's wallet and the DEX treasury).
