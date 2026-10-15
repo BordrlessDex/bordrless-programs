@@ -207,7 +207,14 @@ pub fn process_set_native(ctx: Context<SetNative>, native: bool) -> Result<()> {
         }
         ctx.accounts.kit_config.set_native(Some(base));
     } else {
-        moved = ctx.accounts.kit_config.native_vault(config_info.lamports());
+        // Without holder rewards there is no vault and nothing to wrap: any lamports above the
+        // base are donations, left on the config uncounted (audit N-1: a one-lamport donation
+        // must not block the rollback).
+        moved = if vault.is_some() {
+            ctx.accounts.kit_config.native_vault(config_info.lamports())
+        } else {
+            0
+        };
         if moved > 0 {
             let wallet = ctx.accounts.wallet.to_account_info();
             let from = config_info.lamports();
