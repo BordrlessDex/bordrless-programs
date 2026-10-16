@@ -43,7 +43,7 @@ upgrade of six programs (the DEX, the launchpad, the kit, the companion, `hook_v
 built from merge `4591354`, the re-audit fixes of `912fff3`; slots 457324888 to 457325076); that
 evening the companion's `set_payout_terms` and the payout window measured against the live pot
 (commit `abfc783`, tx `2BjeHPwF…`, hash `72af698e…`), then the companion's script author share taken
-from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). Each program embeds a `security.txt` that points back to
+from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). On 16 Oct 2026 the kit gained `claim_sol_for`, a permissionless push of a holder's native rewards to the holding's owner (commit `2d19ec9`, slot 457493758). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -53,7 +53,7 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_swap` | `4d034a0265fc5ef909f07ec35711d6637f107627437efac8ebd64f37ca300125` (commit `4591354`) |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
 | `bordrless_launch` | `94ffee2da944efdaae03366e90552a5d6177f4818e51ef4b3bf73d9ad910c1ac` (commit `4591354`) |
-| `bordrless_kit` | `9f899bbf307199893f642834343148a167a004f321c0658c37e441f5ed514d45` (commit `4591354`) |
+| `bordrless_kit` | `44803fa08ce3c3c87363fb9c197c39edff6e51232262238d25923c3afcaed719` (commit `2d19ec9`) |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
 | `bordrless_companion` | `f73a6bde3fc4942332bfa3ddbe952f3123688cacfba9a0fd84851f2130c3e249` (commit `b91b673`) |
