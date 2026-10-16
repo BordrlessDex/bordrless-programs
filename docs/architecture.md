@@ -177,8 +177,10 @@ dollar figure at the SOL price of the moment the launch is prepared (bounds are 
 
 **Fees on a launch pool.** Protocol fee 0.25% of the SOL side (collected by the admin; the pool
 keeps that rate after graduation, while ordinary DEX pools pay 1%). LP fee 0.3%,
-staying in the pool for ever. Creator fee 0–2% (the site's choices; the launchpad allows up to 10%
-since 13 Oct 2026), chosen at launch, taken by the hook in the quote
+staying in the pool for ever. Creator fee up to 5% in all (the launch form offers 0, 0.5%, 1% or 2% for
+the creator fee and for a companion's fee, together at most 5%; a Workshop config any quarter
+percent up to 5%; the launchpad allows up to 10% since 13 Oct 2026; with a companion the fee is
+split, the launcher's part to the launcher and the rest to the companion's pot), chosen at launch, taken by the hook in the quote
 token (from the input on buys, from the output on sells) into the launch's own vault, claimable by
 the creator at any time. For the first 30 seconds the hook overrides the LP fee from 80% down to
 0.3%, linearly: a sniper's premium deepens the pool for everyone. The creator's own first buy in
@@ -211,8 +213,10 @@ other through fixture vectors.
 
 ## Decisions taken without asking
 
-1. Launches are quoted in bridged SOL. The platform token is featured on the bridge and gets a
-   pool against bridged SOL; pairing launches with it can come later, as a per-launch quote.
+1. Launches were first quoted in bridged SOL; since 15 Oct 2026 pools, launches, kits, companions
+   and hook vaults hold native SOL (lamports), the pool keeping bridged SOL as its `quote_mint`
+   ([docs/native-sol-migration.md](native-sol-migration.md)). Pairing launches with the platform
+   token can come later, as a per-launch quote.
 2. Devnet first. Mainnet needs the user's authority key and SOL; the deploy scripts take a key
    path and nothing is hard-coded to this machine.
 3. The brand is written Bordrless, as in the brief.

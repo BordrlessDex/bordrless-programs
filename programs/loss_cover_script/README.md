@@ -8,7 +8,7 @@ it.
 
 | | |
 | --- | --- |
-| Script program | `9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm` (not deployed yet) |
+| Script program | `9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm` (on mainnet) |
 | Pair | `programs/loss_cover_hook` |
 | Approval | `approve(kind script, hash, author = default)`: no author share |
 | `state_len` | 128 |

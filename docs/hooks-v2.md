@@ -1022,7 +1022,7 @@ immutable (the default) or managed; it never hands the upgrade authority to the 
 | Rule | Choices | Default |
 | --- | --- | --- |
 | Holder rewards | off, 0.5%, 1%, 2%; buys and sells set together, or apart under Custom | 1% both sides |
-| Creator fee | 0, 0.5%, 1%, 2% | 0.5% with holder rewards on, else 1% |
+| Creator fee | 0, 0.5%, 1%, 2% per row (the creator fee and, with a companion, the companion fee from 0.5%); the two rows together at most 5%. A Workshop config's fees: any quarter percent up to 5% | 0.5% with holder rewards on, else 1% |
 | Burn | off, 0.25%, 0.5%, 1%; both sides, or apart under Custom | off |
 | Max wallet | off, 1%, 2%, 3%, 5%, until graduation | 2% |
 | Creator wallet lock | off, 7, 30, 90 days | 30 days |

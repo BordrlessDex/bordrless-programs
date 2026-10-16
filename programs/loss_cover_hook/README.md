@@ -9,7 +9,7 @@ never refuses a transfer and takes no cut.
 
 | | |
 | --- | --- |
-| Hook program | `6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr` (not deployed yet) |
+| Hook program | `6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr` (on mainnet) |
 | Pair | `programs/loss_cover_script` |
 | Flags | `BEFORE_TRANSFER \| BEFORE_BURN \| WRITES_HOOK_DATA` (145) |
 | Registry extras | the state (writable), the launch (read-only), the launch pool (read-only) |

@@ -38,27 +38,32 @@ The same addresses on mainnet-beta, devnet and localnet.
 Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded; script companions, payouts and Loss cover on 12 Oct 2026; on 13 Oct 2026 the launchpad's [SOL cut](docs/quote-cut.md), the companion's [payees and wallet payouts](docs/payees-and-wallet-payouts.md), and the router; that
 evening the launchpad's [partner fee](docs/partner-fee.md), with its largest creator fee raised to 10%;
 on 14 Oct 2026 the DEX and the launchpad's curve fill, a buy past the end of a launch's curve taking
-what is left, `docs/hooks-v2.md` §3.1 and §5.4). Each program embeds a `security.txt` that points back to
+what is left, `docs/hooks-v2.md` §3.1 and §5.4); on 15 Oct 2026 the [native SOL](docs/native-sol-migration.md)
+upgrade of six programs (the DEX, the launchpad, the kit, the companion, `hook_vault` and the router,
+built from merge `4591354`, the re-audit fixes of `912fff3`; slots 457324888 to 457325076); that
+evening the companion's `set_payout_terms` and the payout window measured against the live pot
+(commit `abfc783`, tx `2BjeHPwF…`, hash `72af698e…`), then the companion's script author share taken
+from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
 | Program | Executable hash (sha256, `solana-verify get-program-hash`) |
 | --- | --- |
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
-| `bordrless_swap` | `98ae8d0642fcc2ce6c07464809c1dd115847afafa8587d18e27b76293a966f20` (commit `99b5ed6`) |
+| `bordrless_swap` | `4d034a0265fc5ef909f07ec35711d6637f107627437efac8ebd64f37ca300125` (commit `4591354`) |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
-| `bordrless_launch` | `ec65021648896627fcf7c0440bad844e33f1e77478f806f1ff6087f60c24083f` (commit `99b5ed6`) |
-| `bordrless_kit` | `97083d9080dc9e3d2284f13c41200a62059c2203ae3e7df78ce863526076ef70` |
+| `bordrless_launch` | `94ffee2da944efdaae03366e90552a5d6177f4818e51ef4b3bf73d9ad910c1ac` (commit `4591354`) |
+| `bordrless_kit` | `9f899bbf307199893f642834343148a167a004f321c0658c37e441f5ed514d45` (commit `4591354`) |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
-| `bordrless_companion` | `708a6083baf033f62c7e54f7259bb5217a85bda8f4132628770208921e300db8` (commit `212f6ba`) |
+| `bordrless_companion` | `f73a6bde3fc4942332bfa3ddbe952f3123688cacfba9a0fd84851f2130c3e249` (commit `b91b673`) |
 | `lottery_hook` | `7eb0751aab14688fd5cb438fa815d2d3e6df38a314c979181a0c93955bb7f29c` (not yet a verified build: see below) |
 | `hook_timelock` | `30d849b2c54c2ba64668066e77923a6d99483d0cf5eb404cecfc78e50348d60d` |
-| `hook_vault` | `e5097780ead4976105a758de84404ee16b7ac04bcc8b210aca8a5f611cbcf7a0` |
-| `bordrless_router` | `f6718c167c31bdc18cb61e7c837ae09b845732c6e28bcda6699f91906358770a` (commit `212f6ba`) |
+| `hook_vault` | `0ffa7762f47272c3167931bd915a77caca44d1ef017cd94637e7315f48b4ccea` (commit `4591354`) |
+| `bordrless_router` | `73ccf1b27070ad3a0f704b63a1c5c7b93a047c8d39a4513a571765a5da12efd8` (commit `4591354`) |
 
 `lottery_hook` (five-minute rounds, 12 Oct 2026), `loss_cover_hook`
-(`af392c58…`) and `loss_cover_script` (`dac53d50…`) run builds of this repository's source made
+(`af392c58…`) and `loss_cover_script` (`ffdbc50c…`) run builds of this repository's source made
 with `cargo build-sbf` before it was public here; verified builds of them are still to be made and
 deployed so their hashes match.
 

@@ -1087,7 +1087,7 @@ pub struct Script {
     pub created_at: i64,
     /// The script's author, copied from its approval at `create_script`: paid `AUTHOR_SHARE_BPS` of
     /// the launcher's part of the creator fee every claim takes from the launch (out of that part;
-    /// 2026-10-16), unless they are the launch's beneficiary. The
+    /// 2026-10-15), unless they are the launch's beneficiary. The
     /// default key: no author (an approval naming nobody, or an immutable script, which needs no
     /// approval). (From what was `reserved`.)
     pub author: Pubkey,

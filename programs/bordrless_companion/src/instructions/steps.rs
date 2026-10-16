@@ -532,7 +532,7 @@ pub struct Step<'info> {
 /// ([`Companion::restart_stranded_wait`]). A Snowball's or a script's pot has no hook: its part is
 /// credited whole ([`Companion::has_own_pot`]).
 ///
-/// A script companion's claim (2026-10-12; 2026-10-16: out of the launcher's part alone) pays the
+/// A script companion's claim (2026-10-12; 2026-10-15: out of the launcher's part alone) pays the
 /// script's author (`Script.author`, copied from the script's approval) `AUTHOR_SHARE_BPS` of the
 /// launcher's part of the creator fee this claim took from the launch, as SOL to their wallet: out
 /// of that part, never the pot's, the buyback's or the holders', never the hook's SOL cut; not when
@@ -597,7 +597,7 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     // the whole claim (the rest of it waits for the next one).
     let hook_gross = got.min(accrued.saturating_sub(c.quote_cut_claimed.amount));
     let claimed_gross = got;
-    // A script's author (2026-10-16, the owner: "it should only come from the creator fee; the
+    // A script's author (2026-10-15, the owner: "it should only come from the creator fee; the
     // companion fee is only for the pot"): `AUTHOR_SHARE_BPS` of the launcher's part of the creator
     // fee this claim took from the launch, taken out of that part alone: never of the pot's, the
     // buyback's or the holders' parts, never of the hook's SOL cut (which goes whole to the pot),

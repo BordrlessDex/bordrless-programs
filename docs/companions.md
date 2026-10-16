@@ -67,7 +67,7 @@ The templates are presets of these fields:
 - `withdraw` before the launch, unless the mint signs it: that refunds the funding of a launch that
   never happened.
 
-The kit excludes the launch's creator only when it is exactly a companion's creator address,
+The kit excludes the launch's creator only when it is exactly a companion's address,
 decided once when the launch is made (`KitConfig.creator_is_companion`); every other creator is an
 ordinary holder.
 
@@ -119,7 +119,7 @@ an additive upgrade of this program (owner decision a), with `lottery_hook`
   - A round's tickets are the tokens held since it began, registered at the holding's first write
     that round (a transfer, a burn, or anyone's `enter`). Tokens bought or received during a round
     count from the next one. Ranges only shrink.
-  - Only wallets hold tickets: never the launch, its pool, the creator address, or any address off
+  - Only wallets hold tickets: never the launch, its pool, the companion address, or any address off
     the curve.
   - Attempt `k` of a draw picks ticket `u64_le(sha256(R ‖ u32_le(k))[..8]) % total`.
 - **`create_game`** (before the launch, signed by the mint, in the setup transaction after the
@@ -228,7 +228,7 @@ fields as zeros.
 ## Approvals: the programs a companion runs beside its own (2026-10-12)
 
 A script companion (`create_script`, `script_step`: a builder's own program spends the pot with
-the creator address signing, inside the companion's limits) and a custom hook the site offers
+the companion address signing, inside the companion's limits) and a custom hook the site offers
 beside a companion run only programs Bordrless has approved, each approval bound to the program's
 code (a script nobody can change needs none: below):
 
@@ -236,7 +236,8 @@ code (a script nobody can change needs none: below):
   program (its program account and ProgramData passed, its `Timelock` when it has one) as a token
   hook (kind 0, read off chain) or a companion script (kind 1), `code_hash` its executable hash
   (`solana-verify`'s, recomputed on chain: any other is refused), `author` who wrote it (a
-  script's author earns half the creator fees of the companions made with it). Only a program
+  script's author earns half of the launcher's part of the creator fee of the companions made
+  with it, never the pot's). Only a program
   nobody but Bordrless can change is approved: immutable, upgradeable only by Bordrless's keys, or
   behind a hook timelock (`ProgramNotBounded`). An approval counts while the program still runs
   the approved code; an upgrade voids it until the new code is approved.
@@ -254,7 +255,7 @@ code (a script nobody can change needs none: below):
   claim is split as ever, nothing to an author. A program someone can upgrade keeps the rules
   above: without a current approval it is refused (`NotApproved`).
 
-## Snowball: a market maker run by the companion (2026-10-12, not deployed yet)
+## Snowball: a market maker run by the companion (2026-10-12, on mainnet)
 
 The owner's preset: the companion's fee fills a pot that trades the token on its own pool, so the
 chart keeps moving. An additive upgrade of the same program, like v2: every earlier instruction,
@@ -301,7 +302,7 @@ Site side (the monorepo): the SDK's `companion.createSnowball` / `snowballStep`,
 `snowballs` loop; the token page's market maker figures. All of it stays off until the upgrade is
 live: `SNOWBALL_OPEN=1` on the API and `NEXT_PUBLIC_SNOWBALL_OPEN=1` on the site.
 
-## Payouts: a script pays holders through the companion (2026-10-12, not deployed yet)
+## Payouts: a script pays holders through the companion (2026-10-12, deployed 12 Oct)
 
 The owner's Loss cover preset needs the pot to pay holders, each up to a sum its own hook has
 measured. The primitive is general: any pair (a hook that marks eligibility in its holdings, a
@@ -345,7 +346,7 @@ program: every earlier instruction, account and error code is unchanged.
   the cap is never below the frozen one it replaced, so a script that computes the old one still
   answers within it; the pot less the bounty bounds every step whatever the window, the holding cap `holding_bps` of it; then each entry: the
   index, a holding of the mint, named once, within the cap and the budget (`PayoutOverBound`), its
-  owner eligible (never the launch, its pool, the creator address, the companion, the script, its
+  owner eligible (never the launch, its pool, the companion address, the companion, the script, its
   state, the terms, the hook, the default key or an address off the curve: `PayoutTarget`), not
   the launcher (`PayoutToBeneficiary`); with lamports, the owner's account among the remaining
   accounts, writable, payable and not left below its rent-exempt minimum (`PayoutTarget`). A touch
@@ -387,7 +388,7 @@ Errors appended: `PayoutsOff`, `PayoutsNeedHook`, `BadPayoutAnswer`, `PayoutTarg
 `fixtures/scripts/payouts`, which answers whatever its state holds) and `payout_vectors.rs`
 (`vectors/payouts.json`).
 
-## Loss cover: the creator fee pays the holders who are under water (2026-10-12, not deployed yet)
+## Loss cover: the companion's pot pays the holders who are under water (2026-10-12, deployed 12 Oct)
 
 The owner's preset, built on the payouts above: a pair Bordrless owns, `loss_cover_hook`
 (`6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr`) and `loss_cover_script`
@@ -407,7 +408,7 @@ measured, both on chain. A round is many short steps, each holding once a round.
   after the DEX wrote its reserves and before it delivered, pinned in `loss_cover_hook.rs` against
   the DEX's write order), capped at 20% above a slow reference (5% a step, once in 10 minutes); a
   plain transfer in at the spot; a send, a sell or a burn keeps the cover pro rata and clears an
-  emptied holding; the launch, the pool, the creator address and every off-curve address are
+  emptied holding; the launch, the pool, the companion address and every off-curve address are
   exempt; `record_payout` takes only the companion's payout authority and a holding with a record.
 - **The script's rules**: rounds of `round_secs` (a minute to a day), starting only on a pot of at
   least `min_pot_lamports` (below it a step fails with `NothingToDo`: no slot, no measuring); the

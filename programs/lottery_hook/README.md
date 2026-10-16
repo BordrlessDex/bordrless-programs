@@ -7,7 +7,7 @@ program only keeps the tickets: it never sees SOL, never refuses a transfer and 
 
 | | |
 | --- | --- |
-| Hook program | `HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr` (not deployed yet) |
+| Hook program | `HqFWsCBQ416DAfevJ9TspyT5yXGGoYTCpcreiGkCgWcr` (on mainnet) |
 | Standard | Game ticket standard v1, `crates/bordrless-game` |
 | Flags | `BEFORE_TRANSFER \| BEFORE_BURN \| WRITES_HOOK_DATA` (145) |
 | IDL | [`idl/lottery_hook.json`](../../idl/lottery_hook.json) |

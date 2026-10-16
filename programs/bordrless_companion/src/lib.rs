@@ -262,7 +262,7 @@ pub mod bordrless_companion {
     /// The protocol's upgrade authority or the script approver (`SCRIPT_APPROVER`): approves
     /// `program`'s code (its hash recomputed here) as a
     /// token hook (kind 0) or a companion script (kind 1), `author` its author (a script's earns
-    /// half the creator fees of the companions made with it). Only a program nobody but Bordrless
+    /// half of the launcher's part of the creator fee of the companions made with it). Only a program nobody but Bordrless
     /// can change (immutable, Bordrless's keys, or a hook timelock); an upgrade voids it.
     pub fn approve(
         ctx: Context<Approve>,

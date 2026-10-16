@@ -348,9 +348,10 @@ pub const MAX_SCRIPT_STATE_LEN: u32 = 10_240;
 pub const SCRIPT_BOUNTY: u64 = 20_000;
 /// No script step in the launch's first minute (the sniper fee's window, 30 s, with room).
 pub const SCRIPT_AFTER_LAUNCH: i64 = 60;
-/// A script's author earns this share of the creator fees every claim of a script companion takes
-/// from its launch (half, as a listed config's author can), paid as SOL before the split; nothing
-/// when the author is the launch's own launcher (its beneficiary).
+/// A script's author earns this share of the launcher's part of the creator fee every claim of a
+/// script companion takes from its launch (half of that part, out of it; never the pot's, the
+/// buyback's, the holders' or the hook's SOL cut), paid as SOL; nothing when the author is the
+/// launch's own launcher (its beneficiary).
 pub const AUTHOR_SHARE_BPS: u16 = 5_000;
 /// The script's two instructions, as Anchor names them: the first 8 bytes of
 /// `sha256("global:companion_init")` and of `sha256("global:companion_step")`.
