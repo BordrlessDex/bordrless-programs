@@ -67,6 +67,24 @@ pub const MODE_SELL: u8 = 8;
 /// At the init: move `param` lamports from `aux` (the launcher's wallet) to the creator address,
 /// which needs the launcher's signature.
 pub const MODE_TAKE_PAYER: u8 = 9;
+/// Buy the token with `param` of the pot's SOL on the launch pool (`swap_v2` from the creator's
+/// lamports on a native launch, the bridged `swap` otherwise), then burn `param2` of the creator's
+/// tokens (0: all it bought) with the token program's `burn`, the creator signing. The state's
+/// byte 17 is `n`: the token's hook slice (`[hook, hook signer, extras...]`, empty for a token with
+/// no hook) is `others[1..1 + n]`, right after `aux`, used for both the swap and the burn. The burn
+/// write-locks the mint, so the step needs the mint writable among its accounts.
+pub const MODE_BUY_BURN: u8 = 10;
+/// Burn `param2` of the creator's tokens (0: all it holds), no buy; the hook slice as for
+/// `MODE_BUY_BURN`.
+pub const MODE_BURN: u8 = 11;
+
+/// A burn mode's state: the mode, the buy, the burn and the hook slice's length.
+pub fn burn_state_bytes(mode: u8, buy: u64, burn: u64, slice: u8) -> Vec<u8> {
+    let mut d = state_bytes(mode, buy);
+    d.extend_from_slice(&burn.to_le_bytes());
+    d.push(slice);
+    d
+}
 
 /// The script's state for `mint`, as the companion makes it.
 pub fn state_address(mint: &Pubkey) -> Pubkey {
@@ -200,6 +218,34 @@ fn step(accounts: &[AccountInfo], mint: &Pubkey) -> core::result::Result<(), Pro
         )
     };
     let aux = others.first().ok_or(ProgramError::NotEnoughAccountKeys)?;
+    if mode == MODE_BUY_BURN || mode == MODE_BURN {
+        let d = state.try_borrow_data()?;
+        let burn: [u8; 8] = d
+            .get(9..17)
+            .and_then(|b| b.try_into().ok())
+            .ok_or(ProgramError::InvalidAccountData)?;
+        let n = *d.get(17).ok_or(ProgramError::InvalidAccountData)? as usize;
+        drop(d);
+        let slice: Vec<AccountMeta> = others
+            .get(1..1 + n)
+            .ok_or(ProgramError::NotEnoughAccountKeys)?
+            .iter()
+            .map(|a| AccountMeta {
+                pubkey: *a.key,
+                is_signer: false,
+                is_writable: a.is_writable,
+            })
+            .collect();
+        return buy_burn(
+            accounts,
+            launch_info,
+            mint,
+            *creator.key,
+            if mode == MODE_BUY_BURN { param } else { 0 },
+            u64::from_le_bytes(burn),
+            slice,
+        );
+    }
     let launch = {
         let d = launch_info.try_borrow_data()?;
         Launch::try_deserialize(&mut &d[..]).map_err(|_| ProgramError::InvalidAccountData)?
@@ -240,5 +286,51 @@ fn step(accounts: &[AccountInfo], mint: &Pubkey) -> core::result::Result<(), Pro
         MODE_ASSIGN => system_instruction::assign(&me, &ID),
         _ => return Err(ProgramError::InvalidInstructionData),
     };
+    invoke(&ix, accounts)
+}
+
+/// `MODE_BUY_BURN` and `MODE_BURN`: a buy of `buy` (none at 0), then a burn of `burn` of the
+/// creator's tokens (0: what it bought, or all it holds without a buy).
+fn buy_burn(
+    accounts: &[AccountInfo],
+    launch_info: &AccountInfo,
+    mint: &Pubkey,
+    me: Pubkey,
+    buy: u64,
+    burn: u64,
+    slice: Vec<AccountMeta>,
+) -> core::result::Result<(), ProgramError> {
+    let launch = {
+        let d = launch_info.try_borrow_data()?;
+        Launch::try_deserialize(&mut &d[..]).map_err(|_| ProgramError::InvalidAccountData)?
+    };
+    let keys = launch_client::LaunchKeys::of(&launch);
+    let held = token_client::holding_address(mint, &me);
+    let before = amount_of(accounts, &held)?;
+    if buy > 0 {
+        let ix = if launch.is_native() {
+            launch_client::swap_v2_with_base_slice(&keys, me, me, 1, buy, 1, slice.clone())
+        } else {
+            launch_client::swap_with_base_slice(&keys, me, me, 1, buy, 1, slice.clone())
+        };
+        invoke(&ix, accounts)?;
+    }
+    let after = amount_of(accounts, &held)?;
+    let amount = match (burn, buy) {
+        (0, 0) => after,
+        (0, _) => after.saturating_sub(before),
+        (n, _) => n,
+    };
+    let (hook, extras) = match slice.as_slice() {
+        [program, signer, extras @ ..] => (
+            Some(token_client::Hook {
+                program: program.pubkey,
+                signer: signer.pubkey,
+            }),
+            extras.to_vec(),
+        ),
+        _ => (None, vec![]),
+    };
+    let ix = token_client::burn_with(me, held, *mint, hook, extras, amount);
     invoke(&ix, accounts)
 }
