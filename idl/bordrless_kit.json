@@ -283,6 +283,72 @@
       "args": []
     },
     {
+      "name": "claim_sol_for",
+      "docs": [
+        "Anyone pushes a native-kit holder's rewards to it, in SOL, as its own `claim_sol` would",
+        "pay them: the SOL goes only to the holding's owner; `payer` signs and pays the fee only."
+      ],
+      "discriminator": [
+        194,
+        112,
+        32,
+        237,
+        186,
+        4,
+        153,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Signs and pays the transaction fee; nothing else (it receives nothing, pays nothing)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "launch (checked in the handler); receives the SOL."
+          ],
+          "writable": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "holding",
+          "docs": [
+            "The owner's holding of the token."
+          ],
+          "writable": true
+        },
+        {
+          "name": "kit_hook_authority",
+          "address": "2repKA1JgDkBo4AffscVee342dcBcH6c2yfpUTRrAiEN"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "graduate",
       "docs": [
         "The launch graduated: lifts max wallet. Signed by the kit-caller PDA; once."

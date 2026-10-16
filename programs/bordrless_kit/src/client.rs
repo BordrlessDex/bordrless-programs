@@ -145,6 +145,25 @@ pub fn claim_sol(owner: Pubkey, mint: Pubkey) -> Instruction {
     }
 }
 
+/// `claim_sol_for` of a native kit: `owner`'s rewards pushed to its wallet in SOL by `payer`
+/// (who signs and pays the fee; `owner` does not sign).
+pub fn claim_sol_for(payer: Pubkey, owner: Pubkey, mint: Pubkey) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new_readonly(payer, true),
+            AccountMeta::new(owner, false),
+            AccountMeta::new(kit_config_address(&mint), false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(token_client::holding_address(&mint, &owner), false),
+            AccountMeta::new_readonly(HOOK_AUTHORITY, false),
+            AccountMeta::new_readonly(TOKEN_ID, false),
+            AccountMeta::new_readonly(TOKEN_EVENT_AUTHORITY, false),
+        ]),
+        data: crate::instruction::ClaimSolFor {}.data(),
+    }
+}
+
 /// `share_sol(amount)` by `sharer` (its SOL) with the holders of a native kit's `mint`.
 pub fn share_sol(sharer: Pubkey, mint: Pubkey, amount: u64) -> Instruction {
     Instruction {

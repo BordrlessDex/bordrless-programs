@@ -93,6 +93,12 @@ pub mod bordrless_kit {
         native::process_claim_sol(ctx)
     }
 
+    /// Anyone pushes a native-kit holder's rewards to it, in SOL, as its own `claim_sol` would
+    /// pay them: the SOL goes only to the holding's owner; `payer` signs and pays the fee only.
+    pub fn claim_sol_for(ctx: Context<ClaimSolFor>) -> Result<()> {
+        native::process_claim_sol_for(ctx)
+    }
+
     /// Shares `amount` lamports with the holders of a native kit, as `share` does.
     pub fn share_sol(ctx: Context<ShareSol>, amount: u64) -> Result<()> {
         native::process_share_sol(ctx, amount)

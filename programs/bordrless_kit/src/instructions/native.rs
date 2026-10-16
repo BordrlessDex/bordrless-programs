@@ -11,8 +11,9 @@
 //! (its admin's migration, or a native launch at creation).
 //!
 //! On a native kit, the launch pool's holder fees arrive as lamports on the config (the pool hook
-//! names it), `claim_sol` pays a holder SOL and `share_sol` takes SOL; `claim` and `share` are
-//! refused (`NativeKit`), and on a bridged kit `claim_sol` and `share_sol` are (`NotNativeKit`).
+//! names it), `claim_sol` pays a holder SOL (`claim_sol_for` the same, pushed to the holder by
+//! anyone) and `share_sol` takes SOL; `claim` and `share` are refused (`NativeKit`), and on a
+//! bridged kit `claim_sol`, `claim_sol_for` and `share_sol` are (`NotNativeKit`).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::{invoke, invoke_signed};
@@ -283,14 +284,96 @@ pub struct ClaimSol<'info> {
 /// An owner whose wallet would be left below the rent-exempt minimum is refused
 /// (`RecipientBelowRent`).
 pub fn process_claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
-    let owner = ctx.accounts.owner.key();
-    let now = Clock::get()?.unix_timestamp;
-    let config_info = ctx.accounts.kit_config.to_account_info();
-    let vault_amount = ctx.accounts.kit_config.native_vault(config_info.lamports());
-    let balance = ctx.accounts.holding.amount;
-    let read = ctx.accounts.holding.hook_data;
+    let a = &mut *ctx.accounts;
+    let event = pay_sol(
+        &mut a.kit_config,
+        &a.mint,
+        &a.holding,
+        &a.owner.to_account_info(),
+        &a.kit_hook_authority,
+        &a.token_program,
+        &a.token_event_authority,
+    )?;
+    emit_cpi!(event);
+    Ok(())
+}
 
-    let config = &mut ctx.accounts.kit_config;
+/// Accounts of `claim_sol_for`: `claim_sol`'s, the owner a writable account that need not sign
+/// and a separate `payer` signing. The SOL can only go to the holding's owner.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct ClaimSolFor<'info> {
+    /// Signs and pays the transaction fee; nothing else (it receives nothing, pays nothing).
+    pub payer: Signer<'info>,
+    /// CHECK: the holder, the holding's owner (constrained by `holding`): neither the pool nor the
+    /// launch (checked in the handler); receives the SOL.
+    #[account(mut)]
+    pub owner: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = kit_config.rewards_on() @ KitError::RewardsOff,
+        constraint = kit_config.is_native() @ KitError::NotNativeKit
+    )]
+    pub kit_config: Account<'info, KitConfig>,
+    /// CHECK: the config's mint (address-checked).
+    #[account(address = kit_config.mint @ KitError::WrongMint)]
+    pub mint: UncheckedAccount<'info>,
+    /// The owner's holding of the token.
+    #[account(
+        mut,
+        constraint = holding.mint == kit_config.mint @ KitError::WrongHolding,
+        constraint = holding.owner == owner.key() @ KitError::WrongHolding
+    )]
+    pub holding: Account<'info, Holding>,
+    /// CHECK: this program's `["hook-authority"]` PDA, which signs `write_hook_data`.
+    #[account(address = HOOK_AUTHORITY @ KitError::WrongProgram)]
+    pub kit_hook_authority: UncheckedAccount<'info>,
+    /// CHECK: the token program.
+    #[account(address = TOKEN_ID @ KitError::WrongProgram)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the token program's event authority.
+    #[account(address = TOKEN_EVENT_AUTHORITY @ KitError::WrongProgram)]
+    pub token_event_authority: UncheckedAccount<'info>,
+}
+
+/// `claim_sol_for`: `claim_sol` pushed by anyone, paid to the holding's owner exactly as its own
+/// `claim_sol` would pay it (same checks, same bytes written, same event).
+pub fn process_claim_sol_for(ctx: Context<ClaimSolFor>) -> Result<()> {
+    let a = &mut *ctx.accounts;
+    let event = pay_sol(
+        &mut a.kit_config,
+        &a.mint,
+        &a.holding,
+        &a.owner.to_account_info(),
+        &a.kit_hook_authority,
+        &a.token_program,
+        &a.token_event_authority,
+    )?;
+    emit_cpi!(event);
+    Ok(())
+}
+
+/// The SOL claim of `claim_sol` and `claim_sol_for`, `owner` being the holding's owner (both
+/// contexts constrain it): sync; settle the holder at its balance; pay `min(owed, vault)`
+/// (`NothingToClaim` when that is 0) to `owner` from the config's lamports above its base; write
+/// the holder's reward bytes, the rest as read. Answers the event to emit.
+fn pay_sol<'info>(
+    kit_config: &mut Account<'info, KitConfig>,
+    mint_account: &UncheckedAccount<'info>,
+    holding: &Account<'info, Holding>,
+    owner_info: &AccountInfo<'info>,
+    kit_hook_authority: &UncheckedAccount<'info>,
+    token_program: &UncheckedAccount<'info>,
+    token_event_authority: &UncheckedAccount<'info>,
+) -> Result<RewardsClaimed> {
+    let owner = owner_info.key();
+    let now = Clock::get()?.unix_timestamp;
+    let config_info = kit_config.to_account_info();
+    let vault_amount = kit_config.native_vault(config_info.lamports());
+    let balance = holding.amount;
+    let read = holding.hook_data;
+
+    let config = &mut **kit_config;
     require!(!config.is_excluded(&owner), KitError::NotAHolder);
     config.sync(vault_amount, now)?;
     let mut data = HolderData::read(&read);
@@ -305,7 +388,6 @@ pub fn process_claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
     let total_claimed = config.total_claimed;
     let mint = config.mint;
 
-    let owner_info = ctx.accounts.owner.to_account_info();
     let rent = Rent::get()?.minimum_balance(owner_info.data_len());
     require!(
         owner_info.lamports().saturating_add(pay) >= rent,
@@ -316,17 +398,17 @@ pub fn process_claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
     let ix = token_client::write_hook_data(
         HOOK_AUTHORITY,
         mint,
-        ctx.accounts.holding.key(),
+        holding.key(),
         data.with_rewards_of(&read),
     );
     invoke_signed(
         &ix,
         &[
-            ctx.accounts.kit_hook_authority.to_account_info(),
-            ctx.accounts.mint.to_account_info(),
-            ctx.accounts.holding.to_account_info(),
-            ctx.accounts.token_event_authority.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
+            kit_hook_authority.to_account_info(),
+            mint_account.to_account_info(),
+            holding.to_account_info(),
+            token_event_authority.to_account_info(),
+            token_program.to_account_info(),
         ],
         &[&[HOOK_AUTHORITY_SEED, &[HOOK_AUTHORITY_BUMP]]],
     )?;
@@ -338,14 +420,13 @@ pub fn process_claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
     let to = owner_info.lamports();
     **owner_info.try_borrow_mut_lamports()? = to.checked_add(pay).ok_or(KitError::MathOverflow)?;
 
-    emit_cpi!(RewardsClaimed {
+    Ok(RewardsClaimed {
         mint,
         owner,
         amount: pay,
         owed_left: data.owed,
         total_claimed,
-    });
-    Ok(())
+    })
 }
 
 /// Accounts of `share_sol`.

@@ -134,7 +134,8 @@ launch and refuses while it is native (`LaunchStillNative`).
   `rebalance_pool`, `set_buffer_target`, `buffer_all`; events `SwappedNative`, `PoolQuoteFormChanged`.
 - Launchpad: `claim_creator_fees_sol`, `claim_author_fees_sol`, `distribute_fees_sol`,
   `set_native_launches`, `migrate_launch_to_native`, `revert_launch_to_bridged`; client `swap_v2`.
-- Kit: `claim_sol`, `share_sol`, `set_native` (launchpad only).
+- Kit: `claim_sol`, `share_sol`, `set_native` (launchpad only); `claim_sol_for` (anyone pushes a
+  holder's `claim_sol` to the holding's owner, a separate `payer` signing; same checks and event).
 - Companion: `migrate_companion_to_native`, `revert_companion_to_bridged`; wallet payouts may name a
   holding of bridged SOL (its owner passed, paid in bridged SOL). A script companion launches with
   `client::launch_script` (its script's address appended): while native launches are on, a script on
