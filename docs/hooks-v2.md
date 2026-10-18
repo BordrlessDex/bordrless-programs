@@ -2,9 +2,12 @@
 
 Status: specification, revised 2026-10-07 after a security, a runtime, an economics and a product
 review, a fact check of Token-2022 transfer hooks against the version on mainnet (v11.0.0), and a
-second check of the revision (coverage, attack, money simulation). Nothing in this document is
-deployed. It extends `docs/architecture.md`; where they differ, this document wins. Section 0 lists
-what the reviews changed and why.
+second check of the revision (coverage, attack, money simulation). Deployed to mainnet from 7 Oct
+2026 onwards (the README's deploy history lists each upgrade). It extends `docs/architecture.md`;
+where they differ, this document wins. Section 0 lists what the reviews changed and why. Since 15 Oct
+2026 pools, launches, kits, companions and hook vaults hold SOL as lamports where this document says
+bridged SOL in a holding or vault (the `quote_mint` is still bridged SOL), and native pools trade
+with `swap_v2`: `docs/native-sol-migration.md`.
 
 ## Why
 

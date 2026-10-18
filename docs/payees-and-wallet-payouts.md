@@ -43,7 +43,7 @@ beneficiary around them. It then:
 (executable, a sysvar, a reserved key) or would stay below its rent-exempt minimum is owed its
 share. The beneficiary likewise: an account that can't take its part leaves it owed, so it never
 blocks the payees. What is owed stays in `pending_beneficiary` (bridged SOL in the creator's
-holding) and is paid at the next `withdraw` that can pay it. A payee whose account can never take
+holding; on a native companion, `docs/native-sol-migration.md`, lamports on the creator address) and is paid at the next `withdraw` that can pay it. A payee whose account can never take
 SOL (a program id) stays owed for good. A `withdraw` that would pay nobody is refused
 (`NothingToDo`), so nobody pays fees to resend it.
 

@@ -32,7 +32,7 @@ The same addresses on mainnet-beta, devnet and localnet.
 | `hook_timelock` | `BBUzaamchPWZpKENmn7bopiuQWvRGm2Vg8TqLLgzgGGZ` | [Phase 3a](docs/phase3a.md): a hook's or a strategy's upgrade authority behind a public delay of at least 3 days; its only exit is "immutable" |
 | `hook_vault` | `5cojoUStG7WFhHJiSncCUEwTqDuhDLKu4a9BqTbF8jzG` | [Phase 3a](docs/phase3a.md): where a hook's cuts go: slots that burn, sell for SOL to a wallet fixed before launch, or sell and buy-and-burn another token |
 | `bordrless_router` | `7M5GTuzhByzBbrJURzLtbBrFjcsC8aHu816qWTXAYD85` | [The router](docs/router.md): an app's integrator fee (at most 1%) on any DEX swap, 20% of it to Bordrless |
-| `loss_cover_hook` | `6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr` | [Loss cover](docs/loss-cover.md) (the site's Lossback): the hook that keeps each holding's entry |
+| `loss_cover_hook` | `6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr` | [Loss cover](programs/loss_cover_hook) (the site's Lossback): the hook that keeps each holding's entry |
 | `loss_cover_script` | `9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm` | Loss cover's companion script: names the holders under water and what each gets |
 
 Deployed to mainnet-beta on 7 Oct 2026 (the DEX, launchpad and kit upgraded and Half-Life and companions added on 8 Oct 2026; companion v2 and the lottery hook on 9 Oct 2026, jackpot and streak games the same day; phase 3a on 10 Oct 2026: hook_timelock, hook_vault, and the launchpad and companion upgraded; script companions, payouts and Loss cover on 12 Oct 2026; on 13 Oct 2026 the launchpad's [SOL cut](docs/quote-cut.md), the companion's [payees and wallet payouts](docs/payees-and-wallet-payouts.md), and the router; that
@@ -43,7 +43,7 @@ upgrade of six programs (the DEX, the launchpad, the kit, the companion, `hook_v
 built from merge `4591354`, the re-audit fixes of `912fff3`; slots 457324888 to 457325076); that
 evening the companion's `set_payout_terms` and the payout window measured against the live pot
 (commit `abfc783`, tx `2BjeHPwF…`, hash `72af698e…`), then the companion's script author share taken
-from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). On 16 Oct 2026 the kit gained `claim_sol_for`, a permissionless push of a holder's native rewards to the holding's owner (commit `2d19ec9`, slot 457493758). Each program embeds a `security.txt` that points back to
+from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). On 16 Oct 2026 the kit gained `claim_sol_for`, a permissionless push of a holder's native rewards to the holding's owner (commit `2d19ec9`, slot 457493758), and new launches went native (`set_native_launches(true)`, no deploy; the coins launched since 15 Oct migrated). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -103,6 +103,7 @@ taken from the amount itself into a furnace anyone can burn. Launch with it from
 | `docs/quote-cut.md` | A custom hook's SOL cut on every trade of its coin, through the launchpad |
 | `docs/partner-fee.md` | Partner configs: a wallet paid a fixed share of every launch's creator fee, Meteora-style |
 | `docs/payees-and-wallet-payouts.md`, `docs/router.md` | The companion's payees and wallet payouts; the router's integrator fee |
+| `docs/native-sol-migration.md`, `docs/native-sol-audit.md`, `docs/native-sol-reaudit.md` | Native SOL (15 Oct 2026): what holds lamports, `swap_v2`, the old `swap` on native pools, the migration and its audits |
 | `idl/` | Anchor IDLs of the deployed programs |
 | `scripts/solana` | Toolchain install, build, test and deploy |
 
@@ -142,8 +143,10 @@ solana-verify verify-from-repo -u mainnet-beta --program-id 2XoEWp8cF3kRXg74eVwP
 
 ## Upgrade authority
 
-The programs are upgradeable. Until each upgrade authority moves to a multisig behind a timelock
-(`docs/hooks-v2.md` §4.14), treat them as upgradeable by a single key, and never as immutable.
+The programs are upgradeable. The token program's upgrade authority is a Squads multisig vault
+(`5wni4K2qdSfTr6JspbLXDStfbq1XSmzMpF75RSpwsjBH`, 7-day time lock). Until each of the others moves to a
+multisig behind a timelock (`docs/hooks-v2.md` §4.14), treat them as upgradeable by a single key
+(`5xsibKwtiN6ruxsYrEyWVpV3KcwuzSPbQd1n28a7spEd`), and never as immutable.
 `solana program show <address>` shows the current authority.
 
 ## Security

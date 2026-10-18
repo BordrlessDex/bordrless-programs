@@ -43,10 +43,24 @@ DEX, the launchpad or any hook: it wraps the DEX's own `swap`.
   SOL cut) apply to what the router passes on, exactly as for a direct swap. CPI height: router
   (1), DEX (2), launchpad (3), a custom hook's `quote_cut` (4).
 
+## `swap_v2(args)`: native pools (15 Oct 2026)
+
+A native pool (`Pool.reserved[0] == 1`: every launch pool but two since 15 and 16 Oct 2026,
+`docs/native-sol-migration.md`) trades with the DEX's `swap_v2`, and the router wraps it the same
+way, with the same discriminator as the DEX's: the trader (writable, signer), the integrator's
+**wallet** (writable), the DEX treasury's **wallet** (writable), the DEX program, the System
+Program, the router's event accounts, then the DEX `swap_v2` accounts (its trader quote is the
+trader's own wallet on both sides). The fee and the split are as above, paid in SOL to the two
+wallets: no holding, no unwrap. The old `swap` above wraps only the DEX's old `swap`, which on a
+native pool sells by CPI and so fails with `BufferShort` whenever the pool's buffer is short (the
+usual case): route native pools through `swap_v2`.
+
 ## For apps
 
 Build the swap as you would without the router, then wrap it:
 `client::swap(trader, integrator_quote, treasury_quote, &dex_swap, fee_bps, min_quote_after_fee)`
 in Rust, or the SDK's `router.swap(...)`. Create your integrator holding of bridged SOL once
 (`token.createHolding(payer, BRIDGED_SOL_MINT, you)`). Your fees accrue there as bridged SOL;
-unwrap it with the bridge.
+unwrap it with the bridge. On a native pool use `client::swap_v2` or the SDK's
+`router.swapV2(trader, integratorWallet, treasuryWallet, launch.swap(...), feeBps)` instead: your fee
+arrives in your wallet as SOL.

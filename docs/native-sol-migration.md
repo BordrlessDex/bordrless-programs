@@ -2,8 +2,17 @@
 
 Moving Bordrless from bridged SOL (`A49oVhX22ExMwTEtFC6Y8nhBdZ4LJDGhdXLDn4c2f59i`) to native SOL
 (lamports) across the DEX, the launchpad, the kit, companions, `hook_vault` and the router. Built on
-branch `native-sol` (phases 1 to 3). Nothing here changes the token program or the bridge, and no
-account address changes: a pool keeps bridged SOL as its `quote_mint` and in its seeds.
+branch `native-sol` (phases 1 to 3), merged to main at `4591354`. Nothing here changes the token
+program or the bridge, and no account address changes: a pool keeps bridged SOL as its `quote_mint`
+and in its seeds.
+
+**Status: done on mainnet.** 15 Oct 2026: the six programs upgraded (the re-audit fixes of
+`912fff3`) and the existing coins migrated but the exceptions below, the DEX paused for the window.
+16 Oct 2026, once the integrators were on `swap_v2`: `set_native_launches(true)` (step 2.2, held back
+until then), so **new launches are native from creation**, and the coins launched in between
+migrated (the DEX paused again for a few minutes). Still on bridged SOL: pool `4PvPnTBy…` (excluded
+for good, below) and the held coin `5DMBPNoYAmbiNnRyRkWS7BetnfvAzbUqXyXNiw6Hn7hh` (its pool and
+launch, pending its migration). The steps below are the checklist.
 
 ## What changes form
 
@@ -118,7 +127,8 @@ launch and refuses while it is native (`LaunchStillNative`).
   - `collect_protocol_fees` (bridged SOL) still needs the buffer to cover it (`BufferShort`); use
     `collect_protocol_fees_sol`.
 
-  Integrators should move to `swap_v2` before the window.
+  Integrators should trade native pools with `swap_v2` (a CPI or a delegate selling through the old
+  `swap` fails with `BufferShort` whenever the buffer is short, the usual case at target 0).
 - The launchpad's old claims (they pay whatever sits in the old holding), and the kit's `claim` and
   `share` on bridged kits.
 - The router's old `swap`.

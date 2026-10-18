@@ -10,6 +10,14 @@ config's author, so it combines with any hook a config names.
 Nothing else changes. The DEX, the token program and every hook are untouched; a config or launch
 made before has no partner and claims exactly as it did.
 
+**Native SOL (since 15 Oct 2026).** Below, a launch's fees accrue as bridged SOL in its quote holding
+and every party is paid to its holding of bridged SOL. A native launch (`Launch.reserved[17]`, every
+launch since 16 Oct 2026 and almost every older one, `docs/native-sol-migration.md`) keeps them as
+lamports on the launch account and pays each party in SOL to its wallet, with the same split:
+`claim_creator_fees_sol`, `claim_author_fees_sol` and `distribute_fees_sol` (SDK
+`launch.claimCreatorFeesSol`, `claimAuthorFeesSol`, `distributeFeesSol`); no partner holding is
+needed.
+
 ## The config: `create_partner_config(args, author_share_bps, cut, partner, partner_share_bps)`
 
 - **Accounts:** those of `create_config`, with the partner's account
