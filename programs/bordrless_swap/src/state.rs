@@ -173,6 +173,29 @@ impl Pool {
         self.reserved[NATIVE_FLAG_OFFSET] = u8::from(native);
     }
 
+    /// Whether the pool's quote is a real SPL Token or Token-2022 mint (quote kind 2, `crate::spl`),
+    /// held in its associated token account. Such a pool trades only through `swap_spl`.
+    pub fn quote_spl(&self) -> bool {
+        self.reserved[NATIVE_FLAG_OFFSET] == QUOTE_KIND_SPL
+    }
+
+    /// A kind-2 pool's quote program (SPL Token or Token-2022).
+    pub fn spl_program(&self) -> Pubkey {
+        crate::spl::program_id(self.reserved[SPL_PROGRAM_OFFSET])
+    }
+
+    /// A kind-2 pool's quote decimals.
+    pub fn spl_decimals(&self) -> u8 {
+        self.reserved[SPL_DECIMALS_OFFSET]
+    }
+
+    /// Marks the pool kind 2 with its quote mint's program index and decimals.
+    pub fn set_quote_spl(&mut self, program: u8, decimals: u8) {
+        self.reserved[NATIVE_FLAG_OFFSET] = QUOTE_KIND_SPL;
+        self.reserved[SPL_PROGRAM_OFFSET] = program;
+        self.reserved[SPL_DECIMALS_OFFSET] = decimals;
+    }
+
     fn reserved_u64(&self, offset: usize) -> u64 {
         let mut b = [0u8; 8];
         b.copy_from_slice(&self.reserved[offset..offset + 8]);

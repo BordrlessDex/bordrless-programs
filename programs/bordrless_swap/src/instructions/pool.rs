@@ -376,6 +376,13 @@ pub fn process_create_pool<'info>(
             call.invoke(discriminators::BEFORE_INITIALIZE, &hook_args, Allowed::NONE)?;
         }
     }
+    // A pool in the launchpad's name is the launchpad's to create (`docs/token-quotes.md` §2.1):
+    // otherwise anyone could take the address of a launch's leg or reserve pool before it opens.
+    // Checked after the callback, so a pool that asks the launchpad still hears its own refusal.
+    require!(
+        by_hook || hook_program_opt != Some(LAUNCHPAD_ID),
+        SwapError::LaunchpadPoolNeedsLaunchpad
+    );
 
     // The deposits, measured.
     let authority = ctx.accounts.authority.to_account_info();
@@ -492,7 +499,12 @@ pub fn process_create_pool<'info>(
 pub struct FinalizeCurve<'info> {
     /// The pool hook program's hook authority.
     pub hook_caller: Signer<'info>,
-    #[account(mut, constraint = pool.curve @ SwapError::NotCurve)]
+    /// A pool quoted in an SPL token stays a curve for ever (it has no LP mint).
+    #[account(
+        mut,
+        constraint = pool.curve @ SwapError::NotCurve,
+        constraint = !pool.quote_spl() @ SwapError::SplPool
+    )]
     pub pool: Account<'info, Pool>,
     /// CHECK: the pool's base vault (address-checked).
     #[account(address = pool.base_vault @ SwapError::WrongVault)]
@@ -589,7 +601,8 @@ pub struct CollectProtocolFees<'info> {
     pub admin: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ SwapError::NotAdmin)]
     pub config: Account<'info, Config>,
-    #[account(mut)]
+    /// A pool quoted in an SPL token pays through `collect_protocol_fees_spl`.
+    #[account(mut, constraint = !pool.quote_spl() @ SwapError::SplPool)]
     pub pool: Account<'info, Pool>,
     /// CHECK: address-checked.
     #[account(address = pool.quote_mint @ SwapError::WrongHolding)]
@@ -1131,6 +1144,346 @@ pub fn process_set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) ->
     let pool = &mut ctx.accounts.pool;
     pool.set_buffer_target(buffer_target);
     emit_cpi!(form_event(pool, FORM_TARGET_SET, 0, 0)?);
+    Ok(())
+}
+
+// ---- Quote tokens (`docs/token-quotes.md` §2.1): pools quoted in a real SPL Token or Token-2022
+// mint (quote kind 2, `crate::spl`). ----
+
+/// Accounts of `create_spl_pool`: a curve a hook program creates as its own hook (its hook
+/// authority signs as `hook_caller`), quoted in an SPL Token or Token-2022 mint. The remaining
+/// accounts are the base mint's token-hook slice (`base_hook_accounts` of them), nothing else.
+#[event_cpi]
+#[derive(Accounts)]
+#[instruction(args: CreatePoolArgs)]
+pub struct CreateSplPool<'info> {
+    /// Pays the rent (the pool, its two vaults) and the creation fee.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// Owns the base deposit's holding.
+    pub authority: Signer<'info>,
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    /// CHECK: the config's treasury (address-checked).
+    #[account(mut, address = config.treasury @ SwapError::WrongHolding)]
+    pub treasury: UncheckedAccount<'info>,
+    pub base_mint: Box<Account<'info, TokenMint>>,
+    /// CHECK: the quote mint, owned by `quote_token_program` and held to the extension policy in the
+    /// handler (`crate::spl::check_quote_mint`).
+    #[account(constraint = quote_mint.key() != base_mint.key() @ SwapError::SameMint)]
+    pub quote_mint: UncheckedAccount<'info>,
+    #[account(
+        init,
+        payer = payer,
+        space = Pool::LEN,
+        seeds = [POOL_SEED, base_mint.key().as_ref(), quote_mint.key().as_ref(), &args.lp_fee_bps.to_le_bytes(), args.hook_program.as_ref()],
+        bump
+    )]
+    pub pool: Box<Account<'info, Pool>>,
+    /// CHECK: the pool's base holding, created here (the token program checks its address).
+    #[account(mut)]
+    pub base_vault: UncheckedAccount<'info>,
+    /// CHECK: the pool's associated token account of the quote mint, created here (the ATA program
+    /// checks its address).
+    #[account(mut)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: the authority's base holding (checked by the token program on transfer).
+    #[account(mut)]
+    pub authority_base: UncheckedAccount<'info>,
+    /// The hook program's own hook authority (`["hook-authority"]` under `args.hook_program`).
+    pub hook_caller: Signer<'info>,
+    /// CHECK: the token program (checked in the handler).
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the token program's event authority (checked in the handler).
+    pub token_event_authority: UncheckedAccount<'info>,
+    /// CHECK: the quote mint's program: SPL Token or Token-2022 (checked against the mint's owner).
+    pub quote_token_program: UncheckedAccount<'info>,
+    /// CHECK: the associated token account program (address-checked).
+    #[account(address = crate::spl::ATA_PROGRAM_ID @ SwapError::WrongTokenProgram)]
+    pub associated_token_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// `create_spl_pool`: a curve (`virtual_quote > 0`, no quote deposit, `virtual_base` as the hook
+/// asks) by its hook, quoted in an SPL Token or Token-2022 mint allowed by the policy. The quote
+/// vault is the pool's associated token account; the pool is marked quote kind 2 with the quote
+/// mint's program and decimals; the share fee model applies when the hook is the launchpad, the
+/// flat rate otherwise. No initialize callback runs (the hook is the creator), no LP mint exists.
+pub fn process_create_spl_pool<'info>(
+    ctx: Context<'info, CreateSplPool<'info>>,
+    args: CreatePoolArgs,
+) -> Result<()> {
+    let clock = Clock::get()?;
+    let config = &mut ctx.accounts.config;
+    require!(!config.paused, SwapError::Paused);
+    require!(args.lp_fee_bps <= MAX_LP_FEE_BPS, SwapError::FeeTooHigh);
+    require!(
+        args.hook_flags & !pool_flags::ALL == 0,
+        SwapError::InvalidHookFlags
+    );
+    require!(
+        args.hook_data.len() <= MAX_HOOK_DATA,
+        SwapError::HookDataTooLong
+    );
+    require!(args.base_amount > 0, SwapError::ZeroAmount);
+    require!(
+        args.virtual_quote > 0 && args.quote_amount == 0 && args.quote_hook_accounts == 0,
+        SwapError::SplPoolCurveOnly
+    );
+    require!(
+        ctx.remaining_accounts.len() == usize::from(args.base_hook_accounts),
+        SwapError::AccountCounts
+    );
+    // The hook creates its own pool: its hook authority signs.
+    let program = args.hook_program;
+    require!(
+        program != Pubkey::default() && program != crate::ID,
+        SwapError::BadHookCaller
+    );
+    let (expected, _) = bordrless_hook::hook_authority(&program);
+    require_keys_eq!(
+        ctx.accounts.hook_caller.key(),
+        expected,
+        SwapError::BadHookCaller
+    );
+    let hook_signer_bump = Pool::hook_signer(&program).1;
+    // The quote: an SPL Token or Token-2022 mint the policy allows, passed with its program.
+    let quote_mint = ctx.accounts.quote_mint.to_account_info();
+    let quote_program = ctx.accounts.quote_token_program.to_account_info();
+    require_keys_eq!(
+        *quote_mint.owner,
+        quote_program.key(),
+        SwapError::WrongTokenProgram
+    );
+    let (program_index, decimals) =
+        crate::spl::check_quote_mint(&quote_mint).map_err(SwapError::from)?;
+    // A launch pool (the launchpad's own curve) pays the share of its hooks' cuts; any other hook's
+    // curve the flat rate (as `create_pool`).
+    let launch_pool = program == LAUNCHPAD_ID;
+    let (fee_model, protocol_fee_bps, protocol_share_bps) = if launch_pool {
+        (FEE_MODEL_SHARE, 0, config.launch_protocol_share_bps)
+    } else {
+        (FEE_MODEL_FLAT, config.protocol_fee_bps, 0)
+    };
+    let token = TokenAccounts {
+        program: ctx.accounts.token_program.to_account_info(),
+        event_authority: ctx.accounts.token_event_authority.to_account_info(),
+    };
+    token.check()?;
+
+    // The creation fee.
+    if config.pool_creation_fee_lamports > 0 {
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                system_program::Transfer {
+                    from: ctx.accounts.payer.to_account_info(),
+                    to: ctx.accounts.treasury.to_account_info(),
+                },
+            ),
+            config.pool_creation_fee_lamports,
+        )?;
+    }
+    config.pools_created = config
+        .pools_created
+        .checked_add(1)
+        .ok_or(SwapError::MathOverflow)?;
+
+    let pool_key = ctx.accounts.pool.key();
+    {
+        let pool = &mut ctx.accounts.pool;
+        pool.version = VERSION;
+        pool.bump = ctx.bumps.pool;
+        pool.lp_mint_bump = 0;
+        pool.base_mint = ctx.accounts.base_mint.key();
+        pool.quote_mint = quote_mint.key();
+        pool.lp_mint = Pubkey::default();
+        pool.base_vault = ctx.accounts.base_vault.key();
+        pool.quote_vault = ctx.accounts.quote_vault.key();
+        pool.hook_program = Some(program);
+        pool.hook_flags = args.hook_flags;
+        pool.lp_fee_bps = args.lp_fee_bps;
+        pool.protocol_fee_bps = protocol_fee_bps;
+        pool.virtual_base = args.virtual_base;
+        pool.virtual_quote = args.virtual_quote;
+        pool.curve = true;
+        pool.creator = ctx.accounts.authority.key();
+        pool.created_at = clock.unix_timestamp;
+        pool.hook_signer_bump = hook_signer_bump;
+        pool.fee_model = fee_model;
+        pool.protocol_share_bps = protocol_share_bps;
+        pool.reserved = [0; 60];
+        pool.set_quote_spl(program_index, decimals);
+    }
+
+    // The vaults: the base holding, and the quote's associated token account (idempotent: anyone
+    // may have created it already; the ATA program checks its address and owner).
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let payer = ctx.accounts.payer.to_account_info();
+    let system = ctx.accounts.system_program.to_account_info();
+    token.create_holding(
+        &payer,
+        &ctx.accounts.base_mint.to_account_info(),
+        &pool_info,
+        &ctx.accounts.base_vault.to_account_info(),
+        &system,
+    )?;
+    let quote_vault = ctx.accounts.quote_vault.to_account_info();
+    crate::spl::create_ata_idempotent(
+        &payer,
+        &quote_vault,
+        &pool_info,
+        &quote_mint,
+        &system,
+        &quote_program,
+        &ctx.accounts.associated_token_program.to_account_info(),
+    )?;
+    let vault = crate::spl::read_token_account(&quote_vault, quote_program.key)
+        .ok_or(SwapError::WrongVault)?;
+    require!(
+        vault.owner == pool_key && vault.mint == quote_mint.key(),
+        SwapError::WrongVault
+    );
+
+    // The base deposit, measured.
+    let base_before = balance(&ctx.accounts.base_vault)?;
+    token.transfer(
+        &ctx.accounts.authority.to_account_info(),
+        &ctx.accounts.authority_base.to_account_info(),
+        &ctx.accounts.base_vault.to_account_info(),
+        &ctx.accounts.base_mint.to_account_info(),
+        &TokenSide::of(
+            ctx.remaining_accounts,
+            ctx.accounts.base_mint.hook_program.is_some(),
+        ),
+        args.base_amount,
+        &[],
+    )?;
+    let base_received = balance(&ctx.accounts.base_vault)?
+        .checked_sub(base_before)
+        .ok_or(SwapError::MathOverflow)?;
+    require!(base_received > 0, SwapError::NothingReceived);
+    let pool = &mut ctx.accounts.pool;
+    pool.base_reserve = base_received;
+    pool.quote_reserve = 0;
+    pool.lp_supply = 0;
+    crate::spl::check_books(pool, vault.amount)?;
+
+    emit_cpi!(PoolCreated {
+        pool: pool_key,
+        payer: payer.key(),
+        creator: ctx.accounts.authority.key(),
+        base_mint: ctx.accounts.base_mint.key(),
+        quote_mint: quote_mint.key(),
+        lp_mint: Pubkey::default(),
+        base_vault: ctx.accounts.base_vault.key(),
+        quote_vault: quote_vault.key(),
+        lp_fee_bps: args.lp_fee_bps,
+        protocol_fee_bps,
+        fee_model,
+        protocol_share_bps,
+        hook_program: Some(program),
+        hook_flags: args.hook_flags,
+        virtual_base: args.virtual_base,
+        virtual_quote: args.virtual_quote,
+        base_reserve: base_received,
+        quote_reserve: 0,
+        lp_supply: 0,
+        lp_minted: 0,
+        curve: true,
+        slot: clock.slot,
+        ts: clock.unix_timestamp,
+    });
+    emit_cpi!(SplPoolCreated {
+        pool: pool_key,
+        quote_mint: quote_mint.key(),
+        quote_program: quote_program.key(),
+        quote_decimals: decimals,
+        quote_vault: quote_vault.key(),
+    });
+    Ok(())
+}
+
+/// Accounts of `collect_protocol_fees_spl`: anyone moves a kind-2 pool's protocol fees to the
+/// fee collector the config names, into its associated token account of the quote mint (created
+/// if it does not exist, `payer` paying the rent).
+#[event_cpi]
+#[derive(Accounts)]
+pub struct CollectProtocolFeesSpl<'info> {
+    /// Whoever sends it; pays the collector's token account's rent when it is created.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, constraint = pool.quote_spl() @ SwapError::NotSplPool)]
+    pub pool: Account<'info, Pool>,
+    /// CHECK: address-checked: the pool's quote mint.
+    #[account(address = pool.quote_mint @ SwapError::WrongHolding)]
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the pool's quote vault.
+    #[account(mut, address = pool.quote_vault @ SwapError::WrongVault)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the fee collector the config names.
+    #[account(address = config.fee_collector @ SwapError::WrongHolding)]
+    pub fee_collector: UncheckedAccount<'info>,
+    /// CHECK: the fee collector's associated token account of the quote mint (the ATA program
+    /// checks its address; created if needed).
+    #[account(mut)]
+    pub collector_quote: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the pool's quote program.
+    #[account(address = pool.spl_program() @ SwapError::WrongTokenProgram)]
+    pub quote_token_program: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the associated token account program.
+    #[account(address = crate::spl::ATA_PROGRAM_ID @ SwapError::WrongTokenProgram)]
+    pub associated_token_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// `collect_protocol_fees_spl`: the pool's `protocol_fees_quote` from its quote vault (the pool
+/// signs) to the fee collector's associated token account of the quote mint.
+pub fn process_collect_protocol_fees_spl(ctx: Context<CollectProtocolFeesSpl>) -> Result<()> {
+    let program = ctx.accounts.quote_token_program.to_account_info();
+    let mint = ctx.accounts.quote_mint.to_account_info();
+    let collector_quote = ctx.accounts.collector_quote.to_account_info();
+    crate::spl::create_ata_idempotent(
+        &ctx.accounts.payer.to_account_info(),
+        &collector_quote,
+        &ctx.accounts.fee_collector.to_account_info(),
+        &mint,
+        &ctx.accounts.system_program.to_account_info(),
+        &program,
+        &ctx.accounts.associated_token_program.to_account_info(),
+    )?;
+    let to = crate::spl::read_token_account(&collector_quote, program.key)
+        .ok_or(SwapError::WrongTokenAccount)?;
+    require!(
+        to.owner == ctx.accounts.config.fee_collector && to.mint == mint.key(),
+        SwapError::WrongTokenAccount
+    );
+    let amount = ctx.accounts.pool.protocol_fees_quote;
+    let leg = crate::spl::SplLeg {
+        token_program: program,
+        decimals: ctx.accounts.pool.spl_decimals(),
+    };
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let seeds = PoolSeeds::of(&ctx.accounts.pool);
+    leg.transfer(
+        &pool_info,
+        &ctx.accounts.quote_vault.to_account_info(),
+        &collector_quote,
+        &mint,
+        amount,
+        &[&seeds.seeds()],
+    )?;
+    let pool = &mut ctx.accounts.pool;
+    pool.protocol_fees_quote = 0;
+    crate::spl::check_books(pool, leg.amount(&ctx.accounts.quote_vault)?)?;
+    emit_cpi!(ProtocolFeesCollected {
+        pool: pool.key(),
+        quote_amount: amount,
+        collector: ctx.accounts.config.fee_collector,
+        ts: Clock::get()?.unix_timestamp
+    });
     Ok(())
 }
 

@@ -18,6 +18,10 @@
 //! The kit is called only through this program's `["kit-caller", mint]` PDA, which signs nothing
 //! else; the launch PDA and this program's hook authority are never passed to it.
 //!
+//! A coin may instead be quoted in 1 to 6 real SPL Token or Token-2022 mints
+//! (`create_token_launch`, `docs/token-quotes.md`): one leg pool per quote, opened by `open_leg`,
+//! the creator fee taken in each leg's token and claimed per leg; such a coin never graduates.
+//!
 //! Layout: [`state`], [`instructions`] (config, launch configs, launch, graduate, claim, hook
 //! callbacks), [`cpi`] (the instructions this program invokes), [`events`], [`error`], [`client`].
 
@@ -212,5 +216,32 @@ pub mod bordrless_launch {
         args: PoolHookArgs,
     ) -> Result<HookReturn> {
         hooks::process_after_swap(ctx, args)
+    }
+
+    /// Creates a coin quoted in 1 to 6 SPL Token or Token-2022 mints (`docs/token-quotes.md`
+    /// §2.2): the mint (no token hook), the whole supply to the launch, the `Launch` and its
+    /// `Legs`. The remaining accounts are the quote mints, in leg order. Each leg then opens with
+    /// `open_leg`.
+    pub fn create_token_launch<'info>(
+        ctx: Context<'info, CreateTokenLaunch<'info>>,
+        args: CreateTokenLaunchArgs,
+    ) -> Result<()> {
+        token_launch::process_create_token_launch(ctx, args)
+    }
+
+    /// Anyone: opens leg `index` of a launch quoted in tokens: its creator-fee account, its pool
+    /// on the DEX (this program as the hook, the leg's share deposited) and the pool's registry.
+    /// Trading starts once every leg is open.
+    pub fn open_leg<'info>(ctx: Context<'info, OpenLeg<'info>>, index: u8) -> Result<()> {
+        token_launch::process_open_leg(ctx, index)
+    }
+
+    /// Anyone: pays leg `index`'s creator fees to the creator's associated token account of the
+    /// leg's quote (created if needed).
+    pub fn claim_creator_fees_token<'info>(
+        ctx: Context<'info, ClaimCreatorFeesToken<'info>>,
+        index: u8,
+    ) -> Result<()> {
+        token_launch::process_claim_creator_fees_token(ctx, index)
     }
 }

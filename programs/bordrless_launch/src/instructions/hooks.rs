@@ -22,6 +22,10 @@
 //! its cuts of that input and ends its answer with it; the DEX uses that much, sells the last token
 //! and leaves the rest of the input with the trader, and `graduate` can follow in the same
 //! transaction. A buy short of the end is unchanged.
+//!
+//! A launch quoted in tokens (`docs/token-quotes.md` §2.2) answers on each of its leg pools with
+//! its creator fee alone, on the quote side, into the leg's fee account ([`leg_answer`]), and
+//! refuses every trade until all its legs are open.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::Instruction;
@@ -65,7 +69,9 @@ pub fn process_before_initialize(
 }
 
 /// Accounts of `before_swap` and `after_swap`: the prefix, then the registry's extras at 5 to 8:
-/// the launch, its quote holding, the holder vault and the kit config.
+/// the launch, its quote holding, the holder vault and the kit config. A leg pool of a launch
+/// quoted in tokens (`docs/token-quotes.md` §2.2) passes at 6 the leg's fee account and at 7 the
+/// launch's `Legs` instead, both checked in the handler ([`leg_answer`]).
 #[derive(Accounts)]
 pub struct HookCallback<'info> {
     /// CHECK: the DEX's signer for this program (address- and signer-checked).
@@ -79,21 +85,29 @@ pub struct HookCallback<'info> {
     pub quote_mint: UncheckedAccount<'info>,
     /// CHECK: the trader.
     pub actor: UncheckedAccount<'info>,
-    /// The launch of the base mint. Only `create_launch` creates a `Launch`, at
-    /// `["launch", mint]` with that mint, so the owner, the discriminator and the mint bind it
-    /// without a derivation.
+    /// The launch of the base mint. Only `create_launch` (and `create_token_launch`) creates a
+    /// `Launch`, at `["launch", mint]` with that mint, so the owner, the discriminator and the mint
+    /// bind it without a derivation. A launch quoted in tokens has one pool per leg: the handler
+    /// finds the pool among its legs.
     #[account(
         mut,
         constraint = launch.mint == base_mint.key() @ LaunchError::WrongPool,
-        constraint = launch.pool == pool.key() @ LaunchError::WrongPool
+        constraint = launch.is_token_quoted() || launch.pool == pool.key() @ LaunchError::WrongPool
     )]
     pub launch: Box<Account<'info, Launch>>,
-    /// CHECK: the launch's quote holding (address-checked); receives creator fees.
-    #[account(mut, address = launch.quote_holding @ LaunchError::WrongHolding)]
+    /// CHECK: the launch's quote holding (address-checked); receives creator fees. For a launch
+    /// quoted in tokens: the leg's fee account (checked in the handler).
+    #[account(
+        mut,
+        constraint = launch.is_token_quoted() || launch_quote.key() == launch.quote_holding @ LaunchError::WrongHolding
+    )]
     pub launch_quote: UncheckedAccount<'info>,
     /// CHECK: the holder vault (address-checked); receives holder fees (the DEX checks it is a
-    /// writable holding of the quote before paying it).
-    #[account(address = launch.holder_vault @ LaunchError::WrongHolderVault)]
+    /// writable holding of the quote before paying it). For a launch quoted in tokens: its `Legs`
+    /// (writable; checked in the handler).
+    #[account(
+        constraint = launch.is_token_quoted() || holder_vault.key() == launch.holder_vault @ LaunchError::WrongHolderVault
+    )]
     pub holder_vault: UncheckedAccount<'info>,
     /// CHECK: the kit config (address-checked); read, through the kit crate, only when holder
     /// rewards are on.
@@ -303,6 +317,77 @@ fn share_bps_of(pool: &AccountInfo) -> Result<u16> {
     })
 }
 
+/// The answer on a leg pool of a launch quoted in tokens (`docs/token-quotes.md` §2.2), in
+/// `before_swap` (`before`) or `after_swap`: the pool is one of the launch's legs (its `Legs`, at
+/// index 7, names it with this quote mint and its fee account at index 6); every leg must be open;
+/// the creator fee alone is taken, from the quote side (a buy's input before, a sell's output
+/// after) into the leg's fee account, and counted on the leg. No LP fee override (the leg's pool
+/// keeps its own), no holder fee, no burn, no sniper window, no creator first-buy rule.
+fn leg_answer(
+    ctx: &Context<HookCallback>,
+    args: &PoolHookArgs,
+    before: bool,
+) -> Result<HookReturn> {
+    let a = &ctx.accounts;
+    require_keys_eq!(args.pool, a.pool.key(), LaunchError::WrongPool);
+    let legs_info = a.holder_vault.to_account_info();
+    require!(
+        *legs_info.owner == crate::ID && legs_info.is_writable,
+        LaunchError::LegsAccountInvalid
+    );
+    // The leg's offset in the `Legs` account, read in place (no full decode on every trade).
+    let at = {
+        use anchor_lang::Discriminator;
+        let data = legs_info.try_borrow_data()?;
+        require!(
+            data.len() >= Legs::LEN && &data[..8] == Legs::DISCRIMINATOR,
+            LaunchError::LegsAccountInvalid
+        );
+        let key = |at: usize| Pubkey::new_from_array(data[at..at + 32].try_into().expect("32"));
+        require_keys_eq!(
+            key(Legs::MINT_OFFSET),
+            a.launch.mint,
+            LaunchError::LegsAccountInvalid
+        );
+        let count = usize::from(data[Legs::COUNT_OFFSET]).min(MAX_LEGS);
+        require!(
+            data[Legs::OPENED_OFFSET] == data[Legs::COUNT_OFFSET],
+            LaunchError::LegsNotOpen
+        );
+        let at = (0..count)
+            .map(|i| Legs::LEGS_OFFSET + i * Legs::LEG_LEN)
+            .find(|at| key(*at) == a.quote_mint.key() && key(at + Legs::LEG_POOL) == args.pool)
+            .ok_or(LaunchError::WrongPool)?;
+        require_keys_eq!(
+            key(at + Legs::LEG_FEE_ACCOUNT),
+            a.launch_quote.key(),
+            LaunchError::WrongLegAccount
+        );
+        at
+    };
+    let buy = args.direction == 1;
+    let rates = LaunchRules::NONE.fee_rates(a.launch.creator_fee_bps);
+    let cut = if before {
+        launch_before_swap(buy, args.amount_in, &rates, 0, 0)
+    } else {
+        launch_after_swap(buy, args.amount_out, &rates, 0, 0)
+    };
+    let mut ret = HookReturn::default();
+    if cut.creator_fee > 0 {
+        ret.deltas.push(Delta {
+            amount: cut.creator_fee,
+            account: LEG_FEES_INDEX,
+        });
+        // A running total for display (the claim pays the fee account's balance): saturating.
+        let mut data = legs_info.try_borrow_mut_data()?;
+        let field = at + Legs::LEG_ACCRUED;
+        let accrued = u64::from_le_bytes(data[field..field + 8].try_into().expect("8"));
+        data[field..field + 8]
+            .copy_from_slice(&accrued.saturating_add(cut.creator_fee).to_le_bytes());
+    }
+    Ok(ret)
+}
+
 /// `before_swap`: the LP fee (the sniper schedule; the creator's own first buy into its own
 /// wallet inside the window pays the normal fee, once), then the cut from the input; a buy past
 /// the end of the curve is filled (the module doc), its cuts of the part used, and the answer
@@ -311,6 +396,11 @@ pub fn process_before_swap<'info>(
     ctx: Context<'info, HookCallback<'info>>,
     args: PoolHookArgs,
 ) -> Result<()> {
+    if ctx.accounts.launch.is_token_quoted() {
+        let ret = leg_answer(&ctx, &args, true)?;
+        set_answer(&ret, None);
+        return Ok(());
+    }
     require_keys_eq!(args.pool, ctx.accounts.launch.pool, LaunchError::WrongPool);
     let now = Clock::get()?.unix_timestamp;
     let buy = args.direction == 1;
@@ -411,6 +501,9 @@ pub fn process_after_swap<'info>(
     ctx: Context<'info, HookCallback<'info>>,
     args: PoolHookArgs,
 ) -> Result<HookReturn> {
+    if ctx.accounts.launch.is_token_quoted() {
+        return leg_answer(&ctx, &args, false);
+    }
     require_keys_eq!(args.pool, ctx.accounts.launch.pool, LaunchError::WrongPool);
     let buy = args.direction == 1;
     let rates = {

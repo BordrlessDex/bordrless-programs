@@ -72,6 +72,15 @@ pub const NATIVE_FLAG_OFFSET: usize = 0;
 pub const BUFFER_OFFSET: usize = 1;
 /// `Pool.reserved[BUFFER_TARGET_OFFSET..+8]` (u64 LE): the buffer `rebalance` moves toward.
 pub const BUFFER_TARGET_OFFSET: usize = 9;
+/// `Pool.reserved[NATIVE_FLAG_OFFSET]` of a pool quoted in a real SPL Token or Token-2022 mint (quote
+/// kind 2, `crate::spl`, `docs/token-quotes.md` §2.1): its quote is that mint, held in the pool's
+/// associated token account. 0 is a Bordrless-standard quote, 1 native SOL.
+pub const QUOTE_KIND_SPL: u8 = 2;
+/// `Pool.reserved[SPL_PROGRAM_OFFSET]` of a kind-2 pool: its quote mint's program,
+/// `crate::spl::PROGRAM_SPL_TOKEN` (0) or `crate::spl::PROGRAM_TOKEN_2022` (1).
+pub const SPL_PROGRAM_OFFSET: usize = 17;
+/// `Pool.reserved[SPL_DECIMALS_OFFSET]` of a kind-2 pool: its quote mint's decimals.
+pub const SPL_DECIMALS_OFFSET: usize = 18;
 
 #[cfg(test)]
 mod bridge_tests {

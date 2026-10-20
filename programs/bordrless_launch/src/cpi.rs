@@ -252,6 +252,59 @@ pub fn dex_create_pool(
     }
 }
 
+/// The keys of a leg pool's `create_spl_pool` (`docs/token-quotes.md` §2.2).
+pub struct CreateSplPoolKeys {
+    /// Pays the rent (whoever opens the leg).
+    pub payer: Pubkey,
+    /// Deposits the leg's share (the launch).
+    pub authority: Pubkey,
+    /// The DEX config's treasury.
+    pub treasury: Pubkey,
+    /// The coin.
+    pub base_mint: Pubkey,
+    /// The leg's quote mint.
+    pub quote_mint: Pubkey,
+    /// The pool PDA.
+    pub pool: Pubkey,
+    /// Its base vault.
+    pub base_vault: Pubkey,
+    /// Its quote vault (its associated token account of the quote).
+    pub quote_vault: Pubkey,
+    /// The launch's holding of the coin (the deposit).
+    pub authority_base: Pubkey,
+    /// The quote mint's program.
+    pub quote_program: Pubkey,
+}
+
+/// DEX `create_spl_pool` with this program as the pool's hook and its hook authority signing. The
+/// coin has no token hook: no remaining accounts.
+pub fn dex_create_spl_pool(keys: &CreateSplPoolKeys, args: CreatePoolArgs) -> Instruction {
+    Instruction {
+        program_id: bordrless_swap::ID,
+        accounts: vec![
+            AccountMeta::new(keys.payer, true),
+            AccountMeta::new_readonly(keys.authority, true),
+            rw(DEX_CONFIG),
+            rw(keys.treasury),
+            ro(keys.base_mint),
+            ro(keys.quote_mint),
+            rw(keys.pool),
+            rw(keys.base_vault),
+            rw(keys.quote_vault),
+            rw(keys.authority_base),
+            AccountMeta::new_readonly(LAUNCH_HOOK_AUTHORITY, true),
+            ro(bordrless_token::ID),
+            ro(TOKEN_EVENT_AUTHORITY),
+            ro(keys.quote_program),
+            ro(bordrless_swap::spl::ATA_PROGRAM_ID),
+            ro(system_program::ID),
+            ro(DEX_EVENT_AUTHORITY),
+            ro(bordrless_swap::ID),
+        ],
+        data: bordrless_swap::instruction::CreateSplPool { args }.data(),
+    }
+}
+
 /// DEX `finalize_curve`, signed by this program's hook authority.
 pub fn dex_finalize_curve(
     pool: Pubkey,

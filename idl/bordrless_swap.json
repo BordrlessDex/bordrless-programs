@@ -53,6 +53,9 @@
         },
         {
           "name": "pool",
+          "docs": [
+            "A pool quoted in an SPL token never takes or returns liquidity."
+          ],
           "writable": true
         },
         {
@@ -261,6 +264,9 @@
         },
         {
           "name": "pool",
+          "docs": [
+            "A pool quoted in an SPL token pays through `collect_protocol_fees_spl`."
+          ],
           "writable": true
         },
         {
@@ -376,6 +382,91 @@
         },
         {
           "name": "token_event_authority"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "collect_protocol_fees_spl",
+      "docs": [
+        "Anyone: moves the accrued protocol fees of a pool quoted in an SPL token to the fee",
+        "collector's associated token account of the quote mint (created if needed, the payer paying",
+        "its rent). Nothing else can receive them."
+      ],
+      "discriminator": [
+        38,
+        175,
+        52,
+        190,
+        76,
+        40,
+        115,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Whoever sends it; pays the collector's token account's rent when it is created."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "fee_collector"
+        },
+        {
+          "name": "collector_quote",
+          "docs": [
+            "checks its address; created if needed)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
           "name": "system_program",
@@ -754,6 +845,162 @@
       ]
     },
     {
+      "name": "create_spl_pool",
+      "docs": [
+        "A hook creates a curve pool quoted in a real SPL Token or Token-2022 mint (quote kind 2,",
+        "`docs/token-quotes.md` §2.1): base deposited, no quote, the quote mint held to the extension",
+        "policy, its quote vault the pool's associated token account. No LP mint: such a pool never",
+        "finalizes or takes liquidity. The remaining accounts are the base mint's token-hook slice."
+      ],
+      "discriminator": [
+        104,
+        30,
+        199,
+        57,
+        90,
+        50,
+        128,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent (the pool, its two vaults) and the creation fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Owns the base deposit's holding."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint",
+          "docs": [
+            "handler (`crate::spl::check_quote_mint`)."
+          ]
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_mint"
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              },
+              {
+                "kind": "arg",
+                "path": "args.lp_fee_bps"
+              },
+              {
+                "kind": "arg",
+                "path": "args.hook_program"
+              }
+            ]
+          }
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "docs": [
+            "checks its address)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "authority_base",
+          "writable": true
+        },
+        {
+          "name": "hook_caller",
+          "docs": [
+            "The hook program's own hook authority (`[\"hook-authority\"]` under `args.hook_program`)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreatePoolArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "finalize_curve",
       "docs": [
         "The pool's hook turns a curve pool into an ordinary one: reserves synced to the vaults, no",
@@ -779,6 +1026,9 @@
         },
         {
           "name": "pool",
+          "docs": [
+            "A pool quoted in an SPL token stays a curve for ever (it has no LP mint)."
+          ],
           "writable": true
         },
         {
@@ -1115,6 +1365,9 @@
         },
         {
           "name": "pool",
+          "docs": [
+            "A pool quoted in an SPL token never takes or returns liquidity."
+          ],
           "writable": true
         },
         {
@@ -1472,6 +1725,9 @@
         },
         {
           "name": "pool",
+          "docs": [
+            "A pool quoted in an SPL token trades through `swap_spl`."
+          ],
           "writable": true
         },
         {
@@ -1515,6 +1771,113 @@
         },
         {
           "name": "token_event_authority"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "SwapArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "swap_spl",
+      "docs": [
+        "A swap on a pool quoted in an SPL token: as `swap`, the quote moving by `transfer_checked`",
+        "through its program (the trader signs a buy, the pool a sell) and the quote-side cuts paid",
+        "to token accounts of the quote mint."
+      ],
+      "discriminator": [
+        23,
+        94,
+        247,
+        16,
+        178,
+        159,
+        154,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "trader",
+          "docs": [
+            "The trader: owner (or delegate) of the input account."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "trader_base",
+          "docs": [
+            "(checked by the token program)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "trader_quote",
+          "writable": true
+        },
+        {
+          "name": "hook_program",
+          "optional": true
+        },
+        {
+          "name": "hook_signer",
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "token_event_authority"
+        },
+        {
+          "name": "quote_token_program"
         },
         {
           "name": "event_authority"
@@ -1783,6 +2146,19 @@
         86,
         99,
         191
+      ]
+    },
+    {
+      "name": "SplPoolCreated",
+      "discriminator": [
+        245,
+        216,
+        144,
+        179,
+        131,
+        66,
+        109,
+        139
       ]
     },
     {
@@ -2072,6 +2448,86 @@
       "code": 6051,
       "name": "LaunchStillNative",
       "msg": "revert the pool's launch to bridged first (pass the launch)"
+    },
+    {
+      "code": 6052,
+      "name": "SplPool",
+      "msg": "the pool is quoted in an SPL token: it trades through swap_spl, its fees go through collect_protocol_fees_spl, and it never takes liquidity or finalizes"
+    },
+    {
+      "code": 6053,
+      "name": "NotSplPool",
+      "msg": "the pool is not quoted in an SPL token"
+    },
+    {
+      "code": 6054,
+      "name": "SplPoolCurveOnly",
+      "msg": "a pool quoted in an SPL token is a curve its hook creates: a virtual quote above 0, no quote deposit, no quote hook accounts"
+    },
+    {
+      "code": 6055,
+      "name": "QuoteMintInvalid",
+      "msg": "the quote is not an initialized SPL Token or Token-2022 mint (or its extensions do not parse)"
+    },
+    {
+      "code": 6056,
+      "name": "QuoteMintTransferFee",
+      "msg": "the quote mint charges a transfer fee"
+    },
+    {
+      "code": 6057,
+      "name": "QuoteMintNonTransferable",
+      "msg": "the quote mint is non-transferable"
+    },
+    {
+      "code": 6058,
+      "name": "QuoteMintFrozenByDefault",
+      "msg": "the quote mint's new accounts start frozen"
+    },
+    {
+      "code": 6059,
+      "name": "QuoteMintTransferHook",
+      "msg": "the quote mint runs a transfer hook program"
+    },
+    {
+      "code": 6060,
+      "name": "QuoteMintPaused",
+      "msg": "the quote mint is paused"
+    },
+    {
+      "code": 6061,
+      "name": "QuoteMintConfidential",
+      "msg": "the quote mint mints and burns confidentially"
+    },
+    {
+      "code": 6062,
+      "name": "QuoteMintUnknownExtension",
+      "msg": "the quote mint has an extension pools do not support"
+    },
+    {
+      "code": 6063,
+      "name": "WrongTokenProgram",
+      "msg": "the token program passed is not the quote mint's"
+    },
+    {
+      "code": 6064,
+      "name": "WrongTokenAccount",
+      "msg": "the account is not a token account of the quote mint (or not the one required)"
+    },
+    {
+      "code": 6065,
+      "name": "SplBurn",
+      "msg": "the quote of a pool quoted in an SPL token cannot be burned"
+    },
+    {
+      "code": 6066,
+      "name": "SplInvariant",
+      "msg": "the pool's quote vault holds less than its books"
+    },
+    {
+      "code": 6067,
+      "name": "LaunchpadPoolNeedsLaunchpad",
+      "msg": "a pool with the launchpad as its hook is created by the launchpad only"
     }
   ],
   "types": [
@@ -3217,6 +3673,39 @@
               "Opaque data for the pool hook."
             ],
             "type": "bytes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SplPoolCreated",
+      "docs": [
+        "A pool quoted in a real SPL Token or Token-2022 mint (quote kind 2, `create_spl_pool`), emitted",
+        "right after its `PoolCreated` (whose `lp_mint` is the default key: such a pool has none): the",
+        "quote mint's program and decimals, and its quote vault (the pool's associated token account)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "quote_vault",
+            "type": "pubkey"
           }
         ]
       }

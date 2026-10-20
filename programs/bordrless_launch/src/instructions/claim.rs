@@ -25,7 +25,7 @@ use crate::state::*;
 pub struct ClaimCreatorFees<'info> {
     /// The creator.
     pub creator: Signer<'info>,
-    #[account(mut, seeds = [LAUNCH_SEED, launch.mint.as_ref()], bump = launch.bump, has_one = creator @ LaunchError::NotCreator)]
+    #[account(mut, seeds = [LAUNCH_SEED, launch.mint.as_ref()], bump = launch.bump, has_one = creator @ LaunchError::NotCreator, constraint = !launch.is_token_quoted() @ LaunchError::TokenQuotedLaunch)]
     pub launch: Account<'info, Launch>,
     /// CHECK: address-checked.
     #[account(address = launch.quote_mint @ LaunchError::WrongHolding)]

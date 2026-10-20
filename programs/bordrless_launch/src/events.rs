@@ -225,3 +225,81 @@ pub struct NativeLaunchesSet {
     pub on: bool,
     pub ts: i64,
 }
+
+/// One leg's terms in `TokenLaunchCreated` (`docs/token-quotes.md` §2.2).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct LegTerms {
+    pub quote_mint: Pubkey,
+    /// SPL Token or Token-2022.
+    pub quote_program: Pubkey,
+    pub decimals: u8,
+    pub virtual_quote: u64,
+    /// The coins the leg's pool opens with.
+    pub share: u64,
+    /// The leg's pool (opened by `open_leg`).
+    pub pool: Pubkey,
+    /// The leg's creator-fee token account (created by `open_leg`).
+    pub fee_account: Pubkey,
+}
+
+/// A launch quoted in tokens (`create_token_launch`): its whole supply waits in the launch's
+/// holding until each leg's `open_leg` moves the leg's share into its pool. No `LaunchCreated`.
+#[event]
+pub struct TokenLaunchCreated {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub creator: Pubkey,
+    /// The `Legs` account.
+    pub legs_account: Pubkey,
+    pub name: String,
+    pub symbol: String,
+    pub uri: String,
+    pub supply: u64,
+    pub decimals: u8,
+    pub creator_fee_bps: u16,
+    pub lp_fee_bps: u16,
+    pub launch_fee_lamports: u64,
+    /// In leg order (the order of the quote mints given).
+    pub legs: Vec<LegTerms>,
+    pub slot: u64,
+    pub ts: i64,
+}
+
+/// A leg opened (`open_leg`): its fee account and its pool exist, its share is in the pool.
+/// Trading starts when `opened == count`.
+#[event]
+pub struct LegOpened {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub pool: Pubkey,
+    pub fee_account: Pubkey,
+    pub virtual_quote: u64,
+    pub share: u64,
+    /// Legs open now, this one included.
+    pub opened: u8,
+    pub count: u8,
+    /// Who sent it (paid the rent).
+    pub payer: Pubkey,
+    pub slot: u64,
+    pub ts: i64,
+}
+
+/// A leg's creator fees paid to the creator's associated token account of the leg's quote
+/// (`claim_creator_fees_token`, whoever sent it).
+#[event]
+pub struct LegCreatorFeesClaimed {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub creator: Pubkey,
+    /// The creator's token account that received them.
+    pub destination: Pubkey,
+    pub amount: u64,
+    /// Claimed from this leg so far.
+    pub claimed_total: u64,
+    pub slot: u64,
+    pub ts: i64,
+}

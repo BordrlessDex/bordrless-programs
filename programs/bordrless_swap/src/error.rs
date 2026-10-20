@@ -109,6 +109,39 @@ pub enum SwapError {
     ExcludedPool,
     #[msg("revert the pool's launch to bridged first (pass the launch)")]
     LaunchStillNative,
+    // ---- Quote tokens (docs/token-quotes.md §2.1). Appended, so every code above keeps its number. ----
+    #[msg("the pool is quoted in an SPL token: it trades through swap_spl, its fees go through collect_protocol_fees_spl, and it never takes liquidity or finalizes")]
+    SplPool,
+    #[msg("the pool is not quoted in an SPL token")]
+    NotSplPool,
+    #[msg("a pool quoted in an SPL token is a curve its hook creates: a virtual quote above 0, no quote deposit, no quote hook accounts")]
+    SplPoolCurveOnly,
+    #[msg("the quote is not an initialized SPL Token or Token-2022 mint (or its extensions do not parse)")]
+    QuoteMintInvalid,
+    #[msg("the quote mint charges a transfer fee")]
+    QuoteMintTransferFee,
+    #[msg("the quote mint is non-transferable")]
+    QuoteMintNonTransferable,
+    #[msg("the quote mint's new accounts start frozen")]
+    QuoteMintFrozenByDefault,
+    #[msg("the quote mint runs a transfer hook program")]
+    QuoteMintTransferHook,
+    #[msg("the quote mint is paused")]
+    QuoteMintPaused,
+    #[msg("the quote mint mints and burns confidentially")]
+    QuoteMintConfidential,
+    #[msg("the quote mint has an extension pools do not support")]
+    QuoteMintUnknownExtension,
+    #[msg("the token program passed is not the quote mint's")]
+    WrongTokenProgram,
+    #[msg("the account is not a token account of the quote mint (or not the one required)")]
+    WrongTokenAccount,
+    #[msg("the quote of a pool quoted in an SPL token cannot be burned")]
+    SplBurn,
+    #[msg("the pool's quote vault holds less than its books")]
+    SplInvariant,
+    #[msg("a pool with the launchpad as its hook is created by the launchpad only")]
+    LaunchpadPoolNeedsLaunchpad,
 }
 
 /// The DEX's error for a swap the fees or the curve refuse.

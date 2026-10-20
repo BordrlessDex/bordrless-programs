@@ -25,8 +25,13 @@ use crate::state::*;
 pub struct Graduate<'info> {
     /// Whoever cranks it; pays only the network fee.
     pub cranker: Signer<'info>,
-    /// The launch (only `create_launch` creates one, at its PDA).
-    #[account(mut, constraint = launch.status == STATUS_CURVE @ LaunchError::AlreadyGraduated)]
+    /// The launch (only `create_launch` creates one, at its PDA). A launch quoted in tokens never
+    /// graduates.
+    #[account(
+        mut,
+        constraint = launch.status == STATUS_CURVE @ LaunchError::AlreadyGraduated,
+        constraint = !launch.is_token_quoted() @ LaunchError::TokenQuotedLaunch
+    )]
     pub launch: Box<Account<'info, Launch>>,
     /// CHECK: address-checked.
     #[account(mut, address = launch.mint @ LaunchError::WrongHolding)]

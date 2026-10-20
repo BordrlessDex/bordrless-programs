@@ -176,6 +176,37 @@ pub const COMPANION_NATIVE_OFFSET: usize = 308;
 pub const HOOK_VAULT_SEED: &[u8] = b"vault";
 pub const HOOK_VAULT_NATIVE_OFFSET: usize = 638;
 
+// ---- Quote tokens (`docs/token-quotes.md` §2.2): a coin launched against 1 to 6 real SPL Token
+// or Token-2022 mints, one DEX curve pool (a "leg") per quote. ----
+
+/// `["legs", mint]`: the `Legs` of a launch quoted in tokens.
+pub const LEGS_SEED: &[u8] = b"legs";
+/// `["leg-fees", mint, quote_mint]`: a leg's creator-fee token account, owned by the launch.
+pub const LEG_FEES_SEED: &[u8] = b"leg-fees";
+/// The most quote tokens (legs) one coin launches against.
+pub const MAX_LEGS: usize = 6;
+/// The least virtual quote a leg opens with, raw units of its token (below it the opening price
+/// can't be told apart from zero). `packages/shared/src/quotes.ts` `MIN_LEG_VIRTUAL_QUOTE`.
+pub const MIN_LEG_VIRTUAL_QUOTE: u64 = 1_000;
+/// `Launch.reserved[QUOTE_KIND_OFFSET]`: [`QUOTE_KIND_TOKENS`] for a launch quoted in tokens; 0
+/// for every other launch (the native flag is `reserved[17]`).
+pub const QUOTE_KIND_OFFSET: usize = 18;
+/// See [`QUOTE_KIND_OFFSET`].
+pub const QUOTE_KIND_TOKENS: u8 = 2;
+/// The callbacks a leg pool subscribes to: a launch pool's, without overriding the LP fee (no
+/// sniper window: the pool's own LP fee applies).
+pub const LEG_HOOK_FLAGS: u16 = pool_flags::BEFORE_INITIALIZE
+    | pool_flags::BEFORE_SWAP
+    | pool_flags::AFTER_SWAP
+    | pool_flags::BEFORE_SWAP_RETURNS_DELTA
+    | pool_flags::AFTER_SWAP_RETURNS_DELTA;
+/// Index, in a leg pool's callback account list, of the leg's fee account (where a launch pool
+/// has the launch's quote holding): creator fees go there, in the leg's token.
+pub const LEG_FEES_INDEX: u8 = 6;
+/// Index, in a leg pool's callback account list, of the launch's `Legs` (where a launch pool has
+/// the holder vault), writable: the creator fee is counted there.
+pub const LEGS_INDEX: u8 = 7;
+
 /// Whether `creator` is the companion creator address of `mint` (`PDA(["creator", mint],
 /// COMPANION_ID)`): a companion coin. `revert_launch_to_bridged` uses it to know a launch has a
 /// companion that must revert first.

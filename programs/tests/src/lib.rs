@@ -13,6 +13,7 @@ pub mod kit;
 pub mod launch;
 pub mod native;
 pub mod orao;
+pub mod quotes;
 pub mod spl;
 pub mod timelock;
 pub mod vault;

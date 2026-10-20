@@ -625,6 +625,169 @@ pub fn collect_protocol_fees(
     }
 }
 
+// ---- Quote tokens (`docs/token-quotes.md` §2.1): pools quoted in an SPL Token or Token-2022
+// mint. ----
+
+/// The quote vault of a pool quoted in an SPL token: the pool's associated token account of the
+/// quote mint under its program.
+pub fn spl_vault_address(pool: &Pubkey, quote_mint: &Pubkey, quote_program: &Pubkey) -> Pubkey {
+    crate::spl::associated_token_address(pool, quote_mint, quote_program)
+}
+
+/// The keys of `create_spl_pool` that the caller chooses.
+pub struct CreateSplPoolKeys {
+    /// Pays the rent and the creation fee.
+    pub payer: Pubkey,
+    /// Owns the base deposit's holding.
+    pub authority: Pubkey,
+    /// The config's treasury.
+    pub treasury: Pubkey,
+    /// Base mint (a Bordrless mint).
+    pub base_mint: Pubkey,
+    /// Quote mint (SPL Token or Token-2022).
+    pub quote_mint: Pubkey,
+    /// The quote mint's program.
+    pub quote_program: Pubkey,
+    /// The hook program's hook authority (`["hook-authority"]` under `args.hook_program`), which
+    /// signs.
+    pub hook_caller: Pubkey,
+}
+
+/// `create_spl_pool`. `base_slice` is the base mint's token-hook slice ([`token_hook_slice`];
+/// `args.base_hook_accounts` must be its length), the only remaining accounts.
+pub fn create_spl_pool(
+    keys: &CreateSplPoolKeys,
+    args: CreatePoolArgs,
+    base_slice: Vec<AccountMeta>,
+) -> Instruction {
+    let hook_program = if args.hook_program == Pubkey::default() {
+        None
+    } else {
+        Some(args.hook_program)
+    };
+    let pool = pool_address(
+        &keys.base_mint,
+        &keys.quote_mint,
+        args.lp_fee_bps,
+        hook_program,
+    );
+    let mut accounts = vec![
+        AccountMeta::new(keys.payer, true),
+        AccountMeta::new_readonly(keys.authority, true),
+        AccountMeta::new(config_address(), false),
+        AccountMeta::new(keys.treasury, false),
+        AccountMeta::new_readonly(keys.base_mint, false),
+        AccountMeta::new_readonly(keys.quote_mint, false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new(vault_address(&pool, &keys.base_mint), false),
+        AccountMeta::new(
+            spl_vault_address(&pool, &keys.quote_mint, &keys.quote_program),
+            false,
+        ),
+        AccountMeta::new(
+            token_client::holding_address(&keys.base_mint, &keys.authority),
+            false,
+        ),
+        AccountMeta::new_readonly(keys.hook_caller, true),
+    ];
+    accounts.extend(token_fixed());
+    accounts.extend([
+        AccountMeta::new_readonly(keys.quote_program, false),
+        AccountMeta::new_readonly(crate::spl::ATA_PROGRAM_ID, false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    let mut accounts = with_events(accounts);
+    accounts.extend(base_slice);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateSplPool { args }.data(),
+    }
+}
+
+/// The fixed keys of a `swap_spl`.
+pub struct SwapSplKeys {
+    /// The trader.
+    pub trader: Pubkey,
+    /// The pool (quoted in an SPL token).
+    pub pool: Pubkey,
+    /// Base mint.
+    pub base_mint: Pubkey,
+    /// Quote mint.
+    pub quote_mint: Pubkey,
+    /// The quote mint's program.
+    pub quote_program: Pubkey,
+    /// The trader's base holding (or, on a buy, any holding of the base mint to deliver to).
+    pub trader_base: Pubkey,
+    /// A token account of the quote mint: on a buy the trader's (it pays), on a sell any to
+    /// deliver to.
+    pub trader_quote: Pubkey,
+    /// The pool's hook program.
+    pub hook_program: Option<Pubkey>,
+    /// Pass the base mint writable (a hook may burn base).
+    pub base_mint_writable: bool,
+}
+
+/// `swap_spl`. `extras` as for [`swap`] (the quote side's token-hook slice is empty).
+pub fn swap_spl(keys: &SwapSplKeys, args: SwapArgs, extras: Vec<AccountMeta>) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(keys.trader, true),
+        AccountMeta::new_readonly(config_address(), false),
+        AccountMeta::new(keys.pool, false),
+        mint_meta(keys.base_mint, keys.base_mint_writable),
+        AccountMeta::new_readonly(keys.quote_mint, false),
+        AccountMeta::new(vault_address(&keys.pool, &keys.base_mint), false),
+        AccountMeta::new(
+            spl_vault_address(&keys.pool, &keys.quote_mint, &keys.quote_program),
+            false,
+        ),
+        AccountMeta::new(keys.trader_base, false),
+        AccountMeta::new(keys.trader_quote, false),
+        optional(keys.hook_program),
+        hook_signer_meta(keys.hook_program),
+    ];
+    accounts.extend(token_fixed());
+    accounts.push(AccountMeta::new_readonly(keys.quote_program, false));
+    let mut accounts = with_events(accounts);
+    accounts.extend(extras);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SwapSpl { args }.data(),
+    }
+}
+
+/// `collect_protocol_fees_spl`: anyone (`payer`, which pays the collector's token account's rent
+/// if it must be created) moves a pool's protocol fees to `fee_collector`'s (the config's)
+/// associated token account of the quote mint.
+pub fn collect_protocol_fees_spl(
+    payer: Pubkey,
+    pool: Pubkey,
+    quote_mint: Pubkey,
+    quote_program: Pubkey,
+    fee_collector: Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(config_address(), false),
+            AccountMeta::new(pool, false),
+            AccountMeta::new_readonly(quote_mint, false),
+            AccountMeta::new(spl_vault_address(&pool, &quote_mint, &quote_program), false),
+            AccountMeta::new_readonly(fee_collector, false),
+            AccountMeta::new(
+                crate::spl::associated_token_address(&fee_collector, &quote_mint, &quote_program),
+                false,
+            ),
+            AccountMeta::new_readonly(quote_program, false),
+            AccountMeta::new_readonly(crate::spl::ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ]),
+        data: crate::instruction::CollectProtocolFeesSpl {}.data(),
+    }
+}
+
 /// Reads a pool from its account data.
 pub fn read_pool(info: &AccountInfo) -> Result<Pool> {
     require_keys_eq!(

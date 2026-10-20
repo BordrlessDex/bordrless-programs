@@ -14,8 +14,13 @@
 //! so a token whose own hook takes a cut still prices correctly, and `min_amount_out` is checked
 //! against what the recipient's holding actually gained.
 //!
+//! A pool's quote is a Bordrless mint, native SOL ([`native`]), or a real SPL Token or Token-2022
+//! mint ([`spl`], quote kind 2: a curve its hook creates with `create_spl_pool`, traded with
+//! `swap_spl`, its fees collected with `collect_protocol_fees_spl`; `docs/token-quotes.md`).
+//!
 //! Layout: [`state`], [`instructions`] (config, pool, liquidity, swap), [`hooks`] (pool hook CPIs
-//! and delta transfers), [`token`] (token standard CPIs), [`events`], [`error`], [`client`].
+//! and delta transfers), [`token`] (token standard CPIs), [`native`], [`spl`], [`events`],
+//! [`error`], [`client`].
 
 #![allow(unexpected_cfgs)]
 
@@ -28,6 +33,7 @@ pub mod events;
 pub mod hooks;
 pub mod instructions;
 pub mod native;
+pub mod spl;
 pub mod state;
 pub mod token;
 
@@ -162,5 +168,30 @@ pub mod bordrless_swap {
     /// Admin: sets a native pool's buffer target.
     pub fn set_buffer_target(ctx: Context<QuoteForm>, buffer_target: u64) -> Result<()> {
         pool::process_set_buffer_target(ctx, buffer_target)
+    }
+
+    /// A hook creates a curve pool quoted in a real SPL Token or Token-2022 mint (quote kind 2,
+    /// `docs/token-quotes.md` §2.1): base deposited, no quote, the quote mint held to the extension
+    /// policy, its quote vault the pool's associated token account. No LP mint: such a pool never
+    /// finalizes or takes liquidity. The remaining accounts are the base mint's token-hook slice.
+    pub fn create_spl_pool<'info>(
+        ctx: Context<'info, CreateSplPool<'info>>,
+        args: CreatePoolArgs,
+    ) -> Result<()> {
+        pool::process_create_spl_pool(ctx, args)
+    }
+
+    /// A swap on a pool quoted in an SPL token: as `swap`, the quote moving by `transfer_checked`
+    /// through its program (the trader signs a buy, the pool a sell) and the quote-side cuts paid
+    /// to token accounts of the quote mint.
+    pub fn swap_spl<'info>(ctx: Context<'info, SwapSpl<'info>>, args: SwapArgs) -> Result<()> {
+        swap::process_swap_spl(ctx, args)
+    }
+
+    /// Anyone: moves the accrued protocol fees of a pool quoted in an SPL token to the fee
+    /// collector's associated token account of the quote mint (created if needed, the payer paying
+    /// its rent). Nothing else can receive them.
+    pub fn collect_protocol_fees_spl(ctx: Context<CollectProtocolFeesSpl>) -> Result<()> {
+        pool::process_collect_protocol_fees_spl(ctx)
     }
 }

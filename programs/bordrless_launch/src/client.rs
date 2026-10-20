@@ -13,7 +13,7 @@ use bordrless_token::client as token_client;
 use crate::constants::*;
 use crate::instructions::launch_config::programdata_address;
 use crate::instructions::{ConfigArgs, CreateConfigArgs, CreateLaunchArgs};
-use crate::state::{Launch, LaunchConfig, LaunchRules, PartnerFee, QuoteCut};
+use crate::state::{Launch, LaunchConfig, LaunchRules, Legs, PartnerFee, QuoteCut};
 
 /// This program's `["hook-authority"]` PDA.
 pub fn hook_signer() -> Pubkey {
@@ -1078,6 +1078,233 @@ pub fn revert_launch_to_bridged(
     }
 }
 
+// ---- Quote tokens (`docs/token-quotes.md` §2.2): a coin quoted in 1 to 6 SPL Token or
+// Token-2022 mints, one leg pool each. ----
+
+/// The `Legs` of a launch quoted in tokens: `["legs", mint]`.
+pub fn legs_address(mint: &Pubkey) -> Pubkey {
+    Legs::address(mint).0
+}
+
+/// A leg's creator-fee token account: `["leg-fees", mint, quote_mint]`.
+pub fn leg_fees_address(mint: &Pubkey, quote_mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[LEG_FEES_SEED, mint.as_ref(), quote_mint.as_ref()],
+        &crate::ID,
+    )
+    .0
+}
+
+/// What a client needs of one leg to open it, trade it and claim it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LegKeys {
+    /// The coin.
+    pub mint: Pubkey,
+    /// The leg's quote mint.
+    pub quote_mint: Pubkey,
+    /// Its program (SPL Token or Token-2022).
+    pub quote_program: Pubkey,
+    /// The launch's LP fee (`Launch.lp_fee_bps`, part of the pool's address).
+    pub lp_fee_bps: u16,
+}
+
+impl LegKeys {
+    /// The leg's pool: `["pool", mint, quote_mint, lp_fee_bps, LAUNCH_ID]` under the DEX.
+    pub fn pool(&self) -> Pubkey {
+        pool_address(&self.mint, &self.quote_mint, self.lp_fee_bps)
+    }
+
+    /// The pool's quote vault: its associated token account of the quote.
+    pub fn quote_vault(&self) -> Pubkey {
+        swap_client::spl_vault_address(&self.pool(), &self.quote_mint, &self.quote_program)
+    }
+
+    /// `owner`'s associated token account of the quote.
+    pub fn quote_account(&self, owner: &Pubkey) -> Pubkey {
+        bordrless_swap::spl::associated_token_address(owner, &self.quote_mint, &self.quote_program)
+    }
+
+    /// The leg's creator-fee account.
+    pub fn fee_account(&self) -> Pubkey {
+        leg_fees_address(&self.mint, &self.quote_mint)
+    }
+}
+
+/// The extra accounts of a leg pool's callbacks, as its registry resolves them (§2.4): the launch
+/// (w), the leg's fee account (w), the launch's `Legs` (w) and the kit config (r).
+pub fn leg_hook_extras(mint: &Pubkey, quote_mint: &Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new(launch_address(mint), false),
+        AccountMeta::new(leg_fees_address(mint, quote_mint), false),
+        AccountMeta::new(legs_address(mint), false),
+        AccountMeta::new_readonly(kit_config_address(mint), false),
+    ]
+}
+
+/// `create_token_launch`: `mint` a fresh keypair that signs, `treasury` the config's treasury,
+/// `quote_mints` the legs' quote mints in order (the remaining accounts; `args.virtual_quotes` in
+/// the same order).
+pub fn create_token_launch(
+    creator: Pubkey,
+    mint: Pubkey,
+    treasury: Pubkey,
+    args: crate::instructions::CreateTokenLaunchArgs,
+    quote_mints: &[Pubkey],
+) -> Instruction {
+    let launch = launch_address(&mint);
+    let mut accounts = with_events(vec![
+        AccountMeta::new(creator, true),
+        AccountMeta::new(config_address(), false),
+        AccountMeta::new(treasury, false),
+        AccountMeta::new(mint, true),
+        AccountMeta::new(launch, false),
+        AccountMeta::new(legs_address(&mint), false),
+        AccountMeta::new(token_client::holding_address(&mint, &launch), false),
+        AccountMeta::new_readonly(bordrless_token::ID, false),
+        AccountMeta::new_readonly(token_client::event_authority(), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    accounts.extend(
+        quote_mints
+            .iter()
+            .map(|q| AccountMeta::new_readonly(*q, false)),
+    );
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::CreateTokenLaunch { args }.data(),
+    }
+}
+
+/// `open_leg(index)`, `payer` paying the rent; `dex_treasury` the DEX config's treasury.
+pub fn open_leg(payer: Pubkey, dex_treasury: Pubkey, keys: &LegKeys, index: u8) -> Instruction {
+    let launch = launch_address(&keys.mint);
+    let pool = keys.pool();
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(launch, false),
+            AccountMeta::new(legs_address(&keys.mint), false),
+            AccountMeta::new_readonly(keys.mint, false),
+            AccountMeta::new_readonly(keys.quote_mint, false),
+            AccountMeta::new(keys.fee_account(), false),
+            AccountMeta::new(token_client::holding_address(&keys.mint, &launch), false),
+            AccountMeta::new(registry_address(&pool), false),
+            AccountMeta::new(swap_client::config_address(), false),
+            AccountMeta::new(dex_treasury, false),
+            AccountMeta::new(pool, false),
+            AccountMeta::new(swap_client::vault_address(&pool, &keys.mint), false),
+            AccountMeta::new(keys.quote_vault(), false),
+            AccountMeta::new_readonly(hook_signer(), false),
+            AccountMeta::new_readonly(swap_client::event_authority(), false),
+            AccountMeta::new_readonly(bordrless_swap::ID, false),
+            AccountMeta::new_readonly(bordrless_token::ID, false),
+            AccountMeta::new_readonly(token_client::event_authority(), false),
+            AccountMeta::new_readonly(keys.quote_program, false),
+            AccountMeta::new_readonly(bordrless_swap::spl::ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ]),
+        data: crate::instruction::OpenLeg { index }.data(),
+    }
+}
+
+/// `claim_creator_fees_token(index)` of the launch's `creator`, sent by `payer` (anyone).
+pub fn claim_creator_fees_token(
+    payer: Pubkey,
+    creator: Pubkey,
+    keys: &LegKeys,
+    index: u8,
+) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(launch_address(&keys.mint), false),
+            AccountMeta::new(legs_address(&keys.mint), false),
+            AccountMeta::new_readonly(keys.quote_mint, false),
+            AccountMeta::new(keys.fee_account(), false),
+            AccountMeta::new_readonly(creator, false),
+            AccountMeta::new(keys.quote_account(&creator), false),
+            AccountMeta::new_readonly(keys.quote_program, false),
+            AccountMeta::new_readonly(bordrless_swap::spl::ATA_PROGRAM_ID, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ]),
+        data: crate::instruction::ClaimCreatorFeesToken { index }.data(),
+    }
+}
+
+/// A `swap_spl` on a leg pool with the given token accounts: `trader_base` the coin holding
+/// (`trader`'s on a sell, the recipient's on a buy), `trader_quote` the quote token account
+/// (`trader`'s on a buy, the recipient's on a sell). The coin has no token hook; the pool hook gets
+/// [`leg_hook_extras`].
+#[allow(clippy::too_many_arguments)]
+pub fn leg_swap_with(
+    keys: &LegKeys,
+    trader: Pubkey,
+    trader_base: Pubkey,
+    trader_quote: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+) -> Instruction {
+    swap_client::swap_spl(
+        &swap_client::SwapSplKeys {
+            trader,
+            pool: keys.pool(),
+            base_mint: keys.mint,
+            quote_mint: keys.quote_mint,
+            quote_program: keys.quote_program,
+            trader_base,
+            trader_quote,
+            hook_program: Some(crate::ID),
+            base_mint_writable: false,
+        },
+        SwapArgs {
+            direction,
+            amount_in,
+            min_amount_out,
+            in_hook_accounts: 0,
+            out_hook_accounts: 0,
+            hook_data: vec![],
+        },
+        leg_hook_extras(&keys.mint, &keys.quote_mint),
+    )
+}
+
+/// A `swap_spl` on a leg pool by `trader`, delivered to `recipient`: a buy pays from `trader`'s
+/// associated token account of the quote into `recipient`'s holding of the coin; a sell delivers
+/// to `recipient`'s associated token account of the quote.
+pub fn leg_swap(
+    keys: &LegKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+) -> Instruction {
+    let (trader_base, trader_quote) = if direction == 1 {
+        (
+            token_client::holding_address(&keys.mint, &recipient),
+            keys.quote_account(&trader),
+        )
+    } else {
+        (
+            token_client::holding_address(&keys.mint, &trader),
+            keys.quote_account(&recipient),
+        )
+    };
+    leg_swap_with(
+        keys,
+        trader,
+        trader_base,
+        trader_quote,
+        direction,
+        amount_in,
+        min_amount_out,
+    )
+}
+
 /// Reads a launch from its account data.
 pub fn read_launch(info: &AccountInfo) -> Result<Launch> {
     require_keys_eq!(
@@ -1270,6 +1497,102 @@ mod tests {
             kit_config_address(&mint)
         );
         assert!(resolved[2].is_writable && !resolved[3].is_writable);
+    }
+
+    #[test]
+    fn a_leg_registry_resolves_to_the_leg_extras() {
+        use crate::instructions::token_launch::leg_registry_list;
+        use bordrless_hook::pool_flags;
+        let mint = Pubkey::new_unique();
+        let quote = Pubkey::new_unique();
+        let prefix = [
+            DEX_HOOK_AUTHORITY,
+            pool_address(&mint, &quote, 100),
+            mint,
+            quote,
+            Pubkey::new_unique(),
+        ];
+        let resolved = leg_registry_list(kit_config_address(&mint))
+            .resolve(&prefix, &Pubkey::default(), &Pubkey::default())
+            .unwrap();
+        assert_eq!(resolved, leg_hook_extras(&mint, &quote));
+        assert_eq!(resolved[0].pubkey, launch_address(&mint));
+        assert_eq!(
+            resolved[usize::from(LEG_FEES_INDEX) - 5].pubkey,
+            leg_fees_address(&mint, &quote)
+        );
+        assert_eq!(
+            resolved[usize::from(LEGS_INDEX) - 5].pubkey,
+            legs_address(&mint)
+        );
+        assert!(resolved[1].is_writable && resolved[2].is_writable && !resolved[3].is_writable);
+        // The fee account and the `Legs` sit where a launch pool's quote holding and holder vault
+        // do (the callbacks' account struct is shared).
+        assert_eq!(
+            (LEG_FEES_INDEX, LEGS_INDEX),
+            (QUOTE_HOLDING_INDEX, HOLDER_VAULT_INDEX)
+        );
+        // A leg pool runs a launch pool's callbacks but keeps its own LP fee.
+        assert_eq!(
+            LEG_HOOK_FLAGS,
+            LAUNCH_HOOK_FLAGS & !pool_flags::BEFORE_SWAP_OVERRIDES_FEE
+        );
+    }
+
+    #[test]
+    fn the_legs_layout_is_its_offsets() {
+        use crate::state::Leg;
+        let (mint, launch, quote, pool, fees) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let mut legs = Legs {
+            version: 1,
+            bump: 254,
+            mint,
+            launch,
+            count: 3,
+            opened: 2,
+            legs: [Leg::default(); MAX_LEGS],
+            reserved: [0; 64],
+        };
+        legs.legs[1] = Leg {
+            quote_mint: quote,
+            quote_program: 1,
+            decimals: 6,
+            fee_bump: 253,
+            virtual_quote: 7,
+            share: 8,
+            pool,
+            fee_account: fees,
+            creator_fees_accrued: 9,
+            creator_fees_claimed: 10,
+            opened_at: 11,
+        };
+        let mut data = Vec::new();
+        legs.try_serialize(&mut data).unwrap();
+        assert_eq!((data.len(), Legs::LEN, Legs::LEG_LEN), (974, 974, 139));
+        let key = |at: usize| Pubkey::new_from_array(data[at..at + 32].try_into().unwrap());
+        let u64_at = |at: usize| u64::from_le_bytes(data[at..at + 8].try_into().unwrap());
+        assert_eq!(key(Legs::MINT_OFFSET), mint);
+        assert_eq!(key(Legs::MINT_OFFSET + 32), launch);
+        assert_eq!(
+            (data[Legs::COUNT_OFFSET], data[Legs::OPENED_OFFSET]),
+            (3, 2)
+        );
+        let at = Legs::LEGS_OFFSET + Legs::LEG_LEN;
+        assert_eq!(key(at), quote);
+        assert_eq!((data[at + 32], data[at + 33], data[at + 34]), (1, 6, 253));
+        assert_eq!((u64_at(at + 35), u64_at(at + 43)), (7, 8));
+        assert_eq!(key(at + Legs::LEG_POOL), pool);
+        assert_eq!(key(at + Legs::LEG_FEE_ACCOUNT), fees);
+        assert_eq!(u64_at(at + Legs::LEG_ACCRUED), 9);
+        assert_eq!(u64_at(at + Legs::LEG_ACCRUED + 8), 10);
+        assert_eq!(u64_at(at + Legs::LEG_ACCRUED + 16), 11);
+        assert_eq!(Legs::LEGS_OFFSET + MAX_LEGS * Legs::LEG_LEN + 64, Legs::LEN);
     }
 
     #[test]

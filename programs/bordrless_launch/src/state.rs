@@ -539,4 +539,104 @@ impl Launch {
     pub fn set_native(&mut self, native: bool) {
         self.reserved[17] = u8::from(native);
     }
+
+    /// Whether the launch is quoted in tokens (`reserved[18]` is [`QUOTE_KIND_TOKENS`],
+    /// `create_token_launch`, `docs/token-quotes.md` §2.2): its supply sits in 1 to 6 leg pools
+    /// quoted in SPL Token or Token-2022 mints ([`Legs`]); `pool` and `quote_mint` name leg 0. 0 for
+    /// every other launch.
+    pub fn is_token_quoted(&self) -> bool {
+        self.reserved[QUOTE_KIND_OFFSET] == QUOTE_KIND_TOKENS
+    }
+
+    /// Marks the launch quoted in tokens.
+    pub fn set_token_quoted(&mut self) {
+        self.reserved[QUOTE_KIND_OFFSET] = QUOTE_KIND_TOKENS;
+    }
+}
+
+/// One leg of a launch quoted in tokens: a DEX curve pool `["pool", mint, quote_mint, lp_fee_bps,
+/// LAUNCH_ID]` quoted in `quote_mint`, holding `share` of the supply and no quote at its opening,
+/// with no virtual base and `virtual_quote` (its opening price is `virtual_quote / share`).
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct Leg {
+    /// The quote mint (SPL Token or Token-2022).
+    pub quote_mint: Pubkey,
+    /// Its program: 0 SPL Token, 1 Token-2022 (`bordrless_swap::spl`).
+    pub quote_program: u8,
+    /// Its decimals.
+    pub decimals: u8,
+    /// Bump of `fee_account`.
+    pub fee_bump: u8,
+    /// The pool's virtual quote, raw units of the quote.
+    pub virtual_quote: u64,
+    /// The coins the pool opens with.
+    pub share: u64,
+    /// The leg's pool on the DEX.
+    pub pool: Pubkey,
+    /// The leg's creator-fee token account `["leg-fees", mint, quote_mint]` (a token account of the
+    /// quote whose owner is the launch), created by `open_leg`.
+    pub fee_account: Pubkey,
+    /// Creator fees taken on this leg so far, raw units of the quote.
+    pub creator_fees_accrued: u64,
+    /// Creator fees claimed from this leg so far.
+    pub creator_fees_claimed: u64,
+    /// When `open_leg` opened it; 0 until then.
+    pub opened_at: i64,
+}
+
+/// The legs of a launch quoted in tokens, at `["legs", mint]` (`docs/token-quotes.md` §2.2). Made by
+/// `create_token_launch` with every leg's terms, addresses included; `open_leg` opens each; the
+/// pool hook counts each leg's creator fees and refuses trades until `opened == count`.
+#[account]
+#[derive(InitSpace, Debug)]
+pub struct Legs {
+    /// Layout version.
+    pub version: u8,
+    /// Bump.
+    pub bump: u8,
+    /// The coin.
+    pub mint: Pubkey,
+    /// Its launch.
+    pub launch: Pubkey,
+    /// How many legs (1 to [`MAX_LEGS`]); `legs[count..]` are zeros.
+    pub count: u8,
+    /// How many are open.
+    pub opened: u8,
+    /// The legs, in the order the creator gave the quote mints.
+    pub legs: [Leg; MAX_LEGS],
+    /// Reserved.
+    pub reserved: [u8; 64],
+}
+
+impl Legs {
+    /// Account size.
+    pub const LEN: usize = DISCRIMINATOR_LEN + Self::INIT_SPACE;
+    /// Byte offset of `mint` in the account (the discriminator included).
+    pub const MINT_OFFSET: usize = 10;
+    /// Byte offset of `count`.
+    pub const COUNT_OFFSET: usize = 74;
+    /// Byte offset of `opened`.
+    pub const OPENED_OFFSET: usize = 75;
+    /// Byte offset of `legs[0]`.
+    pub const LEGS_OFFSET: usize = 76;
+    /// Bytes of one [`Leg`].
+    pub const LEG_LEN: usize = Leg::INIT_SPACE;
+    /// Offset of `pool` within a [`Leg`].
+    pub const LEG_POOL: usize = 51;
+    /// Offset of `fee_account` within a [`Leg`].
+    pub const LEG_FEE_ACCOUNT: usize = 83;
+    /// Offset of `creator_fees_accrued` within a [`Leg`].
+    pub const LEG_ACCRUED: usize = 115;
+
+    /// The `Legs` address of `mint`.
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[LEGS_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// The legs in use.
+    pub fn in_use(&self) -> &[Leg] {
+        &self.legs[..usize::from(self.count).min(MAX_LEGS)]
+    }
 }

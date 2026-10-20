@@ -137,4 +137,63 @@ pub enum LaunchError {
     CompanionStillNative,
     #[msg("revert the coin's hook vault to bridged first (pass the vault)")]
     VaultStillNative,
+    // ---- Quote tokens (docs/token-quotes.md §2.2). Appended, so every code above keeps its number. ----
+    #[msg("this launch is quoted in tokens: it never graduates, and its creator fees are claimed per leg (claim_creator_fees_token)")]
+    TokenQuotedLaunch,
+    #[msg("this launch is not quoted in tokens")]
+    NotTokenLaunch,
+    #[msg("a launch quoted in tokens has 1 to 6 quote mints (the remaining accounts) and one virtual quote for each")]
+    InvalidLegCount,
+    #[msg("a quote token must be an initialized SPL Token or Token-2022 mint")]
+    QuoteMintInvalid,
+    #[msg("the quote token charges a transfer fee")]
+    QuoteMintTransferFee,
+    #[msg("the quote token is non-transferable")]
+    QuoteMintNonTransferable,
+    #[msg("the quote token's new accounts start frozen")]
+    QuoteMintFrozenByDefault,
+    #[msg("the quote token runs a transfer hook program")]
+    QuoteMintTransferHook,
+    #[msg("the quote token is paused")]
+    QuoteMintPaused,
+    #[msg("the quote token mints and burns confidentially")]
+    QuoteMintConfidential,
+    #[msg("the quote token has an extension pools do not support")]
+    QuoteMintUnknownExtension,
+    #[msg("SOL is quoted by a SOL launch: wrapped SOL can't be a quote token")]
+    SolQuoteToken,
+    #[msg("the same quote token is named twice")]
+    DuplicateQuoteToken,
+    #[msg("a leg's virtual quote is below the minimum (1,000 raw units)")]
+    LegVirtualQuoteTooSmall,
+    #[msg("a companion coin can't launch quoted in tokens: its pots are SOL")]
+    CompanionTokenLaunch,
+    #[msg("the launch has no such leg")]
+    NoSuchLeg,
+    #[msg("the leg is already open")]
+    LegAlreadyOpen,
+    #[msg("trading starts once every leg is open")]
+    LegsNotOpen,
+    #[msg(
+        "an account is not the leg's (its quote mint, its program, its pool or its fee account)"
+    )]
+    WrongLegAccount,
+    #[msg("a leg pool's callbacks take the launch's Legs (writable) where a launch pool takes its holder vault")]
+    LegsAccountInvalid,
+}
+
+impl From<bordrless_swap::spl::MintRefusal> for LaunchError {
+    fn from(r: bordrless_swap::spl::MintRefusal) -> Self {
+        use bordrless_swap::spl::MintRefusal;
+        match r {
+            MintRefusal::NotAMint => LaunchError::QuoteMintInvalid,
+            MintRefusal::TransferFee => LaunchError::QuoteMintTransferFee,
+            MintRefusal::NonTransferable => LaunchError::QuoteMintNonTransferable,
+            MintRefusal::FrozenByDefault => LaunchError::QuoteMintFrozenByDefault,
+            MintRefusal::TransferHook => LaunchError::QuoteMintTransferHook,
+            MintRefusal::Paused => LaunchError::QuoteMintPaused,
+            MintRefusal::Confidential => LaunchError::QuoteMintConfidential,
+            MintRefusal::UnknownExtension => LaunchError::QuoteMintUnknownExtension,
+        }
+    }
 }

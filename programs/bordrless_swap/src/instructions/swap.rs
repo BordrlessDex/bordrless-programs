@@ -44,6 +44,12 @@
 //! keeps working on a native pool, with the same accounts, through the pool's buffer: a buy's
 //! bridged SOL joins it, a sell is paid from it as far as it goes and the rest as lamports to the
 //! trader (a writable signer; else `BufferShort`).
+//!
+//! Pools quoted in an SPL Token or Token-2022 mint (quote kind 2, `crate::spl`,
+//! `docs/token-quotes.md` §2.1): `swap_spl` runs the same swap with the quote moved by
+//! `transfer_checked` through its program (the trader signs a buy's input, the pool a sell's
+//! output), the quote-side cuts paid to token accounts of the quote mint, and the pool's books
+//! checked against its quote vault at the end. Every other swap refuses such a pool (`SplPool`).
 
 use anchor_lang::prelude::*;
 use bordrless_core::{
@@ -63,6 +69,7 @@ use crate::native::{
     buffer_in, buffer_out, check_credit_rent, check_native, move_lamports, top_level,
     transfer_from_wallet, BridgeSol,
 };
+use crate::spl::SplLeg;
 use crate::state::*;
 use crate::token::{balance, read_holding, TokenAccounts, TokenSide};
 
@@ -95,7 +102,8 @@ pub struct Swap<'info> {
     pub trader: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
-    #[account(mut)]
+    /// A pool quoted in an SPL token trades through `swap_spl`.
+    #[account(mut, constraint = !pool.quote_spl() @ SwapError::SplPool)]
     pub pool: Account<'info, Pool>,
     /// CHECK: address-checked; writable only for a burn of base.
     #[account(address = pool.base_mint @ SwapError::WrongHolding)]
@@ -182,6 +190,53 @@ pub struct SwapV2<'info> {
     pub bridge_event_authority: Option<UncheckedAccount<'info>>,
 }
 
+/// Accounts of `swap_spl`, a swap on a pool quoted in an SPL Token or Token-2022 mint (quote kind
+/// 2, `crate::spl`): as `swap`'s, the quote vault being the pool's associated token account,
+/// `trader_quote` a token account of the quote mint (on a buy one the trader owns or is delegated;
+/// on a sell any account of the mint to deliver to), and the quote mint's program after the token
+/// program's accounts. The remaining accounts are as `swap`'s, the quote side's token-hook slice
+/// empty.
+#[event_cpi]
+#[derive(Accounts)]
+pub struct SwapSpl<'info> {
+    /// The trader: owner (or delegate) of the input account.
+    pub trader: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, constraint = pool.quote_spl() @ SwapError::NotSplPool)]
+    pub pool: Box<Account<'info, Pool>>,
+    /// CHECK: address-checked; writable only for a burn of base.
+    #[account(address = pool.base_mint @ SwapError::WrongHolding)]
+    pub base_mint: UncheckedAccount<'info>,
+    /// CHECK: address-checked.
+    #[account(address = pool.quote_mint @ SwapError::WrongHolding)]
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: address-checked.
+    #[account(mut, address = pool.base_vault @ SwapError::WrongVault)]
+    pub base_vault: UncheckedAccount<'info>,
+    /// CHECK: address-checked.
+    #[account(mut, address = pool.quote_vault @ SwapError::WrongVault)]
+    pub quote_vault: UncheckedAccount<'info>,
+    /// CHECK: the trader's base holding, or on a buy any holding of the base mint to deliver to
+    /// (checked by the token program).
+    #[account(mut)]
+    pub trader_base: UncheckedAccount<'info>,
+    /// CHECK: a token account of the quote mint (checked in the handler and by its program).
+    #[account(mut)]
+    pub trader_quote: UncheckedAccount<'info>,
+    /// CHECK: the pool's hook program (checked in the handler).
+    pub hook_program: Option<UncheckedAccount<'info>>,
+    /// CHECK: with a hook, this program's signer of its callbacks (checked in the handler).
+    pub hook_signer: Option<UncheckedAccount<'info>>,
+    /// CHECK: the token program.
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: the token program's event authority.
+    pub token_event_authority: UncheckedAccount<'info>,
+    /// CHECK: address-checked: the quote mint's program (SPL Token or Token-2022).
+    #[account(address = pool.spl_program() @ SwapError::WrongTokenProgram)]
+    pub quote_token_program: UncheckedAccount<'info>,
+}
+
 /// The native leg of a `swap_v2`.
 pub struct NativeLeg<'info> {
     /// The System Program.
@@ -218,6 +273,8 @@ pub struct SwapCore<'a, 'info> {
     pub token: TokenAccounts<'info>,
     /// `swap_v2` only.
     pub native: Option<NativeLeg<'info>>,
+    /// `swap_spl` only: the quote's program and decimals.
+    pub spl: Option<SplLeg<'info>>,
     pub remaining: &'info [AccountInfo<'info>],
 }
 
@@ -241,6 +298,42 @@ pub fn process_swap<'info>(mut ctx: Context<'info, Swap<'info>>, args: SwapArgs)
             event_authority: a.token_event_authority.to_account_info(),
         },
         native: None,
+        spl: None,
+        remaining: ctx.remaining_accounts,
+    };
+    let (swapped, _) = run_swap(core, args)?;
+    emit_cpi!(swapped);
+    Ok(())
+}
+
+/// `swap_spl`.
+pub fn process_swap_spl<'info>(
+    mut ctx: Context<'info, SwapSpl<'info>>,
+    args: SwapArgs,
+) -> Result<()> {
+    let a = &mut ctx.accounts;
+    let decimals = a.pool.spl_decimals();
+    let core = SwapCore {
+        trader: a.trader.to_account_info(),
+        paused: a.config.paused,
+        pool: &mut a.pool,
+        base_mint: a.base_mint.to_account_info(),
+        quote_mint: a.quote_mint.to_account_info(),
+        base_vault: a.base_vault.to_account_info(),
+        quote_vault: Some(a.quote_vault.to_account_info()),
+        trader_base: a.trader_base.to_account_info(),
+        trader_quote: a.trader_quote.to_account_info(),
+        hook_program: a.hook_program.as_ref().map(|x| x.to_account_info()),
+        hook_signer: a.hook_signer.as_ref().map(|x| x.to_account_info()),
+        token: TokenAccounts {
+            program: a.token_program.to_account_info(),
+            event_authority: a.token_event_authority.to_account_info(),
+        },
+        native: None,
+        spl: Some(SplLeg {
+            token_program: a.quote_token_program.to_account_info(),
+            decimals,
+        }),
         remaining: ctx.remaining_accounts,
     };
     let (swapped, _) = run_swap(core, args)?;
@@ -297,6 +390,7 @@ pub fn process_swap_v2<'info>(
             system_program: a.system_program.to_account_info(),
             bridge,
         }),
+        spl: None,
         remaining: ctx.remaining_accounts,
     };
     let (swapped, native) = run_swap(core, args)?;
@@ -335,6 +429,20 @@ pub fn run_swap<'info>(
     let pool_acc = c.pool;
     let pool_info = pool_acc.to_account_info();
     let pool_key = pool_acc.key();
+    // `swap_spl`: the quote side is an SPL Token or Token-2022 mint, moved by `transfer_checked`.
+    // A pool quoted in one trades through `swap_spl` alone, and `swap_spl` only on such a pool.
+    let spl = c.spl;
+    require!(spl.is_some() == pool_acc.quote_spl(), SwapError::SplPool);
+    let spl_in = spl.is_some() && buy;
+    let spl_out = spl.is_some() && !buy;
+    let spl_program = spl.as_ref().map(|l| *l.token_program.key);
+    // The quote side's token-hook slice is empty: the quote is not a Bordrless mint.
+    if spl_in {
+        require!(in_extras.is_empty(), SwapError::AccountCounts);
+    }
+    if spl_out {
+        require!(out_extras.is_empty(), SwapError::AccountCounts);
+    }
     // `swap_v2`: the quote side is lamports (the pool's own account stands for its vault).
     let native = c.native;
     let native_in = native.is_some() && buy;
@@ -374,14 +482,37 @@ pub fn run_swap<'info>(
             c.trader_quote.clone(),
         )
     };
-    let in_hook = bordrless_token::client::read_mint(&in_mint)?.hook_program;
-    let out_hook = bordrless_token::client::read_mint(&out_mint)?.hook_program;
-    // A native sell delivers to an account, not a holding: the account is the recipient.
+    let in_hook = if spl_in {
+        None
+    } else {
+        bordrless_token::client::read_mint(&in_mint)?.hook_program
+    };
+    let out_hook = if spl_out {
+        None
+    } else {
+        bordrless_token::client::read_mint(&out_mint)?.hook_program
+    };
+    // A native sell delivers to an account, not a holding: the account is the recipient. An SPL
+    // sell delivers to a token account of the quote mint: its owner is. Never the pool's own vault
+    // (the token program takes a transfer to itself as a no-op: the seller's quote would stay in
+    // the vault outside the books, and the share model would count it as a cut) nor any other
+    // account the pool owns.
     let recipient = if native_out {
         *trader_out.key
+    } else if let (true, Some(leg)) = (spl_out, spl.as_ref()) {
+        let owner = leg.account(&trader_out, out_mint.key)?.owner;
+        require!(
+            *trader_out.key != pool_acc.quote_vault && owner != pool_key,
+            SwapError::WrongTokenAccount
+        );
+        owner
     } else {
         read_holding(&trader_out)?.owner
     };
+    // An SPL buy pays from a token account of the quote mint.
+    if let (true, Some(leg)) = (spl_in, spl.as_ref()) {
+        leg.account(&trader_in, in_mint.key)?;
+    }
     // A native buy is paid by the trader's own wallet.
     if native_in {
         require_keys_eq!(*trader_in.key, *c.trader.key, SwapError::WrongNativeAccount);
@@ -484,6 +615,9 @@ pub fn run_swap<'info>(
                 }
                 if nq_in {
                     ncut_in = call.native_cut(&ret, taken, amount_in, &forbidden)?;
+                } else if let (true, Some(program)) = (spl_in, spl_program.as_ref()) {
+                    cut_in =
+                        call.spl_cut(&ret, taken, amount_in, in_mint.key, program, &forbidden)?;
                 } else {
                     cut_in = call.cut(&ret, taken, amount_in, &in_mint, &forbidden)?;
                 }
@@ -520,6 +654,24 @@ pub fn run_swap<'info>(
         pool_info
             .lamports()
             .checked_sub(before)
+            .ok_or(SwapError::MathOverflow)?
+    } else if let (true, Some(leg)) = (spl_in, spl.as_ref()) {
+        // An SPL buy: each delta from the trader's token account (the trader signs), then the rest
+        // to the quote vault, measured there.
+        for (to, amount) in &cut_in.deltas {
+            leg.transfer(&trader, &trader_in, to, &in_mint, *amount, &[])?;
+        }
+        let vault_in_before = leg.amount(&vault_in)?;
+        leg.transfer(
+            &trader,
+            &trader_in,
+            &vault_in,
+            &in_mint,
+            amount_in - cut_in_taken,
+            &[],
+        )?;
+        leg.amount(&vault_in)?
+            .checked_sub(vault_in_before)
             .ok_or(SwapError::MathOverflow)?
     } else {
         let in_side = TokenSide::of(in_extras, in_hook.is_some());
@@ -700,6 +852,15 @@ pub fn run_swap<'info>(
             {
                 if nq_out {
                     ncut_out = call.native_cut(&ret, taken, amounts.amount_out, &forbidden)?;
+                } else if let (true, Some(program)) = (spl_out, spl_program.as_ref()) {
+                    cut_out = call.spl_cut(
+                        &ret,
+                        taken,
+                        amounts.amount_out,
+                        out_mint.key,
+                        program,
+                        &forbidden,
+                    )?;
                 } else {
                     cut_out = call.cut(&ret, taken, amounts.amount_out, &out_mint, &forbidden)?;
                 }
@@ -747,6 +908,31 @@ pub fn run_swap<'info>(
         trader_out
             .lamports()
             .checked_sub(before)
+            .ok_or(SwapError::MathOverflow)?
+    } else if let (true, Some(leg)) = (spl_out, spl.as_ref()) {
+        // An SPL sell: each delta from the quote vault (the pool signs), then the delivery,
+        // measured at the recipient's token account.
+        for (to, amount) in &cut_out.deltas {
+            leg.transfer(
+                &pool_info,
+                &vault_out,
+                to,
+                &out_mint,
+                *amount,
+                &[&pool_seeds],
+            )?;
+        }
+        let trader_out_before = leg.amount(&trader_out)?;
+        leg.transfer(
+            &pool_info,
+            &vault_out,
+            &trader_out,
+            &out_mint,
+            to_deliver,
+            &[&pool_seeds],
+        )?;
+        leg.amount(&trader_out)?
+            .checked_sub(trader_out_before)
             .ok_or(SwapError::MathOverflow)?
     } else {
         // The old swap's sell on a native pool is paid from the buffer as far as it goes (the
@@ -896,6 +1082,10 @@ pub fn run_swap<'info>(
     move_lamports(&pool_info, &c.trader, to_trader)?;
     // A native pool's books against its lamports and buffer.
     check_native(&pool_info, pool_acc, c.quote_vault.as_ref())?;
+    // A pool quoted in an SPL token: its books against its quote vault.
+    if let Some(leg) = spl.as_ref() {
+        crate::spl::check_books(pool_acc, leg.amount(&quote_side)?)?;
+    }
 
     let pool: &Pool = pool_acc;
     let (deltas_in, deltas_out) = (

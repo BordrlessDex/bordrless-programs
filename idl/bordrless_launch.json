@@ -47,20 +47,25 @@
         {
           "name": "launch",
           "docs": [
-            "The launch of the base mint. Only `create_launch` creates a `Launch`, at",
-            "`[\"launch\", mint]` with that mint, so the owner, the discriminator and the mint bind it",
-            "without a derivation."
+            "The launch of the base mint. Only `create_launch` (and `create_token_launch`) creates a",
+            "`Launch`, at `[\"launch\", mint]` with that mint, so the owner, the discriminator and the mint",
+            "bind it without a derivation. A launch quoted in tokens has one pool per leg: the handler",
+            "finds the pool among its legs."
           ],
           "writable": true
         },
         {
           "name": "launch_quote",
+          "docs": [
+            "quoted in tokens: the leg's fee account (checked in the handler)."
+          ],
           "writable": true
         },
         {
           "name": "holder_vault",
           "docs": [
-            "writable holding of the quote before paying it)."
+            "writable holding of the quote before paying it). For a launch quoted in tokens: its `Legs`",
+            "(writable; checked in the handler)."
           ]
         },
         {
@@ -174,20 +179,25 @@
         {
           "name": "launch",
           "docs": [
-            "The launch of the base mint. Only `create_launch` creates a `Launch`, at",
-            "`[\"launch\", mint]` with that mint, so the owner, the discriminator and the mint bind it",
-            "without a derivation."
+            "The launch of the base mint. Only `create_launch` (and `create_token_launch`) creates a",
+            "`Launch`, at `[\"launch\", mint]` with that mint, so the owner, the discriminator and the mint",
+            "bind it without a derivation. A launch quoted in tokens has one pool per leg: the handler",
+            "finds the pool among its legs."
           ],
           "writable": true
         },
         {
           "name": "launch_quote",
+          "docs": [
+            "quoted in tokens: the leg's fee account (checked in the handler)."
+          ],
           "writable": true
         },
         {
           "name": "holder_vault",
           "docs": [
-            "writable holding of the quote before paying it)."
+            "writable holding of the quote before paying it). For a launch quoted in tokens: its `Legs`",
+            "(writable; checked in the handler)."
           ]
         },
         {
@@ -488,6 +498,118 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "claim_creator_fees_token",
+      "docs": [
+        "Anyone: pays leg `index`'s creator fees to the creator's associated token account of the",
+        "leg's quote (created if needed)."
+      ],
+      "discriminator": [
+        105,
+        130,
+        249,
+        141,
+        13,
+        154,
+        117,
+        4
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Whoever sends it; pays the creator's token account's rent when it is created."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "leg_fees",
+          "writable": true
+        },
+        {
+          "name": "creator"
+        },
+        {
+          "name": "creator_quote",
+          "docs": [
+            "address; created if needed)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "create_config",
@@ -1048,6 +1170,128 @@
       ]
     },
     {
+      "name": "create_token_launch",
+      "docs": [
+        "Creates a coin quoted in 1 to 6 SPL Token or Token-2022 mints (`docs/token-quotes.md`",
+        "§2.2): the mint (no token hook), the whole supply to the launch, the `Launch` and its",
+        "`Legs`. The remaining accounts are the quote mints, in leg order. Each leg then opens with",
+        "`open_leg`."
+      ],
+      "discriminator": [
+        93,
+        87,
+        58,
+        126,
+        88,
+        75,
+        172,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "The creator (a wallet): pays the launch fee and the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch_reserve",
+          "docs": [
+            "address)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateTokenLaunchArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "distribute_fees",
       "docs": [
         "Anyone: pays out the creator fees of a launch made from a partner config",
@@ -1258,7 +1502,8 @@
         {
           "name": "launch",
           "docs": [
-            "The launch (only `create_launch` creates one, at its PDA)."
+            "The launch (only `create_launch` creates one, at its PDA). A launch quoted in tokens never",
+            "graduates."
           ],
           "writable": true
         },
@@ -1562,6 +1807,161 @@
       "args": []
     },
     {
+      "name": "open_leg",
+      "docs": [
+        "Anyone: opens leg `index` of a launch quoted in tokens: its creator-fee account, its pool",
+        "on the DEX (this program as the hook, the leg's share deposited) and the pool's registry.",
+        "Trading starts once every leg is open."
+      ],
+      "discriminator": [
+        231,
+        48,
+        55,
+        182,
+        53,
+        15,
+        81,
+        247
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "leg_fees",
+          "writable": true
+        },
+        {
+          "name": "launch_reserve",
+          "writable": true
+        },
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "dex_config",
+          "writable": true,
+          "address": "2XLvgczuVACmvvjfRLLAcLwMzFHutbAAro61zZKP8fsx"
+        },
+        {
+          "name": "dex_treasury",
+          "writable": true
+        },
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "writable": true
+        },
+        {
+          "name": "hook_signer",
+          "address": "3dfEZLdjRcpTJ4RxPzgkqnqaG2FipRdaHgRW72AL6kqL"
+        },
+        {
+          "name": "dex_event_authority",
+          "address": "9cBz2tsg7FwopSsd6HzvtbiL6b7B46eLG436etkB7cyx"
+        },
+        {
+          "name": "swap_program",
+          "address": "GyzKSnnEu2uN5bBRecE4XYY2enbfR2D2MtxnbJPGy7hk"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "revert_launch_to_bridged",
       "docs": [
         "Admin, with the DEX paused: turns a native launch back to bridged SOL. Idempotent."
@@ -1856,6 +2256,19 @@
       ]
     },
     {
+      "name": "Legs",
+      "discriminator": [
+        22,
+        190,
+        92,
+        221,
+        195,
+        59,
+        171,
+        189
+      ]
+    },
+    {
       "name": "PartnerFee",
       "discriminator": [
         191,
@@ -2001,6 +2414,32 @@
       ]
     },
     {
+      "name": "LegCreatorFeesClaimed",
+      "discriminator": [
+        23,
+        133,
+        143,
+        67,
+        170,
+        38,
+        16,
+        203
+      ]
+    },
+    {
+      "name": "LegOpened",
+      "discriminator": [
+        250,
+        161,
+        108,
+        20,
+        92,
+        141,
+        29,
+        220
+      ]
+    },
+    {
       "name": "NativeLaunchesSet",
       "discriminator": [
         129,
@@ -2063,6 +2502,19 @@
         122,
         175,
         109
+      ]
+    },
+    {
+      "name": "TokenLaunchCreated",
+      "discriminator": [
+        200,
+        177,
+        217,
+        82,
+        127,
+        93,
+        98,
+        216
       ]
     }
   ],
@@ -2376,6 +2828,106 @@
       "code": 6061,
       "name": "VaultStillNative",
       "msg": "revert the coin's hook vault to bridged first (pass the vault)"
+    },
+    {
+      "code": 6062,
+      "name": "TokenQuotedLaunch",
+      "msg": "this launch is quoted in tokens: it never graduates, and its creator fees are claimed per leg (claim_creator_fees_token)"
+    },
+    {
+      "code": 6063,
+      "name": "NotTokenLaunch",
+      "msg": "this launch is not quoted in tokens"
+    },
+    {
+      "code": 6064,
+      "name": "InvalidLegCount",
+      "msg": "a launch quoted in tokens has 1 to 6 quote mints (the remaining accounts) and one virtual quote for each"
+    },
+    {
+      "code": 6065,
+      "name": "QuoteMintInvalid",
+      "msg": "a quote token must be an initialized SPL Token or Token-2022 mint"
+    },
+    {
+      "code": 6066,
+      "name": "QuoteMintTransferFee",
+      "msg": "the quote token charges a transfer fee"
+    },
+    {
+      "code": 6067,
+      "name": "QuoteMintNonTransferable",
+      "msg": "the quote token is non-transferable"
+    },
+    {
+      "code": 6068,
+      "name": "QuoteMintFrozenByDefault",
+      "msg": "the quote token's new accounts start frozen"
+    },
+    {
+      "code": 6069,
+      "name": "QuoteMintTransferHook",
+      "msg": "the quote token runs a transfer hook program"
+    },
+    {
+      "code": 6070,
+      "name": "QuoteMintPaused",
+      "msg": "the quote token is paused"
+    },
+    {
+      "code": 6071,
+      "name": "QuoteMintConfidential",
+      "msg": "the quote token mints and burns confidentially"
+    },
+    {
+      "code": 6072,
+      "name": "QuoteMintUnknownExtension",
+      "msg": "the quote token has an extension pools do not support"
+    },
+    {
+      "code": 6073,
+      "name": "SolQuoteToken",
+      "msg": "SOL is quoted by a SOL launch: wrapped SOL can't be a quote token"
+    },
+    {
+      "code": 6074,
+      "name": "DuplicateQuoteToken",
+      "msg": "the same quote token is named twice"
+    },
+    {
+      "code": 6075,
+      "name": "LegVirtualQuoteTooSmall",
+      "msg": "a leg's virtual quote is below the minimum (1,000 raw units)"
+    },
+    {
+      "code": 6076,
+      "name": "CompanionTokenLaunch",
+      "msg": "a companion coin can't launch quoted in tokens: its pots are SOL"
+    },
+    {
+      "code": 6077,
+      "name": "NoSuchLeg",
+      "msg": "the launch has no such leg"
+    },
+    {
+      "code": 6078,
+      "name": "LegAlreadyOpen",
+      "msg": "the leg is already open"
+    },
+    {
+      "code": 6079,
+      "name": "LegsNotOpen",
+      "msg": "trading starts once every leg is open"
+    },
+    {
+      "code": 6080,
+      "name": "WrongLegAccount",
+      "msg": "an account is not the leg's (its quote mint, its program, its pool or its fee account)"
+    },
+    {
+      "code": 6081,
+      "name": "LegsAccountInvalid",
+      "msg": "a leg pool's callbacks take the launch's Legs (writable) where a launch pool takes its holder vault"
     }
   ],
   "types": [
@@ -2909,6 +3461,54 @@
               "defined": {
                 "name": "LaunchRules"
               }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateTokenLaunchArgs",
+      "docs": [
+        "Arguments of `create_token_launch`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee in basis points of the quote side of every trade, within the config's bounds."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quotes",
+            "docs": [
+              "Each leg's virtual quote, raw units of its token, in the order of the quote mints."
+            ],
+            "type": {
+              "vec": "u64"
             }
           }
         ]
@@ -3939,6 +4539,359 @@
       }
     },
     {
+      "name": "Leg",
+      "docs": [
+        "One leg of a launch quoted in tokens: a DEX curve pool `[\"pool\", mint, quote_mint, lp_fee_bps,",
+        "LAUNCH_ID]` quoted in `quote_mint`, holding `share` of the supply and no quote at its opening,",
+        "with no virtual base and `virtual_quote` (its opening price is `virtual_quote / share`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote mint (SPL Token or Token-2022)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_program",
+            "docs": [
+              "Its program: 0 SPL Token, 1 Token-2022 (`bordrless_swap::spl`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Its decimals."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "fee_bump",
+            "docs": [
+              "Bump of `fee_account`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "virtual_quote",
+            "docs": [
+              "The pool's virtual quote, raw units of the quote."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "share",
+            "docs": [
+              "The coins the pool opens with."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The leg's pool on the DEX."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_account",
+            "docs": [
+              "The leg's creator-fee token account `[\"leg-fees\", mint, quote_mint]` (a token account of the",
+              "quote whose owner is the launch), created by `open_leg`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator_fees_accrued",
+            "docs": [
+              "Creator fees taken on this leg so far, raw units of the quote."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "creator_fees_claimed",
+            "docs": [
+              "Creator fees claimed from this leg so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "docs": [
+              "When `open_leg` opened it; 0 until then."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegCreatorFeesClaimed",
+      "docs": [
+        "A leg's creator fees paid to the creator's associated token account of the leg's quote",
+        "(`claim_creator_fees_token`, whoever sent it)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "The creator's token account that received them."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_total",
+            "docs": [
+              "Claimed from this leg so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegOpened",
+      "docs": [
+        "A leg opened (`open_leg`): its fee account and its pool exist, its share is in the pool.",
+        "Trading starts when `opened == count`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "share",
+            "type": "u64"
+          },
+          {
+            "name": "opened",
+            "docs": [
+              "Legs open now, this one included."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "count",
+            "type": "u8"
+          },
+          {
+            "name": "payer",
+            "docs": [
+              "Who sent it (paid the rent)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegTerms",
+      "docs": [
+        "One leg's terms in `TokenLaunchCreated` (`docs/token-quotes.md` §2.2)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_program",
+            "docs": [
+              "SPL Token or Token-2022."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "virtual_quote",
+            "type": "u64"
+          },
+          {
+            "name": "share",
+            "docs": [
+              "The coins the leg's pool opens with."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The leg's pool (opened by `open_leg`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_account",
+            "docs": [
+              "The leg's creator-fee token account (created by `open_leg`)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Legs",
+      "docs": [
+        "The legs of a launch quoted in tokens, at `[\"legs\", mint]` (`docs/token-quotes.md` §2.2). Made by",
+        "`create_token_launch` with every leg's terms, addresses included; `open_leg` opens each; the",
+        "pool hook counts each leg's creator fees and refuses trades until `opened == count`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The coin."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch",
+            "docs": [
+              "Its launch."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "count",
+            "docs": [
+              "How many legs (1 to [`MAX_LEGS`]); `legs[count..]` are zeros."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "opened",
+            "docs": [
+              "How many are open."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "legs",
+            "docs": [
+              "The legs, in the order the creator gave the quote mints."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Leg"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "NativeLaunchesSet",
       "docs": [
         "The admin turned native launches on or off for launches made from now on."
@@ -4468,6 +5421,90 @@
               "Latest early-buyer unlock, counted from the launch."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenLaunchCreated",
+      "docs": [
+        "A launch quoted in tokens (`create_token_launch`): its whole supply waits in the launch's",
+        "holding until each leg's `open_leg` moves the leg's share into its pool. No `LaunchCreated`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "legs_account",
+            "docs": [
+              "The `Legs` account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          },
+          {
+            "name": "supply",
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "creator_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "lp_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "legs",
+            "docs": [
+              "In leg order (the order of the quote mints given)."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "LegTerms"
+                }
+              }
+            }
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }

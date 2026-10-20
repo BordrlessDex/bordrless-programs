@@ -57,7 +57,8 @@ pub struct Liquidity<'info> {
     pub provider: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
-    #[account(mut)]
+    /// A pool quoted in an SPL token never takes or returns liquidity.
+    #[account(mut, constraint = !pool.quote_spl() @ SwapError::SplPool)]
     pub pool: Account<'info, Pool>,
     /// CHECK: address-checked.
     #[account(address = pool.base_mint @ SwapError::WrongHolding)]

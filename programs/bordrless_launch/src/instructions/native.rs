@@ -213,6 +213,11 @@ fn kit_set_native<'info>(a: &LaunchForm<'info>, native: bool) -> Result<()> {
 
 /// `migrate_launch_to_native`.
 pub fn process_migrate_launch_to_native(ctx: Context<LaunchForm>) -> Result<()> {
+    // A launch quoted in tokens has no SOL to move.
+    require!(
+        !ctx.accounts.launch.is_token_quoted(),
+        LaunchError::TokenQuotedLaunch
+    );
     check_form(ctx.accounts)?;
     if ctx.accounts.launch.is_native() {
         return Ok(());

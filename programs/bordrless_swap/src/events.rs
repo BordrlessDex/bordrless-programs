@@ -183,6 +183,18 @@ pub struct SwappedNative {
     pub pool_lamports: u64,
 }
 
+/// A pool quoted in a real SPL Token or Token-2022 mint (quote kind 2, `create_spl_pool`), emitted
+/// right after its `PoolCreated` (whose `lp_mint` is the default key: such a pool has none): the
+/// quote mint's program and decimals, and its quote vault (the pool's associated token account).
+#[event]
+pub struct SplPoolCreated {
+    pub pool: Pubkey,
+    pub quote_mint: Pubkey,
+    pub quote_program: Pubkey,
+    pub quote_decimals: u8,
+    pub quote_vault: Pubkey,
+}
+
 /// A pool moved between bridged SOL in its quote vault and lamports on its account.
 #[event]
 pub struct PoolQuoteFormChanged {

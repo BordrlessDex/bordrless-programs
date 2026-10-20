@@ -305,6 +305,53 @@ impl<'a, 'info> PoolHookCall<'a, 'info> {
     }
 }
 
+impl<'a, 'info> PoolHookCall<'a, 'info> {
+    /// The cut a swap callback's answer takes from `amount` of the quote of a pool quoted in an SPL
+    /// token (`swap_spl`), checked as [`Self::cut`] checks a token side, except that each delta
+    /// account is a writable token account of `mint` under `program` (the quote mint's program)
+    /// and a burn is `SplBurn`.
+    pub fn spl_cut(
+        &self,
+        answer: &HookReturn,
+        taken: u64,
+        amount: u64,
+        mint: &Pubkey,
+        program: &Pubkey,
+        forbidden: &[Pubkey],
+    ) -> Result<Cut<'a, 'info>> {
+        require!(taken < amount, SwapError::DeltaTooLarge);
+        require!(answer.burn == 0, SwapError::SplBurn);
+        let mut deltas: Vec<(&'a AccountInfo<'info>, u64)> =
+            Vec::with_capacity(answer.deltas.len());
+        for delta in &answer.deltas {
+            let i = usize::from(delta.account);
+            require!(i >= POOL_PREFIX_ACCOUNTS, SwapError::InvalidDeltaAccount);
+            let info = self
+                .extras
+                .get(i - POOL_PREFIX_ACCOUNTS)
+                .ok_or(SwapError::InvalidDeltaAccount)?;
+            require!(info.is_writable, SwapError::InvalidDeltaAccount);
+            require!(
+                !forbidden.contains(info.key),
+                SwapError::InvalidDeltaAccount
+            );
+            require!(
+                !deltas.iter().any(|(named, _)| named.key == info.key),
+                SwapError::InvalidDeltaAccount
+            );
+            let account = crate::spl::read_token_account(info, program)
+                .ok_or(SwapError::InvalidDeltaAccount)?;
+            require_keys_eq!(account.mint, *mint, SwapError::InvalidDeltaAccount);
+            deltas.push((info, delta.amount));
+        }
+        Ok(Cut {
+            deltas,
+            burn: 0,
+            taken,
+        })
+    }
+}
+
 /// Splits the remaining accounts of a swap or deposit into the two token hooks' extras and the pool
 /// hook's extras, by the counts the caller gave.
 pub fn split_extras<'a, 'info>(
