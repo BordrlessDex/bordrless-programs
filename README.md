@@ -43,7 +43,7 @@ upgrade of six programs (the DEX, the launchpad, the kit, the companion, `hook_v
 built from merge `4591354`, the re-audit fixes of `912fff3`; slots 457324888 to 457325076); that
 evening the companion's `set_payout_terms` and the payout window measured against the live pot
 (commit `abfc783`, tx `2BjeHPwF…`, hash `72af698e…`), then the companion's script author share taken
-from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). On 16 Oct 2026 the kit gained `claim_sol_for`, a permissionless push of a holder's native rewards to the holding's owner (commit `2d19ec9`, slot 457493758), and new launches went native (`set_native_launches(true)`, no deploy; the coins launched since 15 Oct migrated). On 20 Oct 2026 the DEX and the launchpad gained [quote tokens](docs/token-quotes.md), coins launched against one to six SPL Token or Token-2022 mints (commit `d31557a`, slots 459122832 and 459123096). Each program embeds a `security.txt` that points back to
+from the launcher's part of the creator fee only (commit `b91b673`, slot 457422433). On 16 Oct 2026 the kit gained `claim_sol_for`, a permissionless push of a holder's native rewards to the holding's owner (commit `2d19ec9`, slot 457493758), and new launches went native (`set_native_launches(true)`, no deploy; the coins launched since 15 Oct migrated). On 20 Oct 2026 the DEX and the launchpad gained [quote tokens](docs/token-quotes.md), coins launched against one to six SPL Token or Token-2022 mints (commit `d31557a`, slots 459122832 and 459123096). On 21 Oct 2026 the kit and the launchpad gained rules on those coins: the burn, max wallet, the creator lock and the early-buyer lock (commit `db40cbf`, slots 459491916 and 459492381). Each program embeds a `security.txt` that points back to
 this repository, and each mainnet binary is a [verified build](#verifying-the-deployments) of this
 repository: its hash is the hash of what `solana-verify build` produces here.
 
@@ -52,8 +52,8 @@ repository: its hash is the hash of what `solana-verify build` produces here.
 | `bordrless_token` | `ec9d9f528be0fa7e301e476e6e6a19ec79332fa45dc4e6bccd9f26f5355e5152` |
 | `bordrless_swap` | `d94c63331a988bee4d0418da0dee364bb5978edea873b1191f2a49c813929b2a` (commit `d31557a`) |
 | `bordrless_bridge` | `7bb0f9447d5c55f89043408b96074ed782bf502b96bdfc535eb95a12e6c7371f` |
-| `bordrless_launch` | `0d2494cbccb2340380658048988b639a6efdb5f2ae7c338a17a99f8842b3e7df` (commit `d31557a`) |
-| `bordrless_kit` | `44803fa08ce3c3c87363fb9c197c39edff6e51232262238d25923c3afcaed719` (commit `2d19ec9`) |
+| `bordrless_launch` | `f1cedaae87ce7d40349731b52f5feec38de6e2f671b41fde46f0e3037d8a023a` (commit `db40cbf`) |
+| `bordrless_kit` | `088448f8b3497104e3c2c4644285ada2fba653e26dae9d29a39edea1555d3132` (commit `db40cbf`) |
 | `tax_hook` | `a73935a42bf200b6a9a73490d8fa0ea661d1b89963ff2387c5318f6563835bc8` |
 | `half_life` | `2978b0b8dae78e46baed63d5c76ad166460fe85bc997fb999cdc7e14b57c9c44` |
 | `bordrless_companion` | `f73a6bde3fc4942332bfa3ddbe952f3123688cacfba9a0fd84851f2130c3e249` (commit `b91b673`) |
