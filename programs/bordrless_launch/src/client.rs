@@ -1178,12 +1178,42 @@ pub fn create_token_launch(
     args: crate::instructions::CreateTokenLaunchArgs,
     quote_mints: &[Pubkey],
 ) -> Instruction {
+    create_token_launch_with(creator, mint, treasury, args, quote_mints, None, None)
+}
+
+/// [`create_token_launch`] from a `LaunchConfig` when `launch_config` is given
+/// (`docs/token-quotes.md` §7: `args.rules` and `args.creator_fee_bps` must be the config's; it
+/// takes no SOL cut and pays no author or partner), right after the quote mints, then the config's
+/// custom hook (`custom_hook`: its extras resolved from the hook's registry for `mint`, which must
+/// list the coin's `Legs`, [`crate::instructions::legs_registry_entry`]) as `create_launch_with`
+/// passes it, or the kit's accounts when the rules install the kit. A timelocked hook's
+/// `Timelock` goes last ([`with_hook_timelock`]). `creator` may be a companion's creator address
+/// (the companion's `launch_token` wraps this instruction). Without a config, exactly
+/// [`create_token_launch`].
+#[allow(clippy::too_many_arguments)]
+pub fn create_token_launch_with(
+    creator: Pubkey,
+    mint: Pubkey,
+    treasury: Pubkey,
+    args: crate::instructions::CreateTokenLaunchArgs,
+    quote_mints: &[Pubkey],
+    launch_config: Option<Pubkey>,
+    custom_hook: Option<&CustomHookAccounts>,
+) -> Instruction {
     let launch = launch_address(&mint);
-    let kit = if args.rules.modules() != 0 {
+    let mut kit = if args.rules.modules() != 0 {
         token_launch_kit_accounts(&mint)
     } else {
         vec![]
     };
+    if let Some(config) = launch_config {
+        let mut after = vec![AccountMeta::new_readonly(config, false)];
+        match custom_hook {
+            Some(hook) => after.extend(hook.launch_accounts(&mint)),
+            None => after.append(&mut kit),
+        }
+        kit = after;
+    }
     let mut accounts = with_events(vec![
         AccountMeta::new(creator, true),
         AccountMeta::new(config_address(), false),
@@ -1226,11 +1256,100 @@ pub fn open_leg_with(
             AccountMeta::new(kit_config_address(&keys.mint), false),
         ]);
     }
+    // Holder rewards (`docs/token-quotes.md` §7.5.1): the kit's vault of the leg's token, made by
+    // `open_leg` when missing.
+    if modules & bordrless_kit::modules::HOLDER_REWARDS != 0 {
+        ix.accounts
+            .push(AccountMeta::new(kit_vault_address(keys), false));
+    }
+    ix
+}
+
+/// The kit's vault of a leg's token (`docs/token-quotes.md` §7.5.1): the kit config's associated
+/// token account of it, where the leg's holder fees go (callback index 9 of the leg's trades).
+pub fn kit_vault_address(keys: &LegKeys) -> Pubkey {
+    bordrless_swap::spl::associated_token_address(
+        &kit_config_address(&keys.mint),
+        &keys.quote_mint,
+        &keys.quote_program,
+    )
+}
+
+/// The coin's token-hook slice on leg `keys`' trades of `launch` (a coin of `legs` legs): none
+/// without kit modules; the kit's with the coin's `Legs`, its reward vault in place of the kit's id
+/// on a one-leg coin paying holder rewards in its token (kind 1).
+pub fn leg_base_slice_for(launch: &Launch, legs: u8, keys: &LegKeys) -> Vec<AccountMeta> {
+    if launch.modules == 0 {
+        return vec![];
+    }
+    if launch.reward_kind(legs) == bordrless_kit::constants::REWARD_KIND_TOKEN {
+        return kit_client::token_rewards_hook_slice(&keys.mint, kit_vault_address(keys));
+    }
+    kit_client::legs_hook_slice(&keys.mint)
+}
+
+/// A swap on a leg of `launch` (a coin of `legs` legs) by `trader`, delivered to `recipient`, built
+/// from its rules and payouts (`docs/token-quotes.md` §6.1, §7.5): [`leg_base_slice_for`] on the
+/// coin's side, the coin's mint writable when it burns, and with holder rewards the kit's vault of
+/// the leg after the leg's four extras (callback index 9). Exactly [`leg_swap_with_rules`] for a
+/// coin without holder rewards.
+#[allow(clippy::too_many_arguments)]
+pub fn leg_swap_for(
+    launch: &Launch,
+    legs: u8,
+    keys: &LegKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+) -> Instruction {
+    let (trader_base, trader_quote) = if direction == 1 {
+        (
+            token_client::holding_address(&keys.mint, &recipient),
+            keys.quote_account(&trader),
+        )
+    } else {
+        (
+            token_client::holding_address(&keys.mint, &trader),
+            keys.quote_account(&recipient),
+        )
+    };
+    let mut ix = leg_swap_with_slice(
+        keys,
+        trader,
+        trader_base,
+        trader_quote,
+        direction,
+        amount_in,
+        min_amount_out,
+        leg_base_slice_for(launch, legs, keys),
+        launch.rules.burns(),
+    );
+    if launch.rewards_on() {
+        ix.accounts
+            .push(AccountMeta::new(kit_vault_address(keys), false));
+    }
+    ix
+}
+
+/// [`open_leg`] of a launch whose config named a custom hook (`docs/token-quotes.md` §7): the hook,
+/// the token program's signer for it and its extras (`custom`, resolved from its registry for the
+/// deposit: the launch's holding of the coin to the leg pool's vault, the launch the authority).
+pub fn open_leg_custom(
+    payer: Pubkey,
+    dex_treasury: Pubkey,
+    keys: &LegKeys,
+    index: u8,
+    custom: &CustomHookAccounts,
+) -> Instruction {
+    let mut ix = open_leg(payer, dex_treasury, keys, index);
+    ix.accounts.extend(custom.slice());
     ix
 }
 
 /// `open_leg(index)`, `payer` paying the rent; `dex_treasury` the DEX config's treasury. For a
-/// launch without kit rules ([`open_leg_with`] otherwise).
+/// launch without kit rules or a custom hook ([`open_leg_with`], [`open_leg_custom`] otherwise).
 pub fn open_leg(payer: Pubkey, dex_treasury: Pubkey, keys: &LegKeys, index: u8) -> Instruction {
     let launch = launch_address(&keys.mint);
     let pool = keys.pool();
@@ -1448,6 +1567,302 @@ pub fn read_launch_config(info: &AccountInfo) -> Result<LaunchConfig> {
     );
     let data = info.try_borrow_data()?;
     LaunchConfig::try_deserialize(&mut &data[..])
+}
+
+// ---- The SOL switch (`docs/token-quotes.md` §7.5.2) -----------------------------------------------------
+
+/// A quote token's reference: `["quote-ref", quote_mint]`.
+pub fn quote_reference_address(quote_mint: &Pubkey) -> Pubkey {
+    crate::state::QuoteReference::address(quote_mint).0
+}
+
+/// A Raydium AMM v4 pool's venue accounts: [program, pool (w), authority, coin vault (w), pc vault
+/// (w)]; `nonce` the pool's (its byte 8).
+pub fn amm_v4_accounts(
+    pool: Pubkey,
+    nonce: u8,
+    coin_vault: Pubkey,
+    pc_vault: Pubkey,
+) -> Vec<AccountMeta> {
+    let authority = Pubkey::create_program_address(
+        &[b"amm authority", &[nonce]],
+        &crate::venues::RAYDIUM_AMM_V4,
+    )
+    .expect("the pool's nonce");
+    vec![
+        AccountMeta::new_readonly(crate::venues::RAYDIUM_AMM_V4, false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new_readonly(authority, false),
+        AccountMeta::new(coin_vault, false),
+        AccountMeta::new(pc_vault, false),
+    ]
+}
+
+/// A Raydium CPMM pool's venue accounts: [program, authority, amm config, pool (w), token-0 vault
+/// (w), token-1 vault (w), observation (w)].
+pub fn cpmm_accounts(
+    amm_config: Pubkey,
+    pool: Pubkey,
+    vault0: Pubkey,
+    vault1: Pubkey,
+    observation: Pubkey,
+) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new_readonly(crate::venues::RAYDIUM_CPMM, false),
+        AccountMeta::new_readonly(crate::venues::CPMM_AUTHORITY, false),
+        AccountMeta::new_readonly(amm_config, false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new(vault0, false),
+        AccountMeta::new(vault1, false),
+        AccountMeta::new(observation, false),
+    ]
+}
+
+/// A Raydium CLMM pool's venue accounts: [program, amm config, pool (w), token-0 vault (w), token-1
+/// vault (w), observation (w), Token-2022, memo, then `ticks` (the bitmap extension and the tick
+/// arrays the sale crosses, in its direction, writable)].
+pub fn clmm_accounts(
+    amm_config: Pubkey,
+    pool: Pubkey,
+    vault0: Pubkey,
+    vault1: Pubkey,
+    observation: Pubkey,
+    ticks: &[Pubkey],
+) -> Vec<AccountMeta> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(crate::venues::RAYDIUM_CLMM, false),
+        AccountMeta::new_readonly(amm_config, false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new(vault0, false),
+        AccountMeta::new(vault1, false),
+        AccountMeta::new(observation, false),
+        AccountMeta::new_readonly(bordrless_swap::spl::TOKEN_2022_PROGRAM_ID, false),
+        AccountMeta::new_readonly(crate::venues::MEMO_PROGRAM, false),
+    ];
+    accounts.extend(ticks.iter().map(|t| AccountMeta::new(*t, false)));
+    accounts
+}
+
+/// A Pump AMM pool's venue accounts for a sale: [program, pool (w), global config, base vault (w),
+/// quote vault (w), protocol fee recipient, its quote account (w), event authority, the coin
+/// creator's vault account (w), its authority, fee config, fee program, (`pool_v2` when the sale
+/// pays a creator fee), buyback wallet, its quote account (w)].
+#[allow(clippy::too_many_arguments)]
+pub fn pump_accounts(
+    pool: Pubkey,
+    base_vault: Pubkey,
+    quote_vault: Pubkey,
+    protocol_fee_recipient: Pubkey,
+    protocol_fee_recipient_ata: Pubkey,
+    coin_creator_vault_ata: Pubkey,
+    coin_creator_vault_authority: Pubkey,
+    pool_v2: Option<Pubkey>,
+    buyback_wallet: Pubkey,
+    buyback_ata: Pubkey,
+) -> Vec<AccountMeta> {
+    use crate::venues::pump;
+    let mut accounts = vec![
+        AccountMeta::new_readonly(pump::PROGRAM, false),
+        AccountMeta::new(pool, false),
+        AccountMeta::new_readonly(pump::GLOBAL_CONFIG, false),
+        AccountMeta::new(base_vault, false),
+        AccountMeta::new(quote_vault, false),
+        AccountMeta::new_readonly(protocol_fee_recipient, false),
+        AccountMeta::new(protocol_fee_recipient_ata, false),
+        AccountMeta::new_readonly(pump::EVENT_AUTHORITY, false),
+        AccountMeta::new(coin_creator_vault_ata, false),
+        AccountMeta::new_readonly(coin_creator_vault_authority, false),
+        AccountMeta::new_readonly(pump::FEE_CONFIG, false),
+        AccountMeta::new_readonly(pump::FEE_PROGRAM, false),
+    ];
+    if let Some(v2) = pool_v2 {
+        accounts.push(AccountMeta::new_readonly(v2, false));
+    }
+    accounts.push(AccountMeta::new_readonly(buyback_wallet, false));
+    accounts.push(AccountMeta::new(buyback_ata, false));
+    accounts
+}
+
+/// The venue accounts of a sale through USDC: USDC's mint, `seller`'s USDC account (w), USDC's
+/// reference (w), the token's pool's venue accounts, then USDC's pool's.
+pub fn via_usdc_accounts(
+    seller: &Pubkey,
+    token_venue: Vec<AccountMeta>,
+    usdc_venue: Vec<AccountMeta>,
+) -> Vec<AccountMeta> {
+    let usdc = crate::venues::USDC_MINT;
+    let mut accounts = vec![
+        AccountMeta::new_readonly(usdc, false),
+        AccountMeta::new(
+            bordrless_swap::spl::associated_token_address(
+                seller,
+                &usdc,
+                &bordrless_swap::spl::TOKEN_PROGRAM_ID,
+            ),
+            false,
+        ),
+        AccountMeta::new(quote_reference_address(&usdc), false),
+    ];
+    accounts.extend(token_venue);
+    accounts.extend(usdc_venue);
+    accounts
+}
+
+/// `register_quote_pool` of `quote_mint` by `payer`: `venue` the pool's venue accounts, `usdc`
+/// USDC's pool's venue accounts (a pool against USDC, or replacing one that is: USDC's reference
+/// and mint go before them), `replaced` the registered pool's venue accounts when replacing.
+pub fn register_quote_pool(
+    payer: Pubkey,
+    quote_mint: Pubkey,
+    venue: Vec<AccountMeta>,
+    usdc: Option<Vec<AccountMeta>>,
+    replaced: Option<Vec<AccountMeta>>,
+) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(quote_reference_address(&quote_mint), false),
+        AccountMeta::new_readonly(quote_mint, false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    accounts.extend(venue);
+    if let Some(u) = usdc {
+        accounts.push(AccountMeta::new_readonly(
+            quote_reference_address(&crate::venues::USDC_MINT),
+            false,
+        ));
+        accounts.push(AccountMeta::new_readonly(crate::venues::USDC_MINT, false));
+        accounts.extend(u);
+    }
+    if let Some(r) = replaced {
+        accounts.extend(r);
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::RegisterQuotePool {}.data(),
+    }
+}
+
+/// `pause_quote_reference(paused)` of `quote_mint`'s reference by the admin.
+pub fn pause_quote_reference(admin: Pubkey, quote_mint: Pubkey, paused: bool) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new_readonly(admin, true),
+            AccountMeta::new_readonly(config_address(), false),
+            AccountMeta::new(quote_reference_address(&quote_mint), false),
+        ]),
+        data: crate::instruction::PauseQuoteReference { paused }.data(),
+    }
+}
+
+/// `swap_to_sol`'s accounts after its first two (the crank, the seller) and without its fourth to
+/// sixth (the `Legs`, the quote mint, the source), as the kit's `swap_rewards_to_sol` takes them:
+/// the launch, the token's reference (w), the seller's wrapped-SOL account (w), wrapped SOL, the leg
+/// token's program, SPL Token, the ATA program, the system program, the event authority, the
+/// launchpad, then `venue` (the venue accounts, or [`via_usdc_accounts`]).
+pub fn swap_to_sol_rest(
+    seller: &Pubkey,
+    mint: &Pubkey,
+    quote_mint: &Pubkey,
+    quote_program: &Pubkey,
+    venue: Vec<AccountMeta>,
+) -> Vec<AccountMeta> {
+    let wsol = bordrless_swap::spl::NATIVE_MINT;
+    let mut accounts = vec![
+        AccountMeta::new_readonly(launch_address(mint), false),
+        AccountMeta::new(quote_reference_address(quote_mint), false),
+        AccountMeta::new(
+            bordrless_swap::spl::associated_token_address(
+                seller,
+                &wsol,
+                &bordrless_swap::spl::TOKEN_PROGRAM_ID,
+            ),
+            false,
+        ),
+        AccountMeta::new_readonly(wsol, false),
+        AccountMeta::new_readonly(*quote_program, false),
+        AccountMeta::new_readonly(bordrless_swap::spl::TOKEN_PROGRAM_ID, false),
+        AccountMeta::new_readonly(bordrless_swap::spl::ATA_PROGRAM_ID, false),
+        AccountMeta::new_readonly(system_program::ID, false),
+        AccountMeta::new_readonly(event_authority(), false),
+        AccountMeta::new_readonly(crate::ID, false),
+    ];
+    accounts.extend(venue);
+    accounts
+}
+
+/// `swap_to_sol(amount_in)` by `seller` (a custodian signing through its program) of its `source`
+/// account of leg `keys`' token, sent by `crank`.
+pub fn swap_to_sol(
+    crank: Pubkey,
+    seller: Pubkey,
+    keys: &LegKeys,
+    source: Pubkey,
+    amount_in: u64,
+    venue: Vec<AccountMeta>,
+) -> Instruction {
+    let rest = swap_to_sol_rest(
+        &seller,
+        &keys.mint,
+        &keys.quote_mint,
+        &keys.quote_program,
+        venue,
+    );
+    let mut accounts = vec![
+        AccountMeta::new(crank, true),
+        AccountMeta::new(seller, true),
+        rest[0].clone(),
+        AccountMeta::new_readonly(legs_address(&keys.mint), false),
+        AccountMeta::new_readonly(keys.quote_mint, false),
+        AccountMeta::new(source, false),
+    ];
+    accounts.extend(rest[1..].iter().cloned());
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SwapToSol { amount_in }.data(),
+    }
+}
+
+/// `swap_creator_fees(index, amount_in)` of leg `keys` (its fee account sold to SOL onto the
+/// launch), sent by `crank`.
+pub fn swap_creator_fees(
+    crank: Pubkey,
+    keys: &LegKeys,
+    index: u8,
+    amount_in: u64,
+    venue: Vec<AccountMeta>,
+) -> Instruction {
+    let launch = launch_address(&keys.mint);
+    let wsol = bordrless_swap::spl::NATIVE_MINT;
+    let mut accounts = with_events(vec![
+        AccountMeta::new(crank, true),
+        AccountMeta::new(launch, false),
+        AccountMeta::new_readonly(legs_address(&keys.mint), false),
+        AccountMeta::new_readonly(keys.quote_mint, false),
+        AccountMeta::new(keys.fee_account(), false),
+        AccountMeta::new(quote_reference_address(&keys.quote_mint), false),
+        AccountMeta::new(
+            bordrless_swap::spl::associated_token_address(
+                &launch,
+                &wsol,
+                &bordrless_swap::spl::TOKEN_PROGRAM_ID,
+            ),
+            false,
+        ),
+        AccountMeta::new_readonly(wsol, false),
+        AccountMeta::new_readonly(keys.quote_program, false),
+        AccountMeta::new_readonly(bordrless_swap::spl::TOKEN_PROGRAM_ID, false),
+        AccountMeta::new_readonly(bordrless_swap::spl::ATA_PROGRAM_ID, false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    accounts.extend(venue);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SwapCreatorFees { index, amount_in }.data(),
+    }
 }
 
 #[cfg(test)]
@@ -1799,6 +2214,81 @@ mod tests {
         );
     }
 
+    /// §7.5: the kit reads a leg's token in place and calls `swap_to_sol` by constants of its own;
+    /// its vault of a leg's token is the address the launchpad pays holder fees into; the payouts
+    /// byte and the launch arguments' optional tail.
+    #[test]
+    fn the_kit_finds_a_legs_token_and_its_vault_where_the_launchpad_puts_them() {
+        use crate::instructions::TokenPayouts;
+        use crate::state::Leg;
+        use anchor_lang::Discriminator;
+        use bordrless_kit::constants as k;
+        use bordrless_swap::spl;
+        assert_eq!(k::LEGS_LEG_QUOTE_MINT_OFFSET, 0);
+        assert_eq!(k::LEGS_LEG_QUOTE_PROGRAM_OFFSET, Legs::LEG_QUOTE_PROGRAM);
+        assert_eq!(k::LEGS_LEG_DECIMALS_OFFSET, Legs::LEG_DECIMALS);
+        assert_eq!(
+            k::SWAP_TO_SOL_DISCRIMINATOR,
+            crate::instruction::SwapToSol::DISCRIMINATOR
+        );
+        assert_eq!(
+            (k::MIN_ROUND_SECS, k::MAX_ROUND_SECS, k::DEFAULT_ROUND_SECS),
+            (
+                MIN_HOLDER_ROUND_SECS,
+                MAX_HOLDER_ROUND_SECS,
+                DEFAULT_HOLDER_ROUND_SECS
+            )
+        );
+        let mint = Pubkey::new_unique();
+        for program in [spl::TOKEN_PROGRAM_ID, spl::TOKEN_2022_PROGRAM_ID] {
+            let keys = LegKeys {
+                mint,
+                quote_mint: Pubkey::new_unique(),
+                quote_program: program,
+                lp_fee_bps: 25,
+            };
+            let vault = kit_vault_address(&keys);
+            assert_eq!(
+                vault,
+                kit_client::leg_vault_address(&mint, &keys.quote_mint, &program)
+            );
+            let leg = Leg {
+                quote_mint: keys.quote_mint,
+                quote_program: u8::from(program == spl::TOKEN_2022_PROGRAM_ID),
+                ..Leg::default()
+            };
+            assert_eq!(
+                crate::instructions::token_launch::kit_vault_address(
+                    &kit_config_address(&mint),
+                    &leg
+                ),
+                vault
+            );
+        }
+        // The payouts: none written when zero (the arguments are the bytes they were), five bytes
+        // otherwise; arguments that end before them read as none.
+        let mut bytes = vec![];
+        TokenPayouts::default().serialize(&mut bytes).unwrap();
+        assert!(bytes.is_empty());
+        let on = TokenPayouts {
+            flags: PAYOUT_SOL,
+            holder_round_secs: 1_800,
+        };
+        on.serialize(&mut bytes).unwrap();
+        assert_eq!(bytes, [1, 0x08, 0x07, 0, 0]);
+        assert_eq!(TokenPayouts::try_from_slice(&bytes).unwrap(), on);
+        assert_eq!(
+            TokenPayouts::try_from_slice(&[]).unwrap(),
+            TokenPayouts::default()
+        );
+        assert_eq!(
+            TokenPayouts::try_from_slice(&[0; 5]).unwrap(),
+            TokenPayouts::default(),
+            "a client writing the five bytes as zero means none"
+        );
+        assert!(TokenPayouts::try_from_slice(&[1, 0]).is_err());
+    }
+
     /// `create_token_launch`'s data without rules (every call made before them) reads as no rules;
     /// with them, as given; a part of them fails.
     #[test]
@@ -1822,6 +2312,7 @@ mod tests {
             creator_fee_bps: 100,
             virtual_quotes: vec![5_000_000_000, 7],
             rules,
+            payouts: Default::default(),
         };
         let full = crate::instruction::CreateTokenLaunch { args: args.clone() }.data();
         assert_eq!(

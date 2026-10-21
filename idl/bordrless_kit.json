@@ -349,6 +349,164 @@
       "args": []
     },
     {
+      "name": "claim_token",
+      "docs": [
+        "A holder of a one-leg coin quoted in tokens claims its rewards in the leg's token (its",
+        "associated token account made when missing, the holder paying)."
+      ],
+      "discriminator": [
+        116,
+        206,
+        27,
+        191,
+        166,
+        19,
+        0,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The holder; pays its token account's rent when it is made."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "reward_mint"
+        },
+        {
+          "name": "reward_vault",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "docs": [
+            "here when it is that and missing."
+          ],
+          "writable": true
+        },
+        {
+          "name": "legs"
+        },
+        {
+          "name": "kit_hook_authority",
+          "address": "2repKA1JgDkBo4AffscVee342dcBcH6c2yfpUTRrAiEN"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "reward_token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_token_for",
+      "docs": [
+        "Anyone pushes a holder's `claim_token` to a token account of the holder's that exists: the",
+        "tokens go only to the holding's owner; `payer` signs and pays the fee only."
+      ],
+      "discriminator": [
+        201,
+        143,
+        95,
+        245,
+        213,
+        82,
+        64,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "signer": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "kit_config",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "reward_mint"
+        },
+        {
+          "name": "reward_vault",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "legs"
+        },
+        {
+          "name": "kit_hook_authority",
+          "address": "2repKA1JgDkBo4AffscVee342dcBcH6c2yfpUTRrAiEN"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "reward_token_program"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "graduate",
       "docs": [
         "The launch graduated: lifts max wallet. Signed by the kit-caller PDA; once."
@@ -541,9 +699,11 @@
     {
       "name": "init_legs",
       "docs": [
-        "Installs the kit on a coin quoted in tokens (`docs/token-quotes.md` §6.1): as `init`,",
-        "without holder rewards or a reward vault, its callbacks taking the coin's `Legs` and every",
-        "leg's pool as the pool. Signed by the launch program's kit-caller PDA for the mint."
+        "Installs the kit on a coin quoted in tokens (`docs/token-quotes.md` §6.1): as `init`, its",
+        "callbacks taking the coin's `Legs` and every leg's pool as the pool. Signed by the launch",
+        "program's kit-caller PDA for the mint. With holder rewards (§7.5.1), `rewards` says how they",
+        "are paid: 1 a one-leg coin's token (the leg's quote mint the first remaining account), 2",
+        "every leg's token in rounds, 3 SOL. Data that ends after `args` reads as no rewards."
       ],
       "discriminator": [
         120,
@@ -667,6 +827,113 @@
               "name": "KitInitArgs"
             }
           }
+        },
+        {
+          "name": "rewards",
+          "type": {
+            "defined": {
+              "name": "LegsRewards"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pay_round",
+      "docs": [
+        "Anyone pays a holding its share of the current round, in every leg's token, on the least it",
+        "held since the round before began; once a round per holding."
+      ],
+      "discriminator": [
+        88,
+        109,
+        196,
+        46,
+        199,
+        222,
+        90,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Sends it; pays the owner's token accounts made with `create_missing`."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "kit_config"
+        },
+        {
+          "name": "kit_rounds",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  105,
+                  116,
+                  45,
+                  114,
+                  111,
+                  117,
+                  110,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "kit_config.mint",
+                "account": "KitConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "holding",
+          "writable": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "legs"
+        },
+        {
+          "name": "kit_hook_authority",
+          "address": "2repKA1JgDkBo4AffscVee342dcBcH6c2yfpUTRrAiEN"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "create_missing",
+          "type": "bool"
         }
       ]
     },
@@ -883,6 +1150,202 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "share_token",
+      "docs": [
+        "Shares `amount` of leg `index`'s token with the holders of a coin quoted in tokens: streamed",
+        "over the hour on a one-leg coin, counted at the next round on a coin of several legs."
+      ],
+      "discriminator": [
+        80,
+        39,
+        57,
+        250,
+        182,
+        43,
+        129,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "sharer",
+          "docs": [
+            "Shares from `source`, as its owner or delegate (the token program checks)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true
+        },
+        {
+          "name": "legs"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "quote_token_program"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "start_round",
+      "docs": [
+        "Anyone starts the current round of a coin whose holder rewards are paid in rounds: the",
+        "eligible supply and each leg vault's balance, once a round."
+      ],
+      "discriminator": [
+        144,
+        144,
+        43,
+        7,
+        193,
+        42,
+        217,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the `KitRounds` rent the first time."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "kit_config"
+        },
+        {
+          "name": "kit_rounds",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  105,
+                  116,
+                  45,
+                  114,
+                  111,
+                  117,
+                  110,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "kit_config.mint",
+                "account": "KitConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "legs"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "swap_rewards_to_sol",
+      "docs": [
+        "Anyone sells leg `index`'s holder fees for SOL through the launchpad's `swap_to_sol` on a coin",
+        "whose holder rewards are paid in SOL, and shares what it brings over the hour."
+      ],
+      "discriminator": [
+        249,
+        102,
+        138,
+        17,
+        106,
+        30,
+        95,
+        253
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "docs": [
+            "Sends it; pays the wrapped-SOL account's rent for the swap (returned by it)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "kit_config",
+          "writable": true
+        },
+        {
+          "name": "legs"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "launch_program",
+          "address": "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        },
+        {
+          "name": "amount_in",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -941,6 +1404,19 @@
       ]
     },
     {
+      "name": "LegsRewardsInstalled",
+      "discriminator": [
+        163,
+        201,
+        255,
+        115,
+        239,
+        130,
+        224,
+        91
+      ]
+    },
+    {
       "name": "RewardsClaimed",
       "discriminator": [
         75,
@@ -964,6 +1440,45 @@
         197,
         102,
         254
+      ]
+    },
+    {
+      "name": "RewardsSwappedToSol",
+      "discriminator": [
+        105,
+        15,
+        60,
+        63,
+        177,
+        72,
+        135,
+        25
+      ]
+    },
+    {
+      "name": "RoundPaid",
+      "discriminator": [
+        225,
+        220,
+        210,
+        19,
+        148,
+        21,
+        127,
+        154
+      ]
+    },
+    {
+      "name": "RoundStarted",
+      "discriminator": [
+        180,
+        209,
+        2,
+        244,
+        238,
+        48,
+        170,
+        120
       ]
     }
   ],
@@ -1146,7 +1661,47 @@
     {
       "code": 6035,
       "name": "RewardsOnTokenQuote",
-      "msg": "holder rewards are not available on a coin quoted in tokens yet"
+      "msg": "holder rewards on a coin quoted in tokens need a reward kind (a launchpad from before quote-token rewards)"
+    },
+    {
+      "code": 6036,
+      "name": "WrongRewardKind",
+      "msg": "this kit pays holder rewards another way (a leg's token, rounds, or SOL)"
+    },
+    {
+      "code": 6037,
+      "name": "NoTokenAccount",
+      "msg": "the owner's token account of the reward token is missing or can't receive it"
+    },
+    {
+      "code": 6038,
+      "name": "RoundNotStarted",
+      "msg": "this round has not been started: start_round first"
+    },
+    {
+      "code": 6039,
+      "name": "RoundAlreadyStarted",
+      "msg": "this round has already been started"
+    },
+    {
+      "code": 6040,
+      "name": "NotHeldThroughRound",
+      "msg": "the holding has not held through the round before"
+    },
+    {
+      "code": 6041,
+      "name": "AlreadyPaidThisRound",
+      "msg": "the holding has already been paid this round"
+    },
+    {
+      "code": 6042,
+      "name": "InvalidRoundSecs",
+      "msg": "a round is 10 minutes to a day"
+    },
+    {
+      "code": 6043,
+      "name": "WrongSwap",
+      "msg": "the swap to SOL is not the launchpad's swap_to_sol of this leg's vault"
     }
   ],
   "types": [
@@ -1818,6 +2373,65 @@
       }
     },
     {
+      "name": "LegsRewards",
+      "docs": [
+        "Holder rewards of a coin quoted in tokens (`docs/token-quotes.md` §7.5.1), `init_legs`' last",
+        "argument: `kind` 0 (none: the call the launchpad made before quote-token rewards), 1 (a one-leg",
+        "coin's token through the accumulator), 2 (every leg's token in rounds of `round_secs`), 3 (SOL).",
+        "Optional in the data: data that ends after `KitInitArgs` reads as kind 0; a part of it fails."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "round_secs",
+            "docs": [
+              "A rounds kit's round length (600 to 86,400 seconds); 0 for the other kinds."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegsRewardsInstalled",
+      "docs": [
+        "Holder rewards of a coin quoted in tokens (`docs/token-quotes.md` §7.5.1), after its",
+        "`KitInstalled`: `kind` 1 (a one-leg coin's token through the accumulator, `reward_mint` and",
+        "`reward_vault` the leg's token and the config's account of it), 2 (every leg's token in rounds",
+        "of `round_secs`) or 3 (SOL, native from birth)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "round_secs",
+            "type": "u32"
+          },
+          {
+            "name": "reward_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_vault",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "Mint",
       "docs": [
         "A mint. Address: any signer at creation (a keypair, or a PDA of the creating program)."
@@ -2039,6 +2653,112 @@
           {
             "name": "total_shared",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardsSwappedToSol",
+      "docs": [
+        "A SOL kit sold `amount_in` of leg `index`'s vault for `lamports` through the launchpad's",
+        "`swap_to_sol`; `shared` whether they stream over the hour as a share (else they are divided at",
+        "the next sync, or held while nobody is eligible)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "shared",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundPaid",
+      "docs": [
+        "A holding was paid its share of a round: `balance` what it was paid on (the least it held since",
+        "the round before began), `amounts` what each leg paid (0 for a leg skipped: its token account",
+        "missing or unable to receive)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "u32"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "vec": "u64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundStarted",
+      "docs": [
+        "A round of a rounds kit started: `supply` the eligible supply it divides by, `amounts` each",
+        "leg's vault (in leg order, raw units of each leg's token)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "u32"
+          },
+          {
+            "name": "supply",
+            "type": "u64"
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }

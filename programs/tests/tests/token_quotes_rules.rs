@@ -990,7 +990,7 @@ fn every_rule_at_once_on_one_leg_and_three() {
 }
 
 #[test]
-fn holder_fees_are_refused_and_the_rules_bounds_are_a_sol_launchs() {
+fn holder_fees_launch_and_the_rules_bounds_are_a_sol_launchs() {
     let mut w = World::new();
     let (quotes, launch_quotes) = quote_mints(&mut w, &setups()[2].1);
     let creator = trader(&mut w, &quotes);
@@ -1014,7 +1014,12 @@ fn holder_fees_are_refused_and_the_rules_bounds_are_a_sol_launchs() {
             ..LaunchRules::NONE
         },
     ] {
-        send(rules).expect_code(lcode(LaunchError::HolderFeeOnTokenLaunch));
+        // Since §7.5 a holder fee launches (the kit's holder rewards in the legs' tokens: three
+        // legs, rounds; `token_quotes_holder_rewards.rs`): 6082 is never raised.
+        let tx = send(rules);
+        tx.ok();
+        let p = tx.event::<bordrless_launch::events::TokenLaunchPayouts>();
+        assert_eq!(p.reward_kind, bordrless_kit::constants::REWARD_KIND_ROUNDS);
     }
     // The bounds `create_launch` holds rules to, checked first and in its order.
     let cases = [

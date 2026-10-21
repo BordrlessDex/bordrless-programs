@@ -26,6 +26,7 @@ use crate::constants::*;
 use crate::error::KitError;
 use crate::events::{KitNativeSet, RewardsClaimed, RewardsShared};
 use crate::instructions::callbacks::holding_amount;
+use crate::legs::LegPools;
 use crate::math::settle;
 use crate::state::{HolderData, KitConfig};
 
@@ -284,6 +285,7 @@ pub struct ClaimSol<'info> {
 /// An owner whose wallet would be left below the rent-exempt minimum is refused
 /// (`RecipientBelowRent`).
 pub fn process_claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
+    let legs = claim_legs(&ctx.accounts.kit_config, ctx.remaining_accounts)?;
     let a = &mut *ctx.accounts;
     let event = pay_sol(
         &mut a.kit_config,
@@ -293,6 +295,7 @@ pub fn process_claim_sol(ctx: Context<ClaimSol>) -> Result<()> {
         &a.kit_hook_authority,
         &a.token_program,
         &a.token_event_authority,
+        legs.as_ref(),
     )?;
     emit_cpi!(event);
     Ok(())
@@ -339,6 +342,7 @@ pub struct ClaimSolFor<'info> {
 /// `claim_sol_for`: `claim_sol` pushed by anyone, paid to the holding's owner exactly as its own
 /// `claim_sol` would pay it (same checks, same bytes written, same event).
 pub fn process_claim_sol_for(ctx: Context<ClaimSolFor>) -> Result<()> {
+    let legs = claim_legs(&ctx.accounts.kit_config, ctx.remaining_accounts)?;
     let a = &mut *ctx.accounts;
     let event = pay_sol(
         &mut a.kit_config,
@@ -348,15 +352,31 @@ pub fn process_claim_sol_for(ctx: Context<ClaimSolFor>) -> Result<()> {
         &a.kit_hook_authority,
         &a.token_program,
         &a.token_event_authority,
+        legs.as_ref(),
     )?;
     emit_cpi!(event);
     Ok(())
 }
 
+/// The `Legs` a claim of a coin quoted in tokens excludes every leg's pool by
+/// (`docs/token-quotes.md` §7.5.1): the first remaining account, required exactly when the config is
+/// such a coin's (`LegsMissing`); `None` for every other kit, whose remaining accounts are ignored as
+/// before. Without it a leg's pool, never settled (excluded by the callbacks), could be paid as if
+/// it had held its coins since the first reward.
+fn claim_legs(config: &KitConfig, remaining: &[AccountInfo]) -> Result<Option<LegPools>> {
+    if !config.is_token_quoted() {
+        return Ok(None);
+    }
+    let info = remaining.first().ok_or(KitError::LegsMissing)?;
+    LegPools::read(info, &config.mint).map(Some)
+}
+
 /// The SOL claim of `claim_sol` and `claim_sol_for`, `owner` being the holding's owner (both
 /// contexts constrain it): sync; settle the holder at its balance; pay `min(owed, vault)`
 /// (`NothingToClaim` when that is 0) to `owner` from the config's lamports above its base; write
-/// the holder's reward bytes, the rest as read. Answers the event to emit.
+/// the holder's reward bytes, the rest as read. Answers the event to emit. A coin quoted in tokens
+/// (SOL rewards, `docs/token-quotes.md` §7.5.1) also excludes every leg's pool (`legs`).
+#[allow(clippy::too_many_arguments)]
 fn pay_sol<'info>(
     kit_config: &mut Account<'info, KitConfig>,
     mint_account: &UncheckedAccount<'info>,
@@ -365,6 +385,7 @@ fn pay_sol<'info>(
     kit_hook_authority: &UncheckedAccount<'info>,
     token_program: &UncheckedAccount<'info>,
     token_event_authority: &UncheckedAccount<'info>,
+    legs: Option<&LegPools>,
 ) -> Result<RewardsClaimed> {
     let owner = owner_info.key();
     let now = Clock::get()?.unix_timestamp;
@@ -374,10 +395,7 @@ fn pay_sol<'info>(
     let read = holding.hook_data;
 
     let config = &mut **kit_config;
-    // TODO(phase 2, holder rewards on coins quoted in tokens, docs/token-quotes.md §6.2): exclude
-    // every leg's pool here too (`is_excluded_with` and the coin's `Legs`); today such a coin's kit
-    // has no holder rewards, so it never reaches this (`RewardsOff`).
-    require!(!config.is_excluded(&owner), KitError::NotAHolder);
+    require!(!config.is_excluded_with(&owner, legs), KitError::NotAHolder);
     config.sync(vault_amount, now)?;
     let mut data = HolderData::read(&read);
     settle(&mut data, balance, balance, config.acc_per_share)?;

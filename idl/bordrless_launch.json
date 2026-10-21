@@ -1177,7 +1177,12 @@
         "accounts are the quote mints, in leg order. Each leg then opens with `open_leg`. With rules",
         "(§6.1: the burn, max wallet, the creator wallet lock, the early-buyer lock; no holder fee",
         "yet) as `create_launch` takes them; when they install the kit, the mint names it as its hook",
-        "and the kit's six accounts follow the quote mints. Data without rules reads as none."
+        "and the kit's six accounts follow the quote mints. Data without rules reads as none.",
+        "Workshop items (§7): the creator may be a companion's creator address (the companion's",
+        "`launch_token` signs for it), and a `LaunchConfig` may follow the quote mints (its rules and",
+        "creator fee repeated; no SOL cut, no author's or partner's share), then its custom hook's",
+        "accounts as `create_launch` takes them (the hook's registry listing the coin's `Legs`) or",
+        "the kit's."
       ],
       "discriminator": [
         93,
@@ -1193,7 +1198,8 @@
         {
           "name": "creator",
           "docs": [
-            "The creator (a wallet): pays the launch fee and the rent."
+            "The creator: a wallet, or a companion's creator address (`PDA([\"creator\", mint])` under the",
+            "companion, signing through its `launch_token`). Pays the launch fee and the rent."
           ],
           "writable": true,
           "signer": true
@@ -1814,7 +1820,8 @@
         "Anyone: opens leg `index` of a launch quoted in tokens: its creator-fee account, its pool",
         "on the DEX (this program as the hook, the leg's share deposited) and the pool's registry.",
         "Trading starts once every leg is open. With kit rules, the remaining accounts are the kit,",
-        "the token program's signer of its callbacks and the kit config."
+        "the token program's signer of its callbacks and the kit config; with a custom hook (§7),",
+        "the hook, the token program's signer for it and its extras for the deposit."
       ],
       "discriminator": [
         231,
@@ -1963,6 +1970,144 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "pause_quote_reference",
+      "docs": [
+        "Admin: stops (or resumes) every sale on a quote token's reference."
+      ],
+      "discriminator": [
+        30,
+        122,
+        172,
+        106,
+        137,
+        44,
+        207,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "quote_reference",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101,
+                  45,
+                  114,
+                  101,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_reference.quote_mint",
+                "account": "QuoteReference"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "register_quote_pool",
+      "docs": [
+        "Anyone: registers (or replaces with a deeper one) a quote token's reference pool for the SOL",
+        "switch (`docs/token-quotes.md` §7.5.2): a Raydium AMM v4, CPMM or CLMM pool or a Pump AMM pool",
+        "of the token against wrapped SOL or USDC, swapping, its fee 0.01% to 3%, 100 SOL deep. The",
+        "remaining accounts are the pool's venue accounts, USDC's reference and pool when needed, and",
+        "when replacing the registered pool's."
+      ],
+      "discriminator": [
+        231,
+        72,
+        116,
+        62,
+        30,
+        252,
+        218,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the reference's rent the first time."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "quote_reference",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101,
+                  45,
+                  114,
+                  101,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "revert_launch_to_bridged",
@@ -2216,6 +2361,303 @@
           "type": "bool"
         }
       ]
+    },
+    {
+      "name": "swap_creator_fees",
+      "docs": [
+        "Anyone: sells up to `amount_in` of leg `index`'s creator fees to SOL onto the launch account",
+        "(a wallet creator's coin with the SOL switch on), as `swap_to_sol` sells; the creator claims",
+        "them with `claim_creator_fees_sol`."
+      ],
+      "discriminator": [
+        190,
+        203,
+        96,
+        136,
+        153,
+        151,
+        213,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "docs": [
+            "Pays the wrapped-SOL account's rent and gets it back."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "legs",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "leg_fees",
+          "writable": true
+        },
+        {
+          "name": "quote_reference",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101,
+                  45,
+                  114,
+                  101,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wsol_account",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "source_token_program"
+        },
+        {
+          "name": "spl_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        },
+        {
+          "name": "amount_in",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "swap_to_sol",
+      "docs": [
+        "A custodian of a coin quoted in tokens with the SOL switch on (its kit config or its",
+        "companion's creator address, signing through its program) sells up to `amount_in` of a leg's",
+        "token to SOL on the token's reference pool: at no less than the reference's price less the",
+        "pool's fee, its impact and 1%, within what the token's 8-slot window has left (half the pool's",
+        "fee times its depth across every seller). The SOL lands on the custodian; the return data is",
+        "`(sold u64, lamports u64)`. The remaining accounts are the venue's."
+      ],
+      "discriminator": [
+        18,
+        60,
+        255,
+        39,
+        102,
+        128,
+        62,
+        140
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "docs": [
+            "Pays the wrapped-SOL account's rent and gets it back."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "The tokens' owner: the coin's kit config or its companion's creator address, signing through",
+            "its program. Receives the SOL."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "launch",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "legs",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "Launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "quote_reference",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  111,
+                  116,
+                  101,
+                  45,
+                  114,
+                  101,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wsol_account",
+          "writable": true
+        },
+        {
+          "name": "wsol_mint",
+          "address": "So11111111111111111111111111111111111111112"
+        },
+        {
+          "name": "source_token_program"
+        },
+        {
+          "name": "spl_token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount_in",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -2282,6 +2724,19 @@
         2,
         58,
         54
+      ]
+    },
+    {
+      "name": "QuoteReference",
+      "discriminator": [
+        55,
+        48,
+        134,
+        98,
+        131,
+        236,
+        212,
+        198
       ]
     }
   ],
@@ -2521,6 +2976,58 @@
       ]
     },
     {
+      "name": "QuotePoolRegistered",
+      "discriminator": [
+        166,
+        8,
+        65,
+        12,
+        167,
+        0,
+        109,
+        120
+      ]
+    },
+    {
+      "name": "QuoteReferencePaused",
+      "discriminator": [
+        192,
+        204,
+        130,
+        216,
+        179,
+        237,
+        179,
+        53
+      ]
+    },
+    {
+      "name": "SwappedToSol",
+      "discriminator": [
+        244,
+        46,
+        239,
+        75,
+        119,
+        218,
+        182,
+        137
+      ]
+    },
+    {
+      "name": "TokenLaunchConfigured",
+      "discriminator": [
+        190,
+        61,
+        96,
+        74,
+        58,
+        27,
+        156,
+        108
+      ]
+    },
+    {
       "name": "TokenLaunchCreated",
       "discriminator": [
         200,
@@ -2544,6 +3051,19 @@
         86,
         75,
         97
+      ]
+    },
+    {
+      "name": "TokenLaunchPayouts",
+      "discriminator": [
+        46,
+        72,
+        6,
+        180,
+        239,
+        166,
+        84,
+        212
       ]
     },
     {
@@ -2944,7 +3464,7 @@
     {
       "code": 6076,
       "name": "CompanionTokenLaunch",
-      "msg": "a companion coin can't launch quoted in tokens: its pots are SOL"
+      "msg": "unused since 21 Oct 2026: a companion launches a coin quoted in tokens through its launch_token"
     },
     {
       "code": 6077,
@@ -2974,7 +3494,107 @@
     {
       "code": 6082,
       "name": "HolderFeeOnTokenLaunch",
-      "msg": "holder rewards are not available on a coin quoted in tokens yet: no holder fee"
+      "msg": "unused since docs/token-quotes.md §7.5: a coin quoted in tokens takes a holder fee"
+    },
+    {
+      "code": 6083,
+      "name": "QuoteCutOnTokenLaunch",
+      "msg": "a custom hook's SOL cut has nothing to be paid in on a coin quoted in tokens: a config with a quote cut can't launch one"
+    },
+    {
+      "code": 6084,
+      "name": "ConfigSharesOnTokenLaunch",
+      "msg": "a config that pays its author or a partner a share of the creator fee can't launch a coin quoted in tokens: those shares are paid by SOL claims"
+    },
+    {
+      "code": 6085,
+      "name": "HookMissingLegs",
+      "msg": "a custom hook on a coin quoted in tokens must list the coin's Legs in its registry: the launchpad's PDA of legs and the mint (Account 1)"
+    },
+    {
+      "code": 6086,
+      "name": "PayoutsInvalid",
+      "msg": "payouts: flags other than the SOL switch, or a holder round outside 10 minutes to a day"
+    },
+    {
+      "code": 6087,
+      "name": "WrongKitVault",
+      "msg": "a leg trade's holder fee goes to the kit's vault of the leg's token (the kit config's associated token account of it), writable, after the leg's four extras"
+    },
+    {
+      "code": 6088,
+      "name": "CreatorSignsTokenClaim",
+      "msg": "with the SOL switch on, only the creator takes the creator fee in tokens: it must sign"
+    },
+    {
+      "code": 6089,
+      "name": "QuoteReferenceMissing",
+      "msg": "the quote token has no reference pool: register one (register_quote_pool)"
+    },
+    {
+      "code": 6090,
+      "name": "ReferencePoolInvalid",
+      "msg": "the pool is not a reference: a Raydium AMM v4, CPMM, CLMM or Pump AMM pool of the token against wrapped SOL or USDC, swapping, its vaults its own, its fee within 0.01% and 3%"
+    },
+    {
+      "code": 6091,
+      "name": "ReferencePoolShallow",
+      "msg": "the reference pool holds less than 100 SOL on its SOL (or USDC) side"
+    },
+    {
+      "code": 6092,
+      "name": "ReferenceNotDeeper",
+      "msg": "a registered reference is replaced only by a pool at least 25% deeper"
+    },
+    {
+      "code": 6093,
+      "name": "ReferenceReplacedRecently",
+      "msg": "a reference is replaced at most once an hour"
+    },
+    {
+      "code": 6094,
+      "name": "ReferencePaused",
+      "msg": "the quote token's reference is paused"
+    },
+    {
+      "code": 6095,
+      "name": "ReferenceStale",
+      "msg": "the reference pool's price history is too short or too old"
+    },
+    {
+      "code": 6096,
+      "name": "SwapTooSmall",
+      "msg": "a swap to SOL is worth at least 0.01 SOL"
+    },
+    {
+      "code": 6097,
+      "name": "NotACustodian",
+      "msg": "only a coin's launch, kit config or companion creator address sells its tokens to SOL here"
+    },
+    {
+      "code": 6098,
+      "name": "SolSwitchOff",
+      "msg": "the coin's SOL switch is off"
+    },
+    {
+      "code": 6099,
+      "name": "CompanionCreator",
+      "msg": "a companion's creator fee is swapped by the companion (swap_bucket_to_sol)"
+    },
+    {
+      "code": 6100,
+      "name": "SwapWindowFull",
+      "msg": "the reference's swaps for this window are used up: wait for the next 8 slots"
+    },
+    {
+      "code": 6101,
+      "name": "SwapBelowMinimum",
+      "msg": "the swap brought less SOL than the reference's minimum"
+    },
+    {
+      "code": 6102,
+      "name": "WrongVenueAccounts",
+      "msg": "the venue's accounts are not the reference pool's"
     }
   ],
   "types": [
@@ -3562,14 +4182,27 @@
             "name": "rules",
             "docs": [
               "The token rules, as `create_launch` takes them and within the same bounds",
-              "(`docs/token-quotes.md` §6.1): the burn on buys and sells (every leg's pool hook), max",
-              "wallet, the creator wallet lock and the early-buyer lock (the kit). No holder fee yet",
-              "(`HolderFeeOnTokenLaunch`). Last in the data and optional there: data that ends after",
-              "`virtual_quotes`, as every call made before rules, reads as no rules."
+              "(`docs/token-quotes.md` §6.1, §7.5.1): the holder fee (the kit's holder rewards, paid in the",
+              "legs' tokens or in SOL by `payouts`), the burn on buys and sells (every leg's pool hook), max",
+              "wallet, the creator wallet lock and the early-buyer lock (the kit). Optional in the data:",
+              "data that ends after `virtual_quotes`, as every call made before rules, reads as no rules."
             ],
             "type": {
               "defined": {
                 "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "payouts",
+            "docs": [
+              "How the coin pays out (`docs/token-quotes.md` §7.5): the SOL switch and the holder rounds.",
+              "Optional in the data, after `rules`: absent reads as zero, and zero is written as nothing,",
+              "so a launch without them sends exactly the data it always sent."
+            ],
+            "type": {
+              "defined": {
+                "name": "TokenPayouts"
               }
             }
           }
@@ -5468,6 +6101,207 @@
       }
     },
     {
+      "name": "QuotePoolRegistered",
+      "docs": [
+        "A quote token's reference pool registered or replaced (`register_quote_pool`,",
+        "`docs/token-quotes.md` §7.5.2): `venue` 1 Raydium AMM v4, 2 CPMM, 3 CLMM, 4 Pump AMM; `via` 0",
+        "wrapped SOL, 1 USDC; `replaced` the pool it replaced; its depth in lamports and fee in millionths",
+        "as measured."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "reference",
+            "type": "pubkey"
+          },
+          {
+            "name": "venue",
+            "type": "u8"
+          },
+          {
+            "name": "via",
+            "type": "u8"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "replaced",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "depth_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "fee_ppm",
+            "type": "u32"
+          },
+          {
+            "name": "registrant",
+            "type": "pubkey"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteReference",
+      "docs": [
+        "A quote token's reference pool for the SOL switch (`docs/token-quotes.md` §7.5.2), at",
+        "`[\"quote-ref\", quote_mint]`, shared by every coin quoted in that token: the pool its tokens are",
+        "sold to SOL on (Raydium AMM v4, CPMM, CLMM or Pump AMM, against wrapped SOL or USDC), and the",
+        "window that caps what all its sellers together sell per [`SWAP_WINDOW_SLOTS`] slots. Registered",
+        "by anyone (`register_quote_pool`), replaced by a deeper pool; paused by the admin."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote token."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "venue",
+            "docs": [
+              "`crate::venues::venue`: 1 Raydium AMM v4, 2 CPMM, 3 CLMM, 4 Pump AMM."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "via",
+            "docs": [
+              "[`VIA_SOL`] or [`VIA_USDC`]."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The pool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "registrant",
+            "docs": [
+              "Who registered it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "registered_at",
+            "docs": [
+              "When."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "depth_at",
+            "docs": [
+              "Its SOL-side depth then, lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window",
+            "docs": [
+              "The window of slots the sales below count in (`slot / SWAP_WINDOW_SLOTS`)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_value",
+            "docs": [
+              "What the window's sales were worth, lamports."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Paused by the admin: no sale until unpaused."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "sold_total",
+            "docs": [
+              "Sales so far: the token sold and the lamports they brought (running totals)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lamports_total",
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteReferencePaused",
+      "docs": [
+        "The admin paused or resumed a quote token's reference."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "RuleBounds",
       "docs": [
         "The bounds `create_launch` holds token rules to (§5.2), kept in the [`Config`]. `init_config`",
@@ -5531,6 +6365,108 @@
               "Latest early-buyer unlock, counted from the launch."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwappedToSol",
+      "docs": [
+        "A coin's tokens sold to SOL on their reference pool (`swap_to_sol`, `swap_creator_fees`):",
+        "`authority` the seller (the launch, the kit config or the companion's creator address), which",
+        "received `lamports_out`; `price` the reference's lamports per raw unit of the token (Q64.64);",
+        "`window_value` what the token's window has sold, in lamports, after this."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "venue",
+            "type": "u8"
+          },
+          {
+            "name": "via",
+            "type": "u8"
+          },
+          {
+            "name": "amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "lamports_out",
+            "type": "u64"
+          },
+          {
+            "name": "min_out",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "window_value",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenLaunchConfigured",
+      "docs": [
+        "A launch quoted in tokens made from a `LaunchConfig` (`create_token_launch`,",
+        "`docs/token-quotes.md` §7), right after its `TokenLaunchCreated` (and before any",
+        "`TokenLaunchRules`): the config, and the custom hook it names, now the coin's token hook. Only",
+        "for a launch made from a config."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "custom_hook",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "custom_hook_flags",
+            "type": "u16"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }
@@ -5676,6 +6612,44 @@
       }
     },
     {
+      "name": "TokenLaunchPayouts",
+      "docs": [
+        "The payouts of a coin quoted in tokens (`docs/token-quotes.md` §7.5), after its",
+        "`TokenLaunchCreated` (and `TokenLaunchRules`), when it has the SOL switch or holder rewards:",
+        "`flags` bit 0 the SOL switch; `reward_kind` how holder rewards are paid (0 none, 1 the leg's",
+        "token, 2 every leg's token in rounds of `holder_round_secs`, 3 SOL)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "flags",
+            "type": "u8"
+          },
+          {
+            "name": "reward_kind",
+            "type": "u8"
+          },
+          {
+            "name": "holder_round_secs",
+            "type": "u32"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "TokenLaunchRules",
       "docs": [
         "The rules of a launch quoted in tokens (`create_token_launch`, `docs/token-quotes.md` §6.1),",
@@ -5741,6 +6715,28 @@
           {
             "name": "ts",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenPayouts",
+      "docs": [
+        "Optional at the end of the data: 5 bytes (flags u8, holder_round_secs u32) when either is set, none when both are 0."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flags",
+            "docs": [
+              "Bit 0: the SOL switch."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "holder_round_secs",
+            "type": "u32"
           }
         ]
       }

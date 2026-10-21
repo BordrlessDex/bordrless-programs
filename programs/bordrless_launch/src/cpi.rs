@@ -313,22 +313,38 @@ pub fn dex_create_spl_pool(
 }
 
 /// The kit's `init_legs` (`docs/token-quotes.md` §6.1): `init`'s keys without the reward mint and
-/// vault (none on a coin quoted in tokens yet).
+/// vault (no holder rewards).
 pub fn kit_init_legs(keys: &KitInitKeys, args: KitInitArgs) -> Instruction {
+    kit_init_legs_with(keys, args, bordrless_kit::LegsRewards::default())
+}
+
+/// [`kit_init_legs`] with holder rewards of `rewards.kind` (§7.5.1): the kind and round length after
+/// the arguments, and for kind 1 the leg's quote mint (`args.reward_mint`) after the program. Kind 0:
+/// exactly [`kit_init_legs`]'s instruction.
+pub fn kit_init_legs_with(
+    keys: &KitInitKeys,
+    args: KitInitArgs,
+    rewards: bordrless_kit::LegsRewards,
+) -> Instruction {
+    let reward_mint = args.reward_mint;
+    let mut accounts = vec![
+        AccountMeta::new_readonly(keys.kit_caller, true),
+        AccountMeta::new(keys.payer, true),
+        ro(keys.mint),
+        ro(keys.launch_reserve),
+        rw(keys.kit_config),
+        rw(keys.registry),
+        ro(system_program::ID),
+        ro(KIT_EVENT_AUTHORITY),
+        ro(KIT_ID),
+    ];
+    if rewards.kind == bordrless_kit::constants::REWARD_KIND_TOKEN {
+        accounts.push(ro(reward_mint));
+    }
     Instruction {
         program_id: KIT_ID,
-        accounts: vec![
-            AccountMeta::new_readonly(keys.kit_caller, true),
-            AccountMeta::new(keys.payer, true),
-            ro(keys.mint),
-            ro(keys.launch_reserve),
-            rw(keys.kit_config),
-            rw(keys.registry),
-            ro(system_program::ID),
-            ro(KIT_EVENT_AUTHORITY),
-            ro(KIT_ID),
-        ],
-        data: bordrless_kit::instruction::InitLegs { args }.data(),
+        accounts,
+        data: bordrless_kit::client::init_legs_data(args, rewards),
     }
 }
 
@@ -337,6 +353,18 @@ pub fn kit_init_legs(keys: &KitInitKeys, args: KitInitArgs) -> Instruction {
 /// reward vault) and the coin's `Legs`.
 pub fn kit_legs_slice(kit_config: Pubkey, legs: Pubkey) -> Vec<AccountMeta> {
     let mut slice = kit_slice(kit_config, None);
+    slice.push(ro(legs));
+    slice
+}
+
+/// [`kit_legs_slice`] of a one-leg coin paying holder rewards in its token (§7.5.1): the reward
+/// vault in place of the kit's id.
+pub fn kit_legs_slice_with_vault(
+    kit_config: Pubkey,
+    legs: Pubkey,
+    reward_vault: Pubkey,
+) -> Vec<AccountMeta> {
+    let mut slice = kit_slice(kit_config, Some(reward_vault));
     slice.push(ro(legs));
     slice
 }

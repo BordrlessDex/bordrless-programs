@@ -1,0 +1,899 @@
+{
+  "address": "9mRXU9gpWY3B13AyuCCtNjHnKt1pUFBQ6vJDLTwgakhm",
+  "metadata": {
+    "name": "loss_cover_script",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Bordrless Loss cover script: the companion script that pays every holder under water the same fraction of its uncovered loss from the companion's pot, in rounds, reading the Loss cover hook's records. It moves nothing itself: it names, the companion pays and the hook records."
+  },
+  "instructions": [
+    {
+      "name": "companion_init",
+      "docs": [
+        "The companion's `create_script_v2` calls it once, the creator address signing: the terms",
+        "(`init_data`, a [`CoverTerms`]) are written into the state the companion made."
+      ],
+      "discriminator": [
+        118,
+        161,
+        187,
+        180,
+        87,
+        86,
+        220,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "The companion's creator address for the mint, which only the companion signs for."
+          ],
+          "signer": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                82,
+                155,
+                240,
+                140,
+                167,
+                119,
+                6,
+                207,
+                8,
+                204,
+                153,
+                235,
+                95,
+                232,
+                58,
+                83,
+                32,
+                82,
+                214,
+                243,
+                212,
+                182,
+                185,
+                66,
+                76,
+                49,
+                116,
+                195,
+                33,
+                51,
+                41,
+                170
+              ]
+            }
+          }
+        },
+        {
+          "name": "mint_account"
+        },
+        {
+          "name": "state",
+          "docs": [
+            "The state the companion made for the mint: `PDA([\"script-state\", mint])` under the",
+            "companion, owned by this program, all zeros."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  114,
+                  105,
+                  112,
+                  116,
+                  45,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                82,
+                155,
+                240,
+                140,
+                167,
+                119,
+                6,
+                207,
+                8,
+                204,
+                153,
+                235,
+                95,
+                232,
+                58,
+                83,
+                32,
+                82,
+                214,
+                243,
+                212,
+                182,
+                185,
+                66,
+                76,
+                49,
+                116,
+                195,
+                33,
+                51,
+                41,
+                170
+              ]
+            }
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "init_data",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "companion_step",
+      "docs": [
+        "The companion's `script_step` calls it, the creator address signing: the round rolled when",
+        "due, every candidate holding measured and its payment named (see the module). Answers the",
+        "payouts; `NothingToDo` when there are none."
+      ],
+      "discriminator": [
+        94,
+        21,
+        170,
+        161,
+        246,
+        110,
+        21,
+        40
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "docs": [
+            "The companion's creator address for the mint, which only the companion signs for."
+          ],
+          "signer": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                82,
+                155,
+                240,
+                140,
+                167,
+                119,
+                6,
+                207,
+                8,
+                204,
+                153,
+                235,
+                95,
+                232,
+                58,
+                83,
+                32,
+                82,
+                214,
+                243,
+                212,
+                182,
+                185,
+                66,
+                76,
+                49,
+                116,
+                195,
+                33,
+                51,
+                41,
+                170
+              ]
+            }
+          }
+        },
+        {
+          "name": "mint_account"
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion",
+          "docs": [
+            "The companion of the mint: its pot and its beneficiary."
+          ]
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "state",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "CoverAnswer"
+        }
+      }
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CoverState",
+      "discriminator": [
+        104,
+        115,
+        165,
+        244,
+        18,
+        219,
+        8,
+        1
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CoverRound",
+      "discriminator": [
+        144,
+        221,
+        66,
+        51,
+        242,
+        177,
+        96,
+        133
+      ]
+    },
+    {
+      "name": "CoverRoundLeg",
+      "discriminator": [
+        99,
+        105,
+        101,
+        201,
+        91,
+        43,
+        71,
+        196
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BadTerms",
+      "msg": "the terms are out of bounds: cover 10% to 100%, a holding and a loss of at least 1, a wait of 30 days at most, rounds of a minute to a day, a minimum pot of 100 SOL at most"
+    },
+    {
+      "code": 6001,
+      "name": "NotInitialized",
+      "msg": "the state was never initialized"
+    },
+    {
+      "code": 6002,
+      "name": "WrongMint",
+      "msg": "an account is of another mint"
+    },
+    {
+      "code": 6003,
+      "name": "WrongAccount",
+      "msg": "an account is not the one expected"
+    },
+    {
+      "code": 6004,
+      "name": "NoPrice",
+      "msg": "the pool has no price"
+    },
+    {
+      "code": 6005,
+      "name": "NoTerms",
+      "msg": "the companion's payout terms for the mint were not passed"
+    },
+    {
+      "code": 6006,
+      "name": "NothingToDo",
+      "msg": "nothing to measure or pay in this batch"
+    },
+    {
+      "code": 6007,
+      "name": "NoLegs",
+      "msg": "a coin quoted in tokens: pass its Legs and the companion's legs (CompanionLegs)"
+    }
+  ],
+  "types": [
+    {
+      "name": "Companion",
+      "docs": [
+        "`PDA([\"companion\", mint])`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "creator_bump",
+            "docs": [
+              "Bump of `PDA([\"creator\", mint])`, the launch's creator."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "beneficiary",
+            "docs": [
+              "Who launched it: receives the beneficiary's part of the fees and the vested dev bag."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "split",
+            "type": {
+              "defined": {
+                "name": "Split"
+              }
+            }
+          },
+          {
+            "name": "bounty_bps",
+            "docs": [
+              "What a step pays whoever sends it, of what it moves (at most `MAX_BOUNTY_BPS`)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_buyback",
+            "docs": [
+              "The most one buyback spends (lamports of bridged SOL)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buyback_interval",
+            "docs": [
+              "The least time between buybacks."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "vest_secs",
+            "docs": [
+              "The dev bag vests linearly over this many seconds from the launch (0: at once)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "launched",
+            "type": "bool"
+          },
+          {
+            "name": "launched_at",
+            "type": "i64"
+          },
+          {
+            "name": "dev_tokens",
+            "docs": [
+              "Tokens bought for the dev bag, and released to the beneficiary so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "dev_released",
+            "type": "u64"
+          },
+          {
+            "name": "pending_buyback",
+            "docs": [
+              "Bridged SOL held for each purpose (in the creator's holding)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_holders",
+            "type": "u64"
+          },
+          {
+            "name": "pending_beneficiary",
+            "type": "u64"
+          },
+          {
+            "name": "last_buyback_at",
+            "type": "i64"
+          },
+          {
+            "name": "claimed_total",
+            "docs": [
+              "Running totals."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "spent_total",
+            "type": "u64"
+          },
+          {
+            "name": "burned_total",
+            "type": "u64"
+          },
+          {
+            "name": "shared_total",
+            "type": "u64"
+          },
+          {
+            "name": "paid_beneficiary_total",
+            "type": "u64"
+          },
+          {
+            "name": "bounties_total",
+            "type": "u64"
+          },
+          {
+            "name": "reference_price",
+            "docs": [
+              "The buyback's reference price (quote per base unit times `PRICE_SCALE`), set at the launch and",
+              "moved toward the pool's price by at most `REFERENCE_STEP_BPS` at a time, once an interval."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "reference_at",
+            "type": "i64"
+          },
+          {
+            "name": "game_hook",
+            "docs": [
+              "The game's token hook (`create_game`); the default key for a companion without a game."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pot_bps",
+            "docs": [
+              "The pot's part of every fee claim, next to `split` (the four sum to 10,000)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "pending_pot",
+            "docs": [
+              "Bridged SOL held for the game's pot (in the creator's holding)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "round_secs",
+            "docs": [
+              "The game's round length, which its hook's header must state (checked at the launch)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "stranded_burned_at",
+            "docs": [
+              "When `burn_stranded` last burned a blocked game's buyback, a blocked game's pot last moved",
+              "into the buyback (by any step: `enforce_terms`), or a blocked game's fee claim last credited",
+              "the buyback at least what it held (`Companion::restart_stranded_wait`) (0: never): the",
+              "next burn waits its whole period from here, so a pot moved, or a share credited to a",
+              "buyback that had spent what it was given, is never burned before keepers have had that",
+              "long to spend it."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "game_kind",
+            "docs": [
+              "The game's kind (`create_game`), which the launch checks the hook's flags and header by."
+            ],
+            "type": {
+              "defined": {
+                "name": "GameKind"
+              }
+            }
+          },
+          {
+            "name": "pot_locked",
+            "docs": [
+              "The part of `pending_pot` a closed streak epoch still owes its holders: a cap lowered since",
+              "never trims it (`steps::enforce_terms`), and only a block moves it to the buyback. Zero for",
+              "every other kind."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "mode",
+            "docs": [
+              "`MODE_CLASSIC`, `MODE_SNOWBALL` or `MODE_SCRIPT` (2026-10-12), the last byte of what was",
+              "`reserved`: zero, classic, in every companion made before."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "quote_cut_claimed",
+            "docs": [
+              "How much of the launch's `quote_cut_accrued` (the hook's SOL cut, paid into the creator fee",
+              "vault with the creator fee) this companion's fee claims have taken: what a claim takes",
+              "beyond it, up to the whole claim, is the hook's and goes to the pot's bucket."
+            ],
+            "type": {
+              "defined": {
+                "name": "QuoteCutClaimed"
+              }
+            }
+          },
+          {
+            "name": "native_sol",
+            "docs": [
+              "Whether the companion's SOL is lamports on its creator address (`crate::instructions::native`)",
+              "rather than bridged SOL in the creator's holding."
+            ],
+            "type": {
+              "defined": {
+                "name": "NativeSol"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CoverAnswer",
+      "docs": [
+        "The Borsh of a PayoutAnswer (version 1, a SOL coin) or a PayoutAnswerLegs (version 3, a coin quoted in tokens): read the first byte."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "1 or 3; the entries follow as that version's."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CoverRound",
+      "docs": [
+        "A round rolled: its budget and the loss measured over the round before, which fix the round's",
+        "fraction `min(1, b / l_prev)`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "u32"
+          },
+          {
+            "name": "b",
+            "type": "u64"
+          },
+          {
+            "name": "l_prev",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CoverRoundLeg",
+      "docs": [
+        "A leg's round rolled on a coin quoted in tokens: its budget `b` and the loss `l_prev` measured",
+        "on the leg the round before, in the leg's token."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "u32"
+          },
+          {
+            "name": "leg",
+            "type": "u8"
+          },
+          {
+            "name": "b",
+            "type": "u64"
+          },
+          {
+            "name": "l_prev",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CoverState",
+      "docs": [
+        "The script's state, `PDA([\"script-state\", mint])` under the companion, 128 bytes: the terms,",
+        "written once by `companion_init`, then the rounds."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "cover_bps",
+            "type": "u16"
+          },
+          {
+            "name": "min_holding",
+            "type": "u64"
+          },
+          {
+            "name": "min_loss",
+            "type": "u64"
+          },
+          {
+            "name": "min_age_secs",
+            "type": "u32"
+          },
+          {
+            "name": "round_secs",
+            "type": "u32"
+          },
+          {
+            "name": "min_pot_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "round",
+            "docs": [
+              "The round of the last step (0 before the first)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "b",
+            "docs": [
+              "The round's budget: the pot at its first step."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "l_prev",
+            "docs": [
+              "The uncovered loss measured over the previous round."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "l_cur",
+            "docs": [
+              "Measured so far this round."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "round_paid",
+            "docs": [
+              "Paid so far this round."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "measured",
+            "docs": [
+              "Holdings measured this round."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "rounds",
+            "docs": [
+              "Rounds stepped so far."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "paid_total",
+            "docs": [
+              "Paid all time."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                1
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameKind",
+      "docs": [
+        "The kinds of game a companion runs. Borsh writes the variant's index, so a kind added later is",
+        "appended and every game made before keeps its own (a companion made before phase 2 reads 0,",
+        "the lottery, in `Companion.game_kind`)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Lottery"
+          },
+          {
+            "name": "Jackpot"
+          },
+          {
+            "name": "Streak"
+          },
+          {
+            "name": "Strategy"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NativeSol",
+      "docs": [
+        "A bool (1 byte); absent (read as false) in a companion not grown for it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "on",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteCutClaimed",
+      "docs": [
+        "A u64; absent (read as 0) in a companion account made before 2026-10-15."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Split",
+      "docs": [
+        "What every creator fee claim pays for, in basis points summing to 10,000."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyback_bps",
+            "docs": [
+              "Bought back on the token's own pool and burned."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "holders_bps",
+            "docs": [
+              "Streamed to holders through the kit's reward pool."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "beneficiary_bps",
+            "docs": [
+              "Accrued to the beneficiary, who is paid it as SOL."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -166,7 +166,7 @@ pub enum LaunchError {
     DuplicateQuoteToken,
     #[msg("a leg's virtual quote is below the minimum (1,000 raw units)")]
     LegVirtualQuoteTooSmall,
-    #[msg("a companion coin can't launch quoted in tokens: its pots are SOL")]
+    #[msg("unused since 21 Oct 2026: a companion launches a coin quoted in tokens through its launch_token")]
     CompanionTokenLaunch,
     #[msg("the launch has no such leg")]
     NoSuchLeg,
@@ -180,8 +180,54 @@ pub enum LaunchError {
     WrongLegAccount,
     #[msg("a leg pool's callbacks take the launch's Legs (writable) where a launch pool takes its holder vault")]
     LegsAccountInvalid,
-    #[msg("holder rewards are not available on a coin quoted in tokens yet: no holder fee")]
+    #[msg("unused since docs/token-quotes.md §7.5: a coin quoted in tokens takes a holder fee")]
     HolderFeeOnTokenLaunch,
+    // ---- Workshop items on coins quoted in tokens (docs/token-quotes.md §7). Appended. ----
+    #[msg("a custom hook's SOL cut has nothing to be paid in on a coin quoted in tokens: a config with a quote cut can't launch one")]
+    QuoteCutOnTokenLaunch,
+    #[msg("a config that pays its author or a partner a share of the creator fee can't launch a coin quoted in tokens: those shares are paid by SOL claims")]
+    ConfigSharesOnTokenLaunch,
+    #[msg("a custom hook on a coin quoted in tokens must list the coin's Legs in its registry: the launchpad's PDA of legs and the mint (Account 1)")]
+    HookMissingLegs,
+    // ---- Holder rewards in the quote token and the SOL switch (docs/token-quotes.md §7.5). Appended. ----
+    #[msg(
+        "payouts: flags other than the SOL switch, or a holder round outside 10 minutes to a day"
+    )]
+    PayoutsInvalid,
+    #[msg("a leg trade's holder fee goes to the kit's vault of the leg's token (the kit config's associated token account of it), writable, after the leg's four extras")]
+    WrongKitVault,
+    #[msg(
+        "with the SOL switch on, only the creator takes the creator fee in tokens: it must sign"
+    )]
+    CreatorSignsTokenClaim,
+    #[msg("the quote token has no reference pool: register one (register_quote_pool)")]
+    QuoteReferenceMissing,
+    #[msg("the pool is not a reference: a Raydium AMM v4, CPMM, CLMM or Pump AMM pool of the token against wrapped SOL or USDC, swapping, its vaults its own, its fee within 0.01% and 3%")]
+    ReferencePoolInvalid,
+    #[msg("the reference pool holds less than 100 SOL on its SOL (or USDC) side")]
+    ReferencePoolShallow,
+    #[msg("a registered reference is replaced only by a pool at least 25% deeper")]
+    ReferenceNotDeeper,
+    #[msg("a reference is replaced at most once an hour")]
+    ReferenceReplacedRecently,
+    #[msg("the quote token's reference is paused")]
+    ReferencePaused,
+    #[msg("the reference pool's price history is too short or too old")]
+    ReferenceStale,
+    #[msg("a swap to SOL is worth at least 0.01 SOL")]
+    SwapTooSmall,
+    #[msg("only a coin's launch, kit config or companion creator address sells its tokens to SOL here")]
+    NotACustodian,
+    #[msg("the coin's SOL switch is off")]
+    SolSwitchOff,
+    #[msg("a companion's creator fee is swapped by the companion (swap_bucket_to_sol)")]
+    CompanionCreator,
+    #[msg("the reference's swaps for this window are used up: wait for the next 8 slots")]
+    SwapWindowFull,
+    #[msg("the swap brought less SOL than the reference's minimum")]
+    SwapBelowMinimum,
+    #[msg("the venue's accounts are not the reference pool's")]
+    WrongVenueAccounts,
 }
 
 impl From<bordrless_swap::spl::MintRefusal> for LaunchError {

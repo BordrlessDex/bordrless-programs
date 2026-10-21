@@ -75,6 +75,22 @@ pub enum KitError {
     LegsMissing,
     #[msg("the Legs passed is not this coin's")]
     WrongLegs,
-    #[msg("holder rewards are not available on a coin quoted in tokens yet")]
+    #[msg("holder rewards on a coin quoted in tokens need a reward kind (a launchpad from before quote-token rewards)")]
     RewardsOnTokenQuote,
+    #[msg("this kit pays holder rewards another way (a leg's token, rounds, or SOL)")]
+    WrongRewardKind,
+    #[msg("the owner's token account of the reward token is missing or can't receive it")]
+    NoTokenAccount,
+    #[msg("this round has not been started: start_round first")]
+    RoundNotStarted,
+    #[msg("this round has already been started")]
+    RoundAlreadyStarted,
+    #[msg("the holding has not held through the round before")]
+    NotHeldThroughRound,
+    #[msg("the holding has already been paid this round")]
+    AlreadyPaidThisRound,
+    #[msg("a round is 10 minutes to a day")]
+    InvalidRoundSecs,
+    #[msg("the swap to SOL is not the launchpad's swap_to_sol of this leg's vault")]
+    WrongSwap,
 }

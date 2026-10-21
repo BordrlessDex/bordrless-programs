@@ -12,8 +12,8 @@ use bordrless_token::state::{Holding, Mint as TokenMint};
 
 use crate::constants::*;
 use crate::error::KitError;
-use crate::events::KitInstalled;
-use crate::state::{KitConfig, KitInitArgs};
+use crate::events::{KitInstalled, LegsRewardsInstalled};
+use crate::state::{KitConfig, KitInitArgs, LegsRewards};
 
 /// Accounts of `init`.
 #[event_cpi]
@@ -233,29 +233,128 @@ pub fn legs_registry_list(kit_config: Pubkey) -> HookAccountList {
     list
 }
 
+/// The kit's registry for a one-leg coin quoted in tokens paying holder rewards in its leg's token
+/// (kind 1): [`legs_registry_list`] with the reward vault (the config's associated token account
+/// of the leg's token, read-only) in place of the kit's id.
+pub fn token_rewards_registry_list(kit_config: Pubkey, reward_vault: Pubkey) -> HookAccountList {
+    let mut list = legs_registry_list(kit_config);
+    list.accounts[1] = ExtraAccount {
+        writable: false,
+        source: AccountSource::Key(reward_vault),
+    };
+    list
+}
+
+/// The reward settings of `init_legs` (`docs/token-quotes.md` §7.5.1) checked against the modules:
+/// a reward kind exactly with holder rewards (kind 0 with them is a launchpad from before, refused
+/// as it always was: `RewardsOnTokenQuote`); a round length within bounds for rounds, none for the
+/// other kinds; for kind 1 the leg's quote mint (the first remaining account, an SPL Token or
+/// Token-2022 mint named by `reward_mint`): its program and decimals.
+fn legs_rewards_of(
+    args: &KitInitArgs,
+    rewards: &LegsRewards,
+    remaining: &[AccountInfo],
+) -> Result<Option<(u8, u8)>> {
+    let on = args.modules & modules::HOLDER_REWARDS != 0;
+    match (on, rewards.kind) {
+        (false, 0) => {
+            require!(rewards.round_secs == 0, KitError::WrongRewardKind);
+            require_keys_eq!(
+                args.reward_mint,
+                Pubkey::default(),
+                KitError::WrongRewardMint
+            );
+            Ok(None)
+        }
+        (true, 0) => err!(KitError::RewardsOnTokenQuote),
+        (true, REWARD_KIND_TOKEN) => {
+            require!(rewards.round_secs == 0, KitError::WrongRewardKind);
+            let info = remaining.first().ok_or(KitError::WrongRewardMint)?;
+            require_keys_eq!(*info.key, args.reward_mint, KitError::WrongRewardMint);
+            let program = crate::spl::program_index(info.owner).ok_or(KitError::WrongRewardMint)?;
+            let data = info.try_borrow_data()?;
+            // A mint: its base 82 bytes initialized (a Token-2022 mint with extensions is longer).
+            require!(data.len() >= 82 && data[45] == 1, KitError::WrongRewardMint);
+            Ok(Some((program, data[44])))
+        }
+        (true, REWARD_KIND_ROUNDS) => {
+            require!(
+                (MIN_ROUND_SECS..=MAX_ROUND_SECS).contains(&rewards.round_secs),
+                KitError::InvalidRoundSecs
+            );
+            require_keys_eq!(
+                args.reward_mint,
+                Pubkey::default(),
+                KitError::WrongRewardMint
+            );
+            Ok(None)
+        }
+        (true, REWARD_KIND_SOL) => {
+            require!(rewards.round_secs == 0, KitError::WrongRewardKind);
+            require_keys_eq!(
+                args.reward_mint,
+                Pubkey::default(),
+                KitError::WrongRewardMint
+            );
+            Ok(None)
+        }
+        _ => err!(KitError::WrongRewardKind),
+    }
+}
+
 /// `init_legs`: the kit of a coin quoted in tokens (`docs/token-quotes.md` §6.1), installed by the
 /// launchpad inside `create_token_launch` as `init` installs a SOL coin's: the same checks of the
-/// arguments, the mint, the reserve and the caller, without holder rewards (`RewardsOnTokenQuote`)
-/// or a reward mint (the default key, else `WrongRewardMint`). The config is marked quoted in
-/// tokens, so its callbacks take the coin's `Legs` and treat every leg's pool as the pool; `pool`
-/// is leg 0's.
-pub fn process_init_legs(ctx: Context<InitLegs>, args: KitInitArgs) -> Result<()> {
+/// arguments, the mint, the reserve and the caller. The config is marked quoted in tokens, so its
+/// callbacks take the coin's `Legs` and treat every leg's pool as the pool; `pool` is leg 0's.
+///
+/// Holder rewards (§7.5.1) come with a reward kind (`rewards`): 1, a one-leg coin's token, the
+/// vault the config's associated token account of it (made by `open_leg`), listed in the registry
+/// in place of the kit's id; 2, every leg's token in rounds of `round_secs`; 3, SOL, the kit native
+/// from birth (its rent its lamport base). Without holder rewards nothing changes (kind 0, no reward
+/// mint).
+pub fn process_init_legs<'info>(
+    ctx: Context<'info, InitLegs<'info>>,
+    args: KitInitArgs,
+    rewards: LegsRewards,
+) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let mint_key = ctx.accounts.mint.key();
     let config_key = ctx.accounts.kit_config.key();
     let mint = &ctx.accounts.mint;
     let supply = mint.supply;
-    require!(
-        args.modules & modules::HOLDER_REWARDS == 0,
-        KitError::RewardsOnTokenQuote
-    );
-    require_keys_eq!(
-        args.reward_mint,
-        Pubkey::default(),
-        KitError::WrongRewardMint
-    );
-    let mut config = KitConfig::install(&args, mint_key, supply, ctx.bumps.kit_config, None, now)?;
+    let token = legs_rewards_of(&args, &rewards, ctx.remaining_accounts)?;
+    let vault = token.map(|(program, _)| {
+        crate::spl::associated_address(
+            &config_key,
+            &args.reward_mint,
+            &crate::spl::program_id(program),
+        )
+    });
+    // Rounds and SOL keep no vault: the config's `reward_vault` stays the default key.
+    let installed_vault = match rewards.kind {
+        REWARD_KIND_ROUNDS | REWARD_KIND_SOL => Some(Pubkey::default()),
+        _ => vault,
+    };
+    let mut config = KitConfig::install(
+        &args,
+        mint_key,
+        supply,
+        ctx.bumps.kit_config,
+        installed_vault,
+        now,
+    )?;
     config.set_token_quoted();
+    config.set_reward_kind(rewards.kind);
+    if let Some((program, decimals)) = token {
+        config.set_reward_token(program, decimals);
+    }
+    if rewards.kind == REWARD_KIND_ROUNDS {
+        config.set_round_secs(rewards.round_secs);
+    }
+    if rewards.kind == REWARD_KIND_SOL {
+        // Native from birth: the config's rent is its base, every lamport above it a reward.
+        config.set_native(Some(ctx.accounts.kit_config.to_account_info().lamports()));
+    }
     require!(
         mint.hook_program == Some(crate::ID)
             && mint.hook_authority.is_none()
@@ -286,7 +385,10 @@ pub fn process_init_legs(ctx: Context<InitLegs>, args: KitInitArgs) -> Result<()
         &crate::ID,
         &mint_key,
         ctx.bumps.registry,
-        &legs_registry_list(config_key),
+        &match vault {
+            Some(v) => token_rewards_registry_list(config_key, v),
+            None => legs_registry_list(config_key),
+        },
     )?;
     emit_cpi!(KitInstalled {
         mint: mint_key,
@@ -306,6 +408,15 @@ pub fn process_init_legs(ctx: Context<InitLegs>, args: KitInitArgs) -> Result<()
         early_unlock_at: config.early_unlock_at,
         ts: now,
     });
+    if rewards.kind != 0 {
+        emit_cpi!(LegsRewardsInstalled {
+            mint: mint_key,
+            kind: rewards.kind,
+            round_secs: config.round_secs(),
+            reward_mint: config.reward_mint,
+            reward_vault: config.reward_vault,
+        });
+    }
     ctx.accounts.kit_config.set_inner(config);
     Ok(())
 }

@@ -66,6 +66,11 @@ pub struct Claim<'info> {
 /// early buyer).
 pub fn process_claim(ctx: Context<Claim>) -> Result<()> {
     require!(!ctx.accounts.kit_config.is_native(), KitError::NativeKit);
+    // A coin quoted in tokens pays its holders by `claim_token`, `pay_round` or `claim_sol`.
+    require!(
+        ctx.accounts.kit_config.reward_kind() == 0,
+        KitError::WrongRewardKind
+    );
     let owner = ctx.accounts.owner.key();
     let now = Clock::get()?.unix_timestamp;
     let vault_amount = holding_amount(&ctx.accounts.reward_vault)?;
@@ -73,9 +78,9 @@ pub fn process_claim(ctx: Context<Claim>) -> Result<()> {
     let read = ctx.accounts.holding.hook_data;
 
     let config = &mut ctx.accounts.kit_config;
-    // TODO(phase 2, holder rewards on coins quoted in tokens, docs/token-quotes.md §6.2): exclude
-    // every leg's pool here too (`is_excluded_with` and the coin's `Legs`); today such a coin's kit
-    // has no holder rewards, so it never reaches this (`RewardsOff`).
+    // Bridged SOL rewards only: a coin quoted in tokens never reaches this (refused above), so no
+    // leg's pool is a holder here; its claims exclude every leg's pool (`claim_token`, `pay_round`,
+    // `claim_sol`).
     require!(!config.is_excluded(&owner), KitError::NotAHolder);
     config.sync(vault_amount, now)?;
     let mut data = HolderData::read(&read);

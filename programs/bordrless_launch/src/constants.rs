@@ -216,6 +216,27 @@ pub const TOKEN_LAUNCH_KIT_ACCOUNTS: usize = 6;
 /// kit's id again and the `Legs` they make the coin's slice for the leg's deposit.
 pub const OPEN_LEG_KIT_ACCOUNTS: usize = 3;
 
+// ---- Payouts of coins quoted in tokens (`docs/token-quotes.md` §7.5): holder rewards in the legs'
+// tokens and the SOL switch. ----
+
+/// `Launch.reserved[PAYOUTS_OFFSET]` (byte 530): the payout flags `create_token_launch` fixed
+/// (`TokenPayouts.flags`); 0 for every launch made before.
+pub const PAYOUTS_OFFSET: usize = 19;
+/// Payout flag: the SOL switch.
+pub const PAYOUT_SOL: u8 = 1;
+/// Index, in a leg pool's callback account list, of the kit's vault of the leg's token (the kit
+/// config's associated token account of it), writable, on a coin with holder rewards: the holder fee
+/// goes there. The first account after the leg's four extras.
+pub const KIT_VAULT_INDEX: u8 = 9;
+/// The kit's accounts `open_leg` takes on a coin with holder rewards: the three above and the kit's
+/// vault of the leg's token (made here when missing).
+pub const OPEN_LEG_KIT_REWARD_ACCOUNTS: usize = 4;
+/// The holder-reward round when the launch names none (an hour).
+pub const DEFAULT_HOLDER_ROUND_SECS: u32 = 3_600;
+/// The shortest and longest holder-reward round.
+pub const MIN_HOLDER_ROUND_SECS: u32 = 600;
+pub const MAX_HOLDER_ROUND_SECS: u32 = 86_400;
+
 /// Whether `creator` is the companion creator address of `mint` (`PDA(["creator", mint],
 /// COMPANION_ID)`): a companion coin. `revert_launch_to_bridged` uses it to know a launch has a
 /// companion that must revert first.
@@ -267,3 +288,29 @@ pub const RESERVED_ACCOUNT_KEYS: [Pubkey; 31] = [
     Pubkey::from_str_const("SysvarS1otHistory11111111111111111111111111"),
     Pubkey::from_str_const("SysvarStakeHistory1111111111111111111111111"),
 ];
+
+// ---- The SOL switch (`docs/token-quotes.md` §7.5.2): a quote token's reference pool, and the sales
+// of a token coin's tokens to SOL on it. ----
+
+/// `["quote-ref", quote_mint]`: a quote token's [`crate::state::QuoteReference`].
+pub const QUOTE_REF_SEED: &[u8] = b"quote-ref";
+/// The least a reference pool holds on its SOL side (a USDC side valued through USDC's own
+/// reference): 100 SOL.
+pub const MIN_REFERENCE_DEPTH_LAMPORTS: u128 = 100_000_000_000;
+/// A reference pool's fee bounds, millionths: 0.01% to 3%.
+pub const MIN_REFERENCE_FEE_PPM: u128 = 100;
+pub const MAX_REFERENCE_FEE_PPM: u128 = 30_000;
+/// A registered reference is replaced only by a pool at least this much deeper (basis points of its
+/// depth now): 25% deeper.
+pub const REPLACE_DEEPER_BPS: u128 = 12_500;
+/// ... and at most once in this long, unless the registered pool fails a check now.
+pub const REPLACE_INTERVAL_SECS: i64 = 3_600;
+/// The slots a reference's window spans: what its sales may be worth in all is capped per window
+/// (two leaders' turns).
+pub const SWAP_WINDOW_SLOTS: u64 = 8;
+/// The least a sale to SOL is worth: 0.01 SOL.
+pub const MIN_SWAP_LAMPORTS: u128 = 10_000_000;
+/// `QuoteReference.via`: the pool is against wrapped SOL.
+pub const VIA_SOL: u8 = 0;
+/// `QuoteReference.via`: the pool is against USDC, valued through USDC's own reference.
+pub const VIA_USDC: u8 = 1;

@@ -42,6 +42,12 @@
 //!     with no data, its bridged-SOL and token holdings are still there with no delegate, and the
 //!     launch's creator fees were not claimed by the script (a claim inside a step would pass the
 //!     launcher's and the buyback's shares to the pot).
+//!   - **On a coin quoted in tokens** (`launch_token`, `docs/token-quotes.md` §7), whose whole
+//!     creator fee waits in the creator address's token accounts (every leg's in its token) for
+//!     the script to spend as it decides: each token account of the creator the step was handed is
+//!     still the creator's, the same program and size, with no delegate and no close authority
+//!     (`ScriptBrokeCustody`): its tokens may go, the account (its rent, the fee claims into it)
+//!     may not. The SOL pot works as above (empty unless SOL reaches the creator address).
 //!   - **The payouts the script answered** (`payout.rs`): read from its return data after these
 //!     checks, each checked against the terms, paid to the holding's owner as SOL and recorded by
 //!     the launch's hook. A step with an answer earns its bounty by the entries it carries.
@@ -66,9 +72,11 @@ use crate::error::CompanionError;
 use crate::events::*;
 use crate::instructions::approval::{is_protocol_program, script_approval};
 use crate::instructions::payout::{
-    bounty_for, clear_answer, pay_answer, read_answer, PayoutTermsArgs, StepPayouts,
+    bounty_for, clear_answer, pay_answer, read_answer, PayoutTermsArgs, ScriptAnswer, StepPayouts,
 };
 use crate::instructions::steps::{available, balance, ensure_holding, find, pay_sol};
+use crate::instructions::token_games::TokenPots;
+use crate::instructions::token_scripts::{leg_balances, pay_leg_holdings, settle_leg_pots};
 use crate::instructions::CreatorSeeds;
 use crate::state::*;
 
@@ -226,6 +234,68 @@ fn custody_intact(all: &[AccountInfo], creator: &AccountInfo, mints: &[Pubkey]) 
         }
     }
     Ok(true)
+}
+
+/// The SPL Token and Token-2022 programs: on a coin quoted in tokens (`docs/token-quotes.md` §7)
+/// the creator address holds each leg's creator fee in its token account of the leg's token.
+const SPL_TOKEN_PROGRAMS: [Pubkey; 2] = [
+    bordrless_swap::spl::TOKEN_PROGRAM_ID,
+    bordrless_swap::spl::TOKEN_2022_PROGRAM_ID,
+];
+
+/// A token account's layout (SPL Token's, which Token-2022's begins with): the owner at 32, the
+/// delegate's `COption` tag at 72, the state at 108, the close authority's tag at 129; 165 bytes,
+/// a Token-2022 account longer with its account type (2) at 165. A multisig is 355 bytes.
+const TOKEN_ACCOUNT_LEN: usize = 165;
+const TOKEN_MULTISIG_LEN: usize = 355;
+
+/// Whether `info` is an initialized SPL Token or Token-2022 account whose owner is `owner`.
+fn token_account_of(info: &AccountInfo, owner: &Pubkey) -> bool {
+    if !SPL_TOKEN_PROGRAMS.contains(info.owner) {
+        return false;
+    }
+    let Ok(data) = info.try_borrow_data() else {
+        return false;
+    };
+    let len = data.len();
+    len >= TOKEN_ACCOUNT_LEN
+        && len != TOKEN_MULTISIG_LEN
+        && (len == TOKEN_ACCOUNT_LEN || data[TOKEN_ACCOUNT_LEN] == 2)
+        && data[108] != 0
+        && data[32..64] == owner.to_bytes()
+}
+
+/// The creator address's own token accounts among the step's accounts, each once, with their
+/// program and size, before a script on a coin quoted in tokens runs.
+fn creator_token_accounts(all: &[AccountInfo], creator: &Pubkey) -> Vec<(Pubkey, Pubkey, usize)> {
+    let mut held: Vec<(Pubkey, Pubkey, usize)> = Vec::new();
+    for a in all {
+        if token_account_of(a, creator) && !held.iter().any(|(k, _, _)| k == a.key) {
+            held.push((*a.key, *a.owner, a.data_len()));
+        }
+    }
+    held
+}
+
+/// Whether each of the creator's token accounts the step was handed (`held`) is still its own as it
+/// was: the same program and size, its owner the creator, no delegate and no close authority. A
+/// script spends their tokens as it decides, but closing one (its rent), handing it to another
+/// owner, a delegate or a close authority, or resizing it (a Token-2022 extension its owner turns
+/// on, such as required memos) would take it, or every later fee claim into it, from the companion.
+fn token_accounts_intact(
+    all: &[AccountInfo],
+    creator: &Pubkey,
+    held: &[(Pubkey, Pubkey, usize)],
+) -> bool {
+    held.iter().all(|(key, program, len)| {
+        all.iter().find(|a| a.key == key).is_some_and(|a| {
+            a.owner == program
+                && a.data_len() == *len
+                && token_account_of(a, creator)
+                && a.try_borrow_data()
+                    .is_ok_and(|d| d[72..76] == [0; 4] && d[129..133] == [0; 4])
+        })
+    })
 }
 
 /// Calls `program` with `data`, the creator address signing (it is the one signer of `prefix`,
@@ -620,6 +690,28 @@ pub fn process_script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Res
     let before = Held::of(&all, &creator, Some(&mint), seeds.native)?;
     let claimed = fees_claimed(&launch)?;
     let pot_before = c.pending_pot;
+    // A coin quoted in tokens (`docs/token-quotes.md` §7): its creator fees wait in the creator
+    // address's token accounts, the script's to spend; they stay the creator's.
+    let token_coin = ctx.accounts.launch.is_token_quoted();
+    let token_accounts = if token_coin {
+        creator_token_accounts(&all, creator.key)
+    } else {
+        Vec::new()
+    };
+    // A script with a launcher's part on such a coin (`docs/token-quotes.md` §7.6) keeps its parts
+    // per leg: each leg's pot moves by what the script did to the leg's account, and no more.
+    let mut pots = if token_coin && u64::from(c.pot_bps) < BPS {
+        Some(TokenPots::load(&all, &mint)?)
+    } else {
+        None
+    };
+    let legs_before = pots.as_ref().map(|p| leg_balances(&all, p, creator.key));
+    let mut pots_before = [0u64; MAX_COMPANION_LEGS];
+    if let Some(p) = &pots {
+        for (i, b) in pots_before.iter_mut().enumerate().take(p.count()) {
+            *b = p.legs.legs[i].pending_pot;
+        }
+    }
 
     let state = if s.state_len > 0 {
         (ctx.accounts.script_state.to_account_info(), false, true)
@@ -664,6 +756,16 @@ pub fn process_script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Res
             && fees_claimed(&launch)? == claimed,
         CompanionError::ScriptBrokeCustody
     );
+    if token_coin {
+        require!(
+            token_accounts_intact(&all, creator.key, &token_accounts),
+            CompanionError::ScriptBrokeCustody
+        );
+    }
+    if let (Some(p), Some(before)) = (pots.as_mut(), legs_before.as_ref()) {
+        let after = leg_balances(&all, p, creator.key);
+        settle_leg_pots(p, before, &after)?;
+    }
     // The pot moves by what the script changed: down by what it spent, up by what it sold.
     let pot = (c.pending_pot - spent)
         .checked_add(after.sol.saturating_sub(before.sol))
@@ -696,13 +798,26 @@ pub fn process_script_step<'info>(ctx: Context<'info, ScriptStep<'info>>) -> Res
                 bounty,
                 now,
             };
-            pay_answer(&step, a)?
+            match a {
+                // Payouts in the legs' tokens, from the legs' pots (a script with a launcher's
+                // part on a coin quoted in tokens); the bounty in SOL as without an answer.
+                ScriptAnswer::LegHoldings(legs_answer) => {
+                    let p = pots.as_mut().ok_or(CompanionError::BadPayoutAnswer)?;
+                    pay_leg_holdings(&step, p, &pots_before, legs_answer)?;
+                    pay_sol(&all, &seeds, *creator.key, &cranker_info, bounty)?;
+                    0
+                }
+                _ => pay_answer(&step, a)?,
+            }
         }
         _ => {
             pay_sol(&all, &seeds, *creator.key, &cranker_info, bounty)?;
             0
         }
     };
+    if let Some(p) = &pots {
+        p.save()?;
+    }
     let c = &mut ctx.accounts.companion;
     c.pending_pot = pot - paid - bounty;
     c.bounties_total = c.bounties_total.saturating_add(bounty);

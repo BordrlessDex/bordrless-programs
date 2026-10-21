@@ -1,0 +1,1232 @@
+{
+  "address": "6KMdXC3Fxovp3pnUsdQuUbderPzZtTA4t6R1jacYJWQr",
+  "metadata": {
+    "name": "loss_cover_hook",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Bordrless Loss cover hook: a token hook that keeps each holding's average entry price, what it holds and the cover it was paid, so the Loss cover script can pay holders who are under water from the companion's pot. It never refuses a transfer, takes no cut and never sees SOL."
+  },
+  "docs": [
+    "Instructions of the Loss cover hook."
+  ],
+  "instructions": [
+    {
+      "name": "before_burn",
+      "docs": [
+        "`before_burn`: the reference moved when due, the burner's record cut as for a send."
+      ],
+      "discriminator": [
+        7,
+        177,
+        19,
+        160,
+        28,
+        229,
+        57,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "A2WKjdKC4PurtabNwhvKJvWdxKXLvt79qrzre7GE8XTe"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "pool"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "before_transfer",
+      "docs": [
+        "`before_transfer`: the reference moved when due; the sender's record cut to what it keeps",
+        "(the cover paid pro rata with it), the receiver's basis blended at the trade's price (a buy",
+        "out of the pool: what it paid, uncapped) or the spot (any other transfer); each answered as",
+        "the holding's hook data when its owner may hold a record. Never takes a cut, never refuses a",
+        "SOL coin's transfer. On a coin quoted in tokens each price is the record leg's, and a",
+        "transfer without the accounts it needs is refused (the module)."
+      ],
+      "discriminator": [
+        23,
+        118,
+        189,
+        23,
+        179,
+        222,
+        94,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "hook_signer",
+          "signer": true,
+          "address": "A2WKjdKC4PurtabNwhvKJvWdxKXLvt79qrzre7GE8XTe"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source"
+        },
+        {
+          "name": "destination"
+        },
+        {
+          "name": "authority"
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "pool"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "TokenHookArgs"
+            }
+          }
+        }
+      ],
+      "returns": {
+        "defined": {
+          "name": "HookReturn"
+        }
+      }
+    },
+    {
+      "name": "prepare",
+      "docs": [
+        "Prepares the hook for `mint`, which need not exist yet (a launch's mint: the launchpad",
+        "creates it naming this program as its hook): the state and the extra-accounts registry. The",
+        "launch pool's address follows from the launchpad's config (its LP fee). The mint's keypair",
+        "signs; once per mint."
+      ],
+      "discriminator": [
+        121,
+        155,
+        156,
+        90,
+        164,
+        252,
+        220,
+        109
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The mint the hook is prepared for (not created yet); its keypair signs."
+          ],
+          "signer": true
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The launchpad's config (address-checked): its LP fee is a seed of the launch's pool."
+          ],
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "prepare_legs",
+      "docs": [
+        "`prepare` for a coin quoted in tokens (`docs/token-quotes.md` §7.6): the same state and",
+        "accounts, then the coin's legs' pools, in leg order, as remaining accounts (1 to 6; their",
+        "keys are written, not read: the pools need not exist yet). The state's `pool` is leg 0's,",
+        "`reserved[0]` the number of legs; the registry lists the state, the launch, leg 0's pool, the",
+        "coin's `Legs` and the other legs' pools."
+      ],
+      "discriminator": [
+        148,
+        118,
+        22,
+        93,
+        28,
+        83,
+        212,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The mint the hook is prepared for (not created yet); its keypair signs."
+          ],
+          "signer": true
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "launch_config",
+          "docs": [
+            "The launchpad's config (address-checked): its LP fee is a seed of the launch's pool."
+          ],
+          "address": "5n25iAaXFsjs4UgGQM6fCiRhaQcCVQ1L5BgyRZ7UrmaE"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "record_payout",
+      "docs": [
+        "The companion's payout authority alone: records `lamports` of cover paid to `holding` (0: a",
+        "touch) in round `tag` (on a coin quoted in tokens, raw units of the record leg's token). The",
+        "holding is of this mint, its owner may hold a record and the record exists; the record is",
+        "written through the token program."
+      ],
+      "discriminator": [
+        227,
+        164,
+        213,
+        54,
+        69,
+        172,
+        31,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "payout_authority",
+          "docs": [
+            "The companion program's `PDA([\"payout-authority\"])`, signing by CPI."
+          ],
+          "signer": true,
+          "address": "8XJcBCYmYyggTQBNvK3RausfyRMpmtjJTjKd53W3StkG"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "holding",
+          "docs": [
+            "`mint`; the token program writes its hook data."
+          ],
+          "writable": true
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hook_authority",
+          "address": "J7duBVXCMbN1BLp4mt7myzVvRsvXRPU3BAhFyksDSPAm"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        }
+      ],
+      "args": [
+        {
+          "name": "lamports",
+          "type": "u64"
+        },
+        {
+          "name": "tag",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "set_entry",
+      "docs": [
+        "This program's upgrade authority alone (read from its ProgramData): sets `holding`'s",
+        "recorded entry to `entry` (lamports per base unit times `PRICE_SCALE`; on a coin quoted in",
+        "tokens raw units of the record leg's token), the repair of a record an earlier rule wrote",
+        "wrong. The balance, the cover paid, the round, the basis time, the leg and the flags stay;",
+        "the slot is stamped. The holding is of this mint, its owner may hold a record, the record",
+        "exists and `entry` is not 0. Written through the token program, signed by this program's",
+        "`[\"hook-authority\"]`, as `record_payout` writes."
+      ],
+      "discriminator": [
+        240,
+        87,
+        221,
+        147,
+        77,
+        177,
+        24,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "This program's upgrade authority (as its ProgramData names it)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "address": "FndUwNW68djMCYWemsEsGWj3xfdZM4qfzwf2HdrYRgkG"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "holding",
+          "docs": [
+            "`mint`; the token program writes its hook data."
+          ],
+          "writable": true
+        },
+        {
+          "name": "state",
+          "docs": [
+            "The mint's state: who never holds a record."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hook_authority",
+          "address": "J7duBVXCMbN1BLp4mt7myzVvRsvXRPU3BAhFyksDSPAm"
+        },
+        {
+          "name": "token_program",
+          "address": "2XoEWp8cF3kRXg74eVwPAyTFhVCAztn3V88komxAvr22"
+        },
+        {
+          "name": "token_event_authority",
+          "address": "69vhpnkYjtiJgdfU7QsA5Ww7V8FWtvPcZ2r4znuyByvq"
+        }
+      ],
+      "args": [
+        {
+          "name": "entry",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "LossCoverState",
+      "discriminator": [
+        214,
+        143,
+        128,
+        66,
+        240,
+        98,
+        243,
+        31
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Prepared",
+      "discriminator": [
+        203,
+        59,
+        178,
+        86,
+        6,
+        123,
+        13,
+        36
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "WrongAccount",
+      "msg": "an account is not the one this mint's hook expects"
+    },
+    {
+      "code": 6001,
+      "name": "BadHookSigner",
+      "msg": "the hook signer is not the token program's signer for this hook"
+    },
+    {
+      "code": 6002,
+      "name": "WrongMint",
+      "msg": "the holding is of another mint"
+    },
+    {
+      "code": 6003,
+      "name": "NotEligible",
+      "msg": "this owner holds no record: the launch, its pool, the companion's creator address, or an address off the ed25519 curve"
+    },
+    {
+      "code": 6004,
+      "name": "NotTheCompanion",
+      "msg": "only the companion program's payout authority records a payout"
+    },
+    {
+      "code": 6005,
+      "name": "NoRecord",
+      "msg": "this holding has no record to pay against"
+    },
+    {
+      "code": 6006,
+      "name": "MathOverflow",
+      "msg": "arithmetic overflow"
+    },
+    {
+      "code": 6007,
+      "name": "NotUpgradeAuthority",
+      "msg": "only this program's upgrade authority, as its ProgramData names it, sets an entry"
+    },
+    {
+      "code": 6008,
+      "name": "ZeroEntry",
+      "msg": "an entry of 0 is no price"
+    }
+  ],
+  "types": [
+    {
+      "name": "Config",
+      "docs": [
+        "Program configuration at `[\"config\"]`. Launches snapshot the terms they are created with."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "admin",
+            "docs": [
+              "May change the config."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Receives launch fees (lamports); must also be the DEX config's treasury."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The quote every launch is paired with (bridged SOL)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "launch_fee_lamports",
+            "docs": [
+              "Lamports paid to launch."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "LP fee of launch pools."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_creator_fee_bps",
+            "docs": [
+              "Largest creator fee."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "sniper_window_secs",
+            "docs": [
+              "Seconds of elevated LP fee after creation."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sniper_start_bps",
+            "docs": [
+              "LP fee at the start of the window."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "curve_bps",
+            "docs": [
+              "Share of the supply sold on the curve."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of a launched token, base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of a launched token."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "min_virtual_quote",
+            "docs": [
+              "Smallest virtual quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_virtual_quote",
+            "docs": [
+              "Largest virtual quote reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops new launches."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "launches",
+            "docs": [
+              "Launches so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rule_bounds",
+            "docs": [
+              "The bounds of token rules."
+            ],
+            "type": {
+              "defined": {
+                "name": "RuleBounds"
+              }
+            }
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delta",
+      "docs": [
+        "One cut an answer takes from the amount."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "docs": [
+              "How much (above zero)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "account",
+            "docs": [
+              "Index in the callback's account list (prefix first, then extras) of the holding that",
+              "receives it. Must be an extra."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HookReturn",
+      "docs": [
+        "What a callback may answer in its return data. Which fields a callback may fill depends on the",
+        "callback and the flags ([`Allowed`]); the calling program refuses an answer that fills any",
+        "other field."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deltas",
+            "docs": [
+              "Cuts from the amount (the transfer; a swap's input before, its output after), at most",
+              "[`MAX_DELTAS`]."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Delta"
+                }
+              }
+            }
+          },
+          {
+            "name": "burn",
+            "docs": [
+              "Pool swap callbacks only: an amount to burn from the same side."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "`before_swap` only: the LP fee to apply instead of the pool's."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_burn`): the source holding's new hook data",
+              "([`HOOK_DATA_LEN`] bytes)."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "Token callbacks only (`before_transfer`, `before_mint`): the destination holding's new hook",
+              "data."
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  64
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LossCoverState",
+      "docs": [
+        "The hook's state for one mint, at `[\"state\", mint]`: 274 bytes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "docs": [
+              "Layout version."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump of `[\"state\", mint]`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch",
+            "docs": [
+              "The launch program's `[\"launch\", mint]`: never holds a record."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The launch pool, derived at `prepare` from the launchpad's config: never holds a record,",
+              "and its sends are buys."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The companion's `[\"creator\", mint]`: never holds a record."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reference",
+            "docs": [
+              "A slow reference price (0 until set), and when it last moved."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reference_at",
+            "type": "i64"
+          },
+          {
+            "name": "paid_total",
+            "docs": [
+              "Lamports recorded by `record_payout`, and entries recorded (touches included)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "records",
+            "type": "u64"
+          },
+          {
+            "name": "prepared_by",
+            "docs": [
+              "Who paid for `prepare`, and when."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prepared_at",
+            "type": "i64"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Reserved."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Phase",
+      "docs": [
+        "Before or after the operation."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Before"
+          },
+          {
+            "name": "After"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Prepared",
+      "docs": [
+        "The hook was prepared for a mint."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "state",
+            "type": "pubkey"
+          },
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "The companion's creator address for the mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_fee_bps",
+            "docs": [
+              "The launchpad's LP fee when prepared (a seed of the pool)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "prepared_by",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RuleBounds",
+      "docs": [
+        "The bounds `create_launch` holds token rules to (§5.2), kept in the [`Config`]. `init_config`",
+        "and `set_config` keep each within the hard ceilings of [`crate::constants::ceilings`]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_holder_fee_bps",
+            "docs": [
+              "Largest holder fee per side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_burn_bps",
+            "docs": [
+              "Largest burn per side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_rules_fee_bps",
+            "docs": [
+              "Largest creator fee + holder fee + burn on one side."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "min_max_wallet_bps",
+            "docs": [
+              "Smallest max wallet (when on)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_max_wallet_bps",
+            "docs": [
+              "Largest max wallet."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_creator_lock_secs",
+            "docs": [
+              "Longest creator wallet lock."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "max_early_window_secs",
+            "docs": [
+              "Longest early-buyer window."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "max_early_lock_secs",
+            "docs": [
+              "Latest early-buyer unlock, counted from the launch."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenHookArgs",
+      "docs": [
+        "Arguments of a token hook callback. Balances and hook data are those of the holdings before",
+        "(`Before`) or after (`After`) the operation; `delta` is what the deltas took, known only after."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "op",
+            "docs": [
+              "The operation."
+            ],
+            "type": {
+              "defined": {
+                "name": "TokenOp"
+              }
+            }
+          },
+          {
+            "name": "phase",
+            "docs": [
+              "Before or after it."
+            ],
+            "type": {
+              "defined": {
+                "name": "Phase"
+              }
+            }
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "The mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Source holding (the mint for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination",
+            "docs": [
+              "Destination holding (the mint for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "source_owner",
+            "docs": [
+              "Owner of the source holding (default for a mint)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destination_owner",
+            "docs": [
+              "Owner of the destination holding (default for a burn)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Who signed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "authority_is_delegate",
+            "docs": [
+              "Whether the signer acted as a delegate rather than the owner."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "The amount of the operation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "delta",
+            "docs": [
+              "The sum of the deltas a `before_transfer` answer took (zero before)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_balance",
+            "docs": [
+              "Source balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "destination_balance",
+            "docs": [
+              "Destination balance."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "docs": [
+              "Decimals of the mint."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "supply",
+            "docs": [
+              "Supply of the mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "source_hook_data",
+            "docs": [
+              "The source holding's hook data (zeros for a mint)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "destination_hook_data",
+            "docs": [
+              "The destination holding's hook data (zeros for a burn)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenOp",
+      "docs": [
+        "What a token hook is being told about."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Transfer"
+          },
+          {
+            "name": "Mint"
+          },
+          {
+            "name": "Burn"
+          }
+        ]
+      }
+    }
+  ]
+}

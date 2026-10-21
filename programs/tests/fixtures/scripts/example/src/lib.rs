@@ -16,6 +16,10 @@
 //!   the token program, the system program...) is found among the accounts by key. Without a state
 //!   (the system program's id in its place) a step does nothing.
 //!
+//! On a coin quoted in tokens (`token_quotes_builders.rs`) the `MODE_LEG_*` steps trade a leg with
+//! the creator's tokens of it (`swap_spl`), pay a token account in a leg's token, or do one of the
+//! misdeeds on the creator's token accounts the companion refuses.
+//!
 //! Every call fails (`FOREIGN_SIGNER`) when an account other than the creator signs. The suites
 //! rewrite the state directly to switch modes between steps.
 
@@ -26,7 +30,7 @@ use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::solana_program::program::invoke;
 use anchor_lang::solana_program::system_instruction;
 use bordrless_launch::client as launch_client;
-use bordrless_launch::state::Launch;
+use bordrless_launch::state::{Launch, Legs};
 use bordrless_token::client as token_client;
 
 /// The script's id (test-only; its keypair is not kept).
@@ -77,6 +81,46 @@ pub const MODE_BUY_BURN: u8 = 10;
 /// Burn `param2` of the creator's tokens (0: all it holds), no buy; the hook slice as for
 /// `MODE_BUY_BURN`.
 pub const MODE_BURN: u8 = 11;
+
+// ---- Coins quoted in tokens (`token_quotes_builders.rs`, docs/token-quotes.md §7). The state is
+// the mode, the `u64` parameter, the leg's index (byte 9) and, for a trade, the length of the
+// coin's token-hook slice (byte 10; the slice is `others[1..1 + n]`, right after `aux`). The leg's
+// quote mint, program and decimals are read from the launch's `Legs` (found among the accounts by
+// address); the creator's account of the leg's token is its associated token account. ----
+
+/// Buy the coin on leg `i` with `param` of the leg's token from the creator's account of it
+/// (`swap_spl`), the coin delivered to the creator's holding.
+pub const MODE_LEG_BUY: u8 = 12;
+/// Sell `param` of the creator's coins (0: all it holds) on leg `i`, the leg's token to the
+/// creator's account of it.
+pub const MODE_LEG_SELL: u8 = 13;
+/// Pay `aux` (a token account of leg `i`'s token) `param` of it from the creator's account
+/// (`TransferChecked`, the creator signing).
+pub const MODE_LEG_PAY: u8 = 14;
+/// Close the creator's account of leg `i`'s token, its rent to `aux` (`CloseAccount`).
+pub const MODE_LEG_CLOSE: u8 = 15;
+/// Hand the creator's account of leg `i`'s token to `aux` (`SetAuthority`, the account's owner).
+pub const MODE_LEG_HAND_OVER: u8 = 16;
+/// Make `aux` the delegate of the creator's account of leg `i`'s token (`Approve`, `param`).
+pub const MODE_LEG_DELEGATE: u8 = 17;
+/// Make `aux` the close authority of the creator's account of leg `i`'s token (`SetAuthority`).
+pub const MODE_LEG_CLOSE_AUTHORITY: u8 = 18;
+/// review5: claim leg `i`'s creator fee into the creator's account of the leg's token, inside the
+/// step (the launchpad's permissionless `claim_creator_fees_token`, the creator paying nothing: its
+/// account exists).
+pub const MODE_LEG_CLAIM: u8 = 19;
+
+/// SPL Token and Token-2022 (a leg's `quote_program` 0 and 1).
+const SPL_TOKEN: Pubkey = Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022: Pubkey = Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+/// A leg mode's state: the mode, the parameter, the leg and the hook slice's length.
+pub fn leg_state_bytes(mode: u8, param: u64, leg: u8, slice: u8) -> Vec<u8> {
+    let mut d = state_bytes(mode, param);
+    d.push(leg);
+    d.push(slice);
+    d
+}
 
 /// A burn mode's state: the mode, the buy, the burn and the hook slice's length.
 pub fn burn_state_bytes(mode: u8, buy: u64, burn: u64, slice: u8) -> Vec<u8> {
@@ -218,6 +262,34 @@ fn step(accounts: &[AccountInfo], mint: &Pubkey) -> core::result::Result<(), Pro
         )
     };
     let aux = others.first().ok_or(ProgramError::NotEnoughAccountKeys)?;
+    if (MODE_LEG_BUY..=MODE_LEG_CLAIM).contains(&mode) {
+        let (leg, n) = {
+            let d = state.try_borrow_data()?;
+            (
+                *d.get(9).ok_or(ProgramError::InvalidAccountData)? as usize,
+                *d.get(10).ok_or(ProgramError::InvalidAccountData)? as usize,
+            )
+        };
+        let slice: Vec<AccountMeta> = others
+            .get(1..1 + n)
+            .ok_or(ProgramError::NotEnoughAccountKeys)?
+            .iter()
+            .map(|a| AccountMeta {
+                pubkey: *a.key,
+                is_signer: false,
+                is_writable: a.is_writable,
+            })
+            .collect();
+        return leg_step(
+            accounts,
+            launch_info,
+            mint,
+            *creator.key,
+            *aux.key,
+            (mode, param, leg),
+            slice,
+        );
+    }
     if mode == MODE_BUY_BURN || mode == MODE_BURN {
         let d = state.try_borrow_data()?;
         let burn: [u8; 8] = d
@@ -332,5 +404,124 @@ fn buy_burn(
         _ => (None, vec![]),
     };
     let ix = token_client::burn_with(me, held, *mint, hook, extras, amount);
+    invoke(&ix, accounts)
+}
+
+/// A leg mode (`MODE_LEG_*`) on a coin quoted in tokens: `what` is the mode, its parameter and the
+/// leg's index; `slice` the coin's token-hook slice for a trade.
+fn leg_step(
+    accounts: &[AccountInfo],
+    launch_info: &AccountInfo,
+    mint: &Pubkey,
+    me: Pubkey,
+    aux: Pubkey,
+    what: (u8, u64, usize),
+    slice: Vec<AccountMeta>,
+) -> core::result::Result<(), ProgramError> {
+    let (mode, param, leg) = what;
+    let launch = {
+        let d = launch_info.try_borrow_data()?;
+        Launch::try_deserialize(&mut &d[..]).map_err(|_| ProgramError::InvalidAccountData)?
+    };
+    // The leg's quote mint, program and decimals, read in place from the launch's `Legs`.
+    let legs_key = launch_client::legs_address(mint);
+    let legs_info = accounts
+        .iter()
+        .find(|a| *a.key == legs_key)
+        .ok_or(ProgramError::NotEnoughAccountKeys)?;
+    let (quote_mint, quote_program, decimals) = {
+        let d = legs_info.try_borrow_data()?;
+        let at = Legs::LEGS_OFFSET + leg * Legs::LEG_LEN;
+        let raw = d.get(at..at + 34).ok_or(ProgramError::InvalidAccountData)?;
+        let key: [u8; 32] = raw[..32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidAccountData)?;
+        let program = if raw[32] == 1 { TOKEN_2022 } else { SPL_TOKEN };
+        (Pubkey::new_from_array(key), program, raw[33])
+    };
+    let keys = launch_client::LegKeys {
+        mint: *mint,
+        quote_mint,
+        quote_program,
+        lp_fee_bps: launch.lp_fee_bps,
+    };
+    let account = keys.quote_account(&me);
+    let held = token_client::holding_address(mint, &me);
+    let spl = |data: Vec<u8>, metas: Vec<AccountMeta>| Instruction {
+        program_id: quote_program,
+        accounts: metas,
+        data,
+    };
+    let set_authority = |kind: u8| {
+        let mut data = vec![6, kind, 1];
+        data.extend_from_slice(aux.as_ref());
+        spl(
+            data,
+            vec![
+                AccountMeta::new(account, false),
+                AccountMeta::new_readonly(me, true),
+            ],
+        )
+    };
+    let ix = match mode {
+        MODE_LEG_BUY | MODE_LEG_SELL => {
+            let (direction, amount) = if mode == MODE_LEG_BUY {
+                (1, param)
+            } else if param == 0 {
+                (0, amount_of(accounts, &held)?)
+            } else {
+                (0, param)
+            };
+            launch_client::leg_swap_with_slice(
+                &keys,
+                me,
+                held,
+                account,
+                direction,
+                amount,
+                1,
+                slice,
+                launch.rules.burns(),
+            )
+        }
+        MODE_LEG_PAY => {
+            let mut data = vec![12];
+            data.extend_from_slice(&param.to_le_bytes());
+            data.push(decimals);
+            spl(
+                data,
+                vec![
+                    AccountMeta::new(account, false),
+                    AccountMeta::new_readonly(quote_mint, false),
+                    AccountMeta::new(aux, false),
+                    AccountMeta::new_readonly(me, true),
+                ],
+            )
+        }
+        MODE_LEG_CLOSE => spl(
+            vec![9],
+            vec![
+                AccountMeta::new(account, false),
+                AccountMeta::new(aux, false),
+                AccountMeta::new_readonly(me, true),
+            ],
+        ),
+        MODE_LEG_HAND_OVER => set_authority(2),
+        MODE_LEG_DELEGATE => {
+            let mut data = vec![4];
+            data.extend_from_slice(&param.to_le_bytes());
+            spl(
+                data,
+                vec![
+                    AccountMeta::new(account, false),
+                    AccountMeta::new_readonly(aux, false),
+                    AccountMeta::new_readonly(me, true),
+                ],
+            )
+        }
+        MODE_LEG_CLOSE_AUTHORITY => set_authority(3),
+        MODE_LEG_CLAIM => launch_client::claim_creator_fees_token(me, me, &keys, leg as u8),
+        _ => return Err(ProgramError::InvalidInstructionData),
+    };
     invoke(&ix, accounts)
 }

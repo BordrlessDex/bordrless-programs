@@ -76,12 +76,40 @@ fn bind(accounts: &Callback, args: &TokenHookArgs) -> Result<Option<u64>> {
                     config.native_vault(config.to_account_info().lamports()),
                 ));
             }
+            // A one-leg token kit's vault is the config's account of the leg's token.
+            if config.pays_token() {
+                return token_vault_amount(config, &config.key(), vault).map(Some);
+            }
             Ok(Some(holding_amount(vault)?))
         }
+        // A coin quoted in tokens paying SOL (kind 3) is native from birth and lists no vault; one
+        // paying in rounds (kind 2) runs no accumulator, so its callbacks read no vault.
+        (None, true) if config.reward_kind() == REWARD_KIND_SOL => Ok(Some(
+            config.native_vault(config.to_account_info().lamports()),
+        )),
+        (None, true) if config.pays_rounds() => Ok(None),
         (None, true) => err!(KitError::MissingRewardVault),
         (Some(_), false) => err!(KitError::WrongRewardVault),
         (None, false) => Ok(None),
     }
+}
+
+/// A one-leg token kit's vault balance: `config.reward_vault` (the config's associated token
+/// account of the leg's token, address-checked by the caller), read as a token account of the
+/// reward program and the reward mint, owned by the config.
+pub fn token_vault_amount(
+    config: &KitConfig,
+    config_key: &Pubkey,
+    vault: &AccountInfo,
+) -> Result<u64> {
+    let (program, _) = config.reward_token();
+    let account = crate::spl::read(vault, &crate::spl::program_id(program))
+        .ok_or(KitError::WrongRewardVault)?;
+    require!(
+        account.mint == config.reward_mint && account.owner == *config_key,
+        KitError::WrongRewardVault
+    );
+    Ok(account.amount)
 }
 
 /// The `Legs` of a coin quoted in tokens: the first account after the two extras, required exactly

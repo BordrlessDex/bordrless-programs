@@ -76,4 +76,41 @@ impl LegPools {
         };
         opened.saturating_sub(created_at).max(0)
     }
+
+    /// Leg `index`'s token, read from `info` (the coin's `Legs`, which [`Self::read`] bound to the
+    /// mint): its quote mint, its program byte (0 SPL Token, 1 Token-2022) and its decimals.
+    /// `NoSuchLeg` is `WrongLegs` here: the kit has no leg of its own.
+    pub fn token(info: &AccountInfo, index: usize) -> Result<LegToken> {
+        let data = info.try_borrow_data()?;
+        let count = usize::from(data[LEGS_COUNT_OFFSET]).min(LEGS_MAX);
+        require!(index < count, KitError::WrongLegs);
+        let at = LEGS_FIRST_LEG_OFFSET + index * LEGS_LEG_LEN;
+        let mint_at = at + LEGS_LEG_QUOTE_MINT_OFFSET;
+        Ok(LegToken {
+            quote_mint: Pubkey::new_from_array(data[mint_at..mint_at + 32].try_into().expect("32")),
+            program: data[at + LEGS_LEG_QUOTE_PROGRAM_OFFSET],
+            decimals: data[at + LEGS_LEG_DECIMALS_OFFSET],
+        })
+    }
+}
+
+/// One leg's token, as the `Legs` names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LegToken {
+    pub quote_mint: Pubkey,
+    /// 0 SPL Token, 1 Token-2022.
+    pub program: u8,
+    pub decimals: u8,
+}
+
+impl LegToken {
+    /// The leg token's program.
+    pub fn program_id(&self) -> Pubkey {
+        crate::spl::program_id(self.program)
+    }
+
+    /// The kit config's (`config`) vault of this leg's token: its associated token account.
+    pub fn vault(&self, config: &Pubkey) -> Pubkey {
+        crate::spl::associated_address(config, &self.quote_mint, &self.program_id())
+    }
 }

@@ -1,8 +1,8 @@
 //! Launches quoted in tokens (`docs/token-quotes.md` §2.2): a coin launched against 1 to 6 real
 //! SPL Token or Token-2022 mints instead of SOL, never both.
 //!
-//! `create_token_launch` makes the mint (no custom hook, no launch config; the kit as its hook only
-//! with kit rules),
+//! `create_token_launch` makes the mint (the kit as its hook with kit rules, a launch config's
+//! custom hook with one, none otherwise),
 //! mints the whole supply to the launch's holding and records the `Launch` (`reserved[18] = 2`;
 //! `pool` and `quote_mint` name leg 0) and its `Legs`: per quote mint (the remaining accounts, in
 //! order, each held to the DEX's policy, none wrapped SOL, none repeated) its program, decimals,
@@ -23,10 +23,23 @@
 //! hook from its first instruction). The kit takes the coin's `Legs` in its slice and treats every
 //! leg's pool as the pool; max wallet lifts once the legs together have sold the supply's
 //! `curve_bps`, which the pool hook counts on the `Legs` (`Legs::lift_at`, `Legs::sold`).
+//!
+//! Workshop items (`docs/token-quotes.md` §7, 21 Oct 2026, "builder decides"): the creator may be a
+//! companion's creator address (`PDA(["creator", mint], COMPANION_ID)`), which only the companion
+//! program can sign for (its `launch_token`); and the launch may be made from a `LaunchConfig`
+//! (after the quote mints), whose rules and creator fee the arguments repeat, held to
+//! `create_launch`'s hook rule (who may upgrade the hook was checked when the config was made; a
+//! timelocked hook's timelock must hold no proposal), with no SOL cut and no author's or partner's
+//! share (both are paid from SOL), and whose custom hook (no kit rules beside it) becomes the
+//! coin's token hook. The hook learns the coin's legs from its registry, which must list the
+//! coin's `Legs` (`Pda(LAUNCH_ID, ["legs", Account(1)])`, as the kit's registry for such a coin
+//! does); `open_leg` passes the hook's slice on the deposit, and every leg trade carries it on the
+//! coin's side.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::system_program;
+use anchor_lang::Discriminator;
 use bordrless_hook::{
     hook_accounts_address, write_registry, AccountSource, ExtraAccount, HookAccountList, Seed,
     HOOK_AUTHORITY_SEED,
@@ -34,6 +47,7 @@ use bordrless_hook::{
 use bordrless_kit::KitInitArgs;
 use bordrless_swap::instructions::CreatePoolArgs;
 use bordrless_swap::spl;
+use bordrless_token::client as token_client;
 use bordrless_token::instructions::CreateMintArgs;
 use bordrless_token::state::AuthorityKind;
 
@@ -41,10 +55,12 @@ use crate::constants::*;
 use crate::cpi;
 use crate::error::LaunchError;
 use crate::events::{
-    LegCreatorFeesClaimed, LegOpened, LegTerms, TokenLaunchCreated, TokenLaunchLocks,
-    TokenLaunchRules,
+    LegCreatorFeesClaimed, LegOpened, LegTerms, TokenLaunchConfigured, TokenLaunchCreated,
+    TokenLaunchLocks, TokenLaunchPayouts, TokenLaunchRules,
 };
-use crate::instructions::launch::{check_rules, KitCallerSeeds, LaunchSeeds};
+use crate::instructions::launch::{
+    check_custom_hook_accounts, check_rules, CustomHook, KitCallerSeeds, LaunchSeeds,
+};
 use crate::state::*;
 
 /// Arguments of `create_token_launch`.
@@ -61,11 +77,104 @@ pub struct CreateTokenLaunchArgs {
     /// Each leg's virtual quote, raw units of its token, in the order of the quote mints.
     pub virtual_quotes: Vec<u64>,
     /// The token rules, as `create_launch` takes them and within the same bounds
-    /// (`docs/token-quotes.md` §6.1): the burn on buys and sells (every leg's pool hook), max
-    /// wallet, the creator wallet lock and the early-buyer lock (the kit). No holder fee yet
-    /// (`HolderFeeOnTokenLaunch`). Last in the data and optional there: data that ends after
-    /// `virtual_quotes`, as every call made before rules, reads as no rules.
+    /// (`docs/token-quotes.md` §6.1, §7.5.1): the holder fee (the kit's holder rewards, paid in the
+    /// legs' tokens or in SOL by `payouts`), the burn on buys and sells (every leg's pool hook), max
+    /// wallet, the creator wallet lock and the early-buyer lock (the kit). Optional in the data:
+    /// data that ends after `virtual_quotes`, as every call made before rules, reads as no rules.
     pub rules: LaunchRules,
+    /// How the coin pays out (`docs/token-quotes.md` §7.5): the SOL switch and the holder rounds.
+    /// Optional in the data, after `rules`: absent reads as zero, and zero is written as nothing,
+    /// so a launch without them sends exactly the data it always sent.
+    pub payouts: TokenPayouts,
+}
+
+/// The payout settings of a coin quoted in tokens (`docs/token-quotes.md` §7.5): `flags` bit 0 the
+/// SOL switch ([`PAYOUT_SOL`]: the launcher's part, a companion's holders' and launcher's parts and
+/// the kit's holder rewards paid in SOL, sold on the token's reference pool by `swap_to_sol`), every
+/// other bit 0 (`PayoutsInvalid`); `holder_round_secs` the round of holder rewards paid in every
+/// leg's token on a coin of two legs or more (600 to 86,400 seconds; 0 is an hour; ignored on
+/// other coins). Five bytes at the end of `create_token_launch`'s data when either is set, else
+/// none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TokenPayouts {
+    pub flags: u8,
+    pub holder_round_secs: u32,
+}
+
+impl TokenPayouts {
+    /// Whether the SOL switch is on.
+    pub fn sol(&self) -> bool {
+        self.flags & PAYOUT_SOL != 0
+    }
+}
+
+impl AnchorSerialize for TokenPayouts {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        if *self != Self::default() {
+            writer.write_all(&[self.flags])?;
+            writer.write_all(&self.holder_round_secs.to_le_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+impl AnchorDeserialize for TokenPayouts {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        let mut first = [0u8; 1];
+        let read = loop {
+            match reader.read(&mut first) {
+                Err(e) if e.kind() == borsh::io::ErrorKind::Interrupted => continue,
+                other => break other?,
+            }
+        };
+        if read == 0 {
+            return Ok(Self::default());
+        }
+        let mut secs = [0u8; 4];
+        reader.read_exact(&mut secs)?;
+        Ok(Self {
+            flags: first[0],
+            holder_round_secs: u32::from_le_bytes(secs),
+        })
+    }
+}
+
+#[cfg(feature = "idl-build")]
+impl anchor_lang::IdlBuild for TokenPayouts {
+    fn create_type() -> Option<anchor_lang::idl::types::IdlTypeDef> {
+        use anchor_lang::idl::types::*;
+        Some(IdlTypeDef {
+            name: Self::get_full_path(),
+            docs: vec![
+                "Optional at the end of the data: 5 bytes (flags u8, holder_round_secs u32) when either is set, none when both are 0.".into(),
+            ],
+            serialization: IdlSerialization::default(),
+            repr: None,
+            generics: vec![],
+            ty: IdlTypeDefTy::Struct {
+                fields: Some(IdlDefinedFields::Named(vec![
+                    IdlField {
+                        name: "flags".into(),
+                        docs: vec!["Bit 0: the SOL switch.".into()],
+                        ty: IdlType::U8,
+                    },
+                    IdlField {
+                        name: "holder_round_secs".into(),
+                        docs: vec![],
+                        ty: IdlType::U32,
+                    },
+                ])),
+            },
+        })
+    }
+
+    fn insert_types(
+        types: &mut std::collections::BTreeMap<String, anchor_lang::idl::types::IdlTypeDef>,
+    ) {
+        if let Some(ty) = Self::create_type() {
+            types.insert(Self::get_full_path(), ty);
+        }
+    }
 }
 
 impl AnchorDeserialize for CreateTokenLaunchArgs {
@@ -77,6 +186,7 @@ impl AnchorDeserialize for CreateTokenLaunchArgs {
             creator_fee_bps: AnchorDeserialize::deserialize_reader(reader)?,
             virtual_quotes: AnchorDeserialize::deserialize_reader(reader)?,
             rules: trailing_rules(reader)?,
+            payouts: AnchorDeserialize::deserialize_reader(reader)?,
         })
     }
 }
@@ -104,11 +214,15 @@ fn trailing_rules<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Launc
 /// order (read-only); with rules that install the kit, the kit's six accounts follow them
 /// ([`TOKEN_LAUNCH_KIT_ACCOUNTS`]: the kit, the token program's signer of its callbacks, the kit
 /// config (w), the kit's registry for the mint (w), the mint's kit-caller PDA, the kit's event
-/// authority).
+/// authority). A launch made from a `LaunchConfig` (`docs/token-quotes.md` §7) has it right after
+/// the quote mints, then, when it names a custom hook, `create_launch`'s hook accounts (the hook,
+/// the token program's signer for it, its registry for the mint, its extras, and a timelocked
+/// hook's `Timelock`), else the kit's six when its rules install the kit.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct CreateTokenLaunch<'info> {
-    /// The creator (a wallet): pays the launch fee and the rent.
+    /// The creator: a wallet, or a companion's creator address (`PDA(["creator", mint])` under the
+    /// companion, signing through its `launch_token`). Pays the launch fee and the rent.
     #[account(mut)]
     pub creator: Signer<'info>,
     #[account(mut, address = CONFIG_ADDRESS)]
@@ -228,6 +342,16 @@ fn split_remaining<'a, 'info>(
         LaunchError::KitAccountsMissing
     );
     let (quotes, kit) = remaining.split_at(remaining.len() - TOKEN_LAUNCH_KIT_ACCOUNTS);
+    Ok((quotes, Some(kit_of(kit, mint, kit_config)?)))
+}
+
+/// The kit's [`TOKEN_LAUNCH_KIT_ACCOUNTS`] accounts (`kit`), each at its address (the kit checks
+/// its registry's seeds).
+fn kit_of<'info>(
+    kit: &[AccountInfo<'info>],
+    mint: &Pubkey,
+    kit_config: &Pubkey,
+) -> Result<TokenKit<'info>> {
     let (caller, caller_bump) =
         Pubkey::find_program_address(&[KIT_CALLER_SEED, mint.as_ref()], &crate::ID);
     require!(
@@ -238,28 +362,151 @@ fn split_remaining<'a, 'info>(
             && *kit[5].key == KIT_EVENT_AUTHORITY,
         LaunchError::WrongKitAccount
     );
-    Ok((
-        quotes,
-        Some(TokenKit {
-            program: kit[0].clone(),
-            hook_signer: kit[1].clone(),
-            config: kit[2].clone(),
-            registry: kit[3].clone(),
-            caller: kit[4].clone(),
-            events: kit[5].clone(),
-            caller_bump,
-        }),
-    ))
+    Ok(TokenKit {
+        program: kit[0].clone(),
+        hook_signer: kit[1].clone(),
+        config: kit[2].clone(),
+        registry: kit[3].clone(),
+        caller: kit[4].clone(),
+        events: kit[5].clone(),
+        caller_bump,
+    })
 }
 
-/// The mint (the kit as its token hook when the rules install kit modules, no hook otherwise; the
-/// launch its only authority), the launch's holding of it, the whole supply into that holding (the
-/// kit does not subscribe to mints), then no more minting ever.
+/// The registry entry through which a custom hook on a coin quoted in tokens learns the coin's
+/// legs (`docs/token-quotes.md` §7): the launch's `Legs`, `Pda(LAUNCH_ID, ["legs", Account(1)])`
+/// (the mint), as the kit's registry for such a coin lists it (§6.1). Read-only: only this program
+/// writes the `Legs`.
+pub fn legs_registry_entry() -> ExtraAccount {
+    ExtraAccount {
+        writable: false,
+        source: AccountSource::Pda {
+            program: crate::ID,
+            seeds: vec![Seed::Literal(LEGS_SEED.to_vec()), Seed::Account(1)],
+        },
+    }
+}
+
+/// Whether a hook's registry lists the coin's `Legs` ([`legs_registry_entry`], writable or not).
+pub fn lists_legs(list: &HookAccountList) -> bool {
+    let wanted = legs_registry_entry().source;
+    list.accounts.iter().any(|a| a.source == wanted)
+}
+
+/// Where the `LaunchConfig` stands among `create_token_launch`'s remaining accounts: the first
+/// account this program owns that holds a `LaunchConfig`, right after the quote mints (a quote mint
+/// never is one: only SPL Token and Token-2022 mints pass the DEX's policy). None: no config, and
+/// every remaining account is read as before configs.
+fn config_at(remaining: &[AccountInfo]) -> Option<usize> {
+    remaining.iter().position(|a| {
+        *a.owner == crate::ID
+            && a.try_borrow_data()
+                .is_ok_and(|d| d.starts_with(LaunchConfig::DISCRIMINATOR))
+    })
+}
+
+/// A launch config on a coin quoted in tokens (`docs/token-quotes.md` §7): the arguments repeat its
+/// rules and creator fee (`ConfigMismatch`); no SOL cut (`QuoteCutOnTokenLaunch`: a hook's SOL cut
+/// would have nothing to be paid in); no partner and, unless the creator is its author, no author
+/// share (`ConfigSharesOnTokenLaunch`: both are paid by the SOL claims, which a coin quoted in
+/// tokens never has; the creator's whole fee goes to the creator, per leg); a custom hook with no
+/// kit rules (`CustomHookWithKitRules`, as `create_launch`).
+fn check_token_config(
+    lc: &LaunchConfig,
+    creator: &Pubkey,
+    args: &CreateTokenLaunchArgs,
+) -> Result<()> {
+    require!(
+        args.rules == lc.rules && args.creator_fee_bps == lc.creator_fee_bps,
+        LaunchError::ConfigMismatch
+    );
+    require!(lc.quote_cut().is_none(), LaunchError::QuoteCutOnTokenLaunch);
+    let author = lc.creator != *creator && lc.author_share_bps > 0;
+    require!(
+        !author && lc.partner_share_bps() == 0,
+        LaunchError::ConfigSharesOnTokenLaunch
+    );
+    if lc.hook().is_some() {
+        require!(lc.rules.modules() == 0, LaunchError::CustomHookWithKitRules);
+    }
+    Ok(())
+}
+
+/// What `create_token_launch`'s remaining accounts hold: the quote mints, the kit's accounts, the
+/// config and its custom hook.
+struct TokenRemaining<'a, 'info> {
+    quotes: &'a [AccountInfo<'info>],
+    kit: Option<TokenKit<'info>>,
+    config: Option<Pubkey>,
+    custom: Option<CustomHook<'info>>,
+}
+
+/// The remaining accounts of `create_token_launch`, checked: without a config as before configs
+/// ([`split_remaining`]); with one ([`config_at`], [`check_token_config`]), the quote mints before
+/// it and after it the custom hook's accounts (`create_launch`'s, checked as it checks them, the
+/// hook's registry listing the coin's `Legs`: `HookMissingLegs`), or the kit's six when the rules
+/// install the kit, or nothing.
+fn token_remaining<'a, 'info>(
+    remaining: &'a [AccountInfo<'info>],
+    args: &CreateTokenLaunchArgs,
+    creator: &Pubkey,
+    mint: &Pubkey,
+    kit_config: &Pubkey,
+) -> Result<TokenRemaining<'a, 'info>> {
+    let modules = args.rules.modules();
+    let Some(at) = config_at(remaining) else {
+        let (quotes, kit) = split_remaining(remaining, modules, mint, kit_config)?;
+        return Ok(TokenRemaining {
+            quotes,
+            kit,
+            config: None,
+            custom: None,
+        });
+    };
+    let info = &remaining[at];
+    let lc = LaunchConfig::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+    check_token_config(&lc, creator, args)?;
+    let (quotes, after) = (&remaining[..at], &remaining[at + 1..]);
+    let (kit, custom) = match lc.hook() {
+        Some(_) => {
+            let custom = check_custom_hook_accounts(after, lc.hook(), lc.hook_timelocked(), mint)?;
+            // `check_custom_hook_accounts` decoded the registry (`after[2]`) already.
+            let list = HookAccountList::decode(&after[2].try_borrow_data()?)
+                .ok_or(LaunchError::HookRegistryMissing)?;
+            require!(lists_legs(&list), LaunchError::HookMissingLegs);
+            (None, custom)
+        }
+        None if modules == 0 => {
+            require!(after.is_empty(), LaunchError::UnexpectedCustomHookAccounts);
+            (None, None)
+        }
+        None => {
+            require!(
+                after.len() == TOKEN_LAUNCH_KIT_ACCOUNTS,
+                LaunchError::KitAccountsMissing
+            );
+            (Some(kit_of(after, mint, kit_config)?), None)
+        }
+    };
+    Ok(TokenRemaining {
+        quotes,
+        kit,
+        config: Some(*info.key),
+        custom,
+    })
+}
+
+/// The mint (the kit as its token hook when the rules install kit modules, a config's custom hook
+/// with its flags when it names one, no hook otherwise; the launch its only authority), the
+/// launch's holding of it, the whole supply into that holding (the kit does not subscribe to mints;
+/// a custom hook may, so its extras go along, as `create_launch` passes them), then no more minting
+/// ever.
 #[inline(never)]
 fn mint_coin<'info>(
     ctx: &Context<'info, CreateTokenLaunch<'info>>,
     args: &CreateTokenLaunchArgs,
     kit: Option<&TokenKit<'info>>,
+    custom: Option<&CustomHook<'info>>,
     modules: u8,
 ) -> Result<()> {
     let a = &ctx.accounts;
@@ -267,6 +514,10 @@ fn mint_coin<'info>(
     let (mint, launch) = (a.mint.key(), a.launch.key());
     let token_program = a.token_program.to_account_info();
     let events = a.token_event_authority.to_account_info();
+    let (hook_program, hook_flags) = match custom {
+        Some(c) => (Some(*c.program.key), c.flags),
+        None => (kit.map(|_| KIT_ID), bordrless_kit::mint_flags(modules)),
+    };
     let ix = cpi::token_create_mint(
         a.creator.key(),
         mint,
@@ -278,8 +529,8 @@ fn mint_coin<'info>(
             max_supply: config.supply,
             mint_authority: Some(launch),
             freeze_authority: None,
-            hook_program: kit.map(|_| KIT_ID),
-            hook_flags: bordrless_kit::mint_flags(modules),
+            hook_program,
+            hook_flags,
             hook_authority: None,
             metadata_authority: None,
         },
@@ -311,31 +562,45 @@ fn mint_coin<'info>(
     )?;
     let launch_seeds = LaunchSeeds::new(mint, ctx.bumps.launch);
     let seeds = launch_seeds.seeds();
+    let extra_metas: Vec<AccountMeta> = custom.map_or_else(Vec::new, |c| {
+        c.extras
+            .iter()
+            .map(|e| AccountMeta {
+                pubkey: *e.key,
+                is_signer: false,
+                is_writable: e.is_writable,
+            })
+            .collect()
+    });
     let ix = cpi::token_mint_to(
         launch,
         mint,
         a.launch_reserve.key(),
-        kit.map(|_| cpi::KIT_HOOK),
-        &[],
+        match custom {
+            Some(c) => Some(c.hook()),
+            None => kit.map(|_| cpi::KIT_HOOK),
+        },
+        &extra_metas,
         config.supply,
     );
-    let (hook_info, signer_info) = match kit {
-        Some(k) => (k.program.clone(), k.hook_signer.clone()),
-        None => (token_program.clone(), token_program.clone()),
+    let (hook_info, signer_info) = match (custom, kit) {
+        (Some(c), _) => (c.program.clone(), c.signer.clone()),
+        (None, Some(k)) => (k.program.clone(), k.hook_signer.clone()),
+        (None, None) => (token_program.clone(), token_program.clone()),
     };
-    invoke_signed(
-        &ix,
-        &[
-            a.launch.to_account_info(),
-            a.mint.to_account_info(),
-            a.launch_reserve.to_account_info(),
-            hook_info,
-            signer_info,
-            events.clone(),
-            token_program.clone(),
-        ],
-        &[&seeds],
-    )?;
+    let mut infos = vec![
+        a.launch.to_account_info(),
+        a.mint.to_account_info(),
+        a.launch_reserve.to_account_info(),
+        hook_info,
+        signer_info,
+        events.clone(),
+        token_program.clone(),
+    ];
+    if let Some(c) = custom {
+        infos.extend(c.extras.iter().cloned());
+    }
+    invoke_signed(&ix, &infos, &[&seeds])?;
     let ix = cpi::token_set_authority(launch, mint, AuthorityKind::Mint, None);
     invoke_signed(
         &ix,
@@ -370,24 +635,44 @@ pub fn process_create_token_launch<'info>(
         args.creator_fee_bps <= config.max_creator_fee_bps,
         LaunchError::CreatorFeeTooHigh
     );
-    // The rules within the bounds a SOL launch's are held to; no holder fee yet (phase 2).
+    // The rules within the bounds a SOL launch's are held to, the holder fee included
+    // (`docs/token-quotes.md` §7.5.1: the kit's holder rewards in the legs' tokens or in SOL).
     let rules = args.rules;
     check_rules(&rules, args.creator_fee_bps, config)?;
-    require!(!rules.rewards_on(), LaunchError::HolderFeeOnTokenLaunch);
+    let payouts = args.payouts;
+    require!(
+        payouts.flags & !PAYOUT_SOL == 0
+            && (payouts.holder_round_secs == 0
+                || (MIN_HOLDER_ROUND_SECS..=MAX_HOLDER_ROUND_SECS)
+                    .contains(&payouts.holder_round_secs)),
+        LaunchError::PayoutsInvalid
+    );
     let modules = rules.modules();
     let mint = ctx.accounts.mint.key();
-    // A companion coin's pots are SOL: no companion here (`PartnerOnCompanion`'s pattern).
-    require!(
-        !is_companion_creator(&ctx.accounts.creator.key(), &mint),
-        LaunchError::CompanionTokenLaunch
-    );
+    // A companion's creator address may be the creator (`docs/token-quotes.md` §7): only the
+    // companion program signs for it, through its `launch_token` (a script companion's, whose
+    // script spends each leg's creator fee in that leg's token).
     let (supply, lp_fee_bps, launch_fee) =
         (config.supply, config.lp_fee_bps, config.launch_fee_lamports);
     let (kit_config, _) = Pubkey::find_program_address(&[KIT_SEED, mint.as_ref()], &KIT_ID);
-    let (quotes, kit) = split_remaining(ctx.remaining_accounts, modules, &mint, &kit_config)?;
+    let TokenRemaining {
+        quotes,
+        kit,
+        config: launch_config,
+        custom,
+    } = token_remaining(
+        ctx.remaining_accounts,
+        &args,
+        &ctx.accounts.creator.key(),
+        &mint,
+        &kit_config,
+    )?;
     let legs = leg_terms(quotes, &args.virtual_quotes, &mint, supply, lp_fee_bps)?;
     let count = quotes.len();
     let terms = RuleTerms::of(&rules, clock.unix_timestamp, supply, config.curve_bps);
+    // How holder rewards are paid (`Launch::reward_kind`, decided the same way here): SOL with the
+    // switch, the leg's token on one leg, every leg's token in rounds on several.
+    let rewards = holder_rewards(&rules, payouts, count);
 
     // The launch fee, as for any launch.
     if launch_fee > 0 {
@@ -402,10 +687,13 @@ pub fn process_create_token_launch<'info>(
             launch_fee,
         )?;
     }
-    mint_coin(&ctx, &args, kit.as_ref(), modules)?;
+    mint_coin(&ctx, &args, kit.as_ref(), custom.as_ref(), modules)?;
     if let Some(k) = &kit {
-        install_kit(&ctx, k, &terms, legs[0].pool)?;
+        install_kit(&ctx, k, &terms, legs[0].pool, rewards, &quotes[0])?;
     }
+    let (custom_hook, custom_hook_flags) = custom
+        .as_ref()
+        .map_or((None, 0), |c| (Some(*c.program.key), c.flags));
 
     let a = &mut ctx.accounts;
     a.config.launches = a
@@ -455,13 +743,16 @@ pub fn process_create_token_launch<'info>(
     launch.creator_bought = false;
     launch.holder_fees_accrued = 0;
     launch.burned_on_trades = 0;
-    launch.config = Pubkey::default();
-    launch.custom_hook = None;
-    launch.custom_hook_flags = 0;
+    launch.config = launch_config.unwrap_or_default();
+    launch.custom_hook = custom_hook;
+    launch.custom_hook_flags = custom_hook_flags;
+    // A config's author is paid nothing here: one that would be is refused
+    // (`ConfigSharesOnTokenLaunch`).
     launch.author_share_bps = 0;
     launch.author_fees_paid = 0;
     launch.reserved = [0; 22];
     launch.set_token_quoted();
+    launch.set_payouts(payouts.flags);
     let record = &mut a.legs;
     record.version = VERSION;
     record.bump = ctx.bumps.legs;
@@ -502,6 +793,16 @@ pub fn process_create_token_launch<'info>(
         slot: clock.slot,
         ts: clock.unix_timestamp,
     });
+    if let Some(config) = launch_config {
+        emit_cpi!(TokenLaunchConfigured {
+            launch: launch_key,
+            mint,
+            config,
+            custom_hook,
+            custom_hook_flags,
+            ts: clock.unix_timestamp,
+        });
+    }
     if rules != LaunchRules::NONE {
         emit_cpi!(TokenLaunchRules {
             launch: launch_key,
@@ -516,7 +817,68 @@ pub fn process_create_token_launch<'info>(
             ts: clock.unix_timestamp,
         });
     }
+    if payouts.flags != 0 || rewards.kind != 0 {
+        emit_payouts(
+            &ctx,
+            launch_key,
+            mint,
+            payouts.flags,
+            rewards,
+            clock.unix_timestamp,
+        )?;
+    }
     Ok(())
+}
+
+/// `TokenLaunchPayouts`, out of `create_token_launch`'s frame (its stack is at the limit).
+#[inline(never)]
+fn emit_payouts<'info>(
+    ctx: &Context<'info, CreateTokenLaunch<'info>>,
+    launch: Pubkey,
+    mint: Pubkey,
+    flags: u8,
+    rewards: bordrless_kit::LegsRewards,
+    ts: i64,
+) -> Result<()> {
+    emit_cpi!(TokenLaunchPayouts {
+        launch,
+        mint,
+        flags,
+        reward_kind: rewards.kind,
+        holder_round_secs: rewards.round_secs,
+        ts,
+    });
+    Ok(())
+}
+
+/// The kit's holder rewards of a launch quoted in tokens (`docs/token-quotes.md` §7.5.1): none
+/// without a holder fee; SOL (kind 3) with the switch; the leg's token (kind 1) on one leg; every
+/// leg's token in rounds (kind 2, `holder_round_secs`, an hour when 0) on several.
+#[inline(never)]
+fn holder_rewards(
+    rules: &LaunchRules,
+    payouts: TokenPayouts,
+    count: usize,
+) -> bordrless_kit::LegsRewards {
+    use bordrless_kit::constants::{REWARD_KIND_ROUNDS, REWARD_KIND_SOL, REWARD_KIND_TOKEN};
+    let kind = if !rules.rewards_on() {
+        0
+    } else if payouts.sol() {
+        REWARD_KIND_SOL
+    } else if count == 1 {
+        REWARD_KIND_TOKEN
+    } else {
+        REWARD_KIND_ROUNDS
+    };
+    let round_secs = if kind == REWARD_KIND_ROUNDS {
+        match payouts.holder_round_secs {
+            0 => DEFAULT_HOLDER_ROUND_SECS,
+            secs => secs,
+        }
+    } else {
+        0
+    };
+    bordrless_kit::LegsRewards { kind, round_secs }
 }
 
 /// The times and the max-wallet threshold a launch quoted in tokens fixes from its rules at `now`.
@@ -556,17 +918,23 @@ impl RuleTerms {
 
 /// The kit, installed through `init_legs` by the mint's kit-caller PDA (which signs nothing else),
 /// the creator paying, after the supply is minted: as `create_launch` installs a SOL coin's, leg 0's
-/// pool as its pool, no reward mint or vault.
+/// pool as its pool. With holder rewards (`docs/token-quotes.md` §7.5.1) their kind goes along
+/// (`rewards`), and a one-leg coin paying in its token names that token (`quote`, leg 0's quote
+/// mint) as the reward mint; without, no reward mint or vault, and the data is the call's of before.
 #[inline(never)]
 fn install_kit<'info>(
     ctx: &Context<'info, CreateTokenLaunch<'info>>,
     kit: &TokenKit<'info>,
     terms: &RuleTerms,
     pool: Pubkey,
+    rewards: bordrless_kit::LegsRewards,
+    quote: &AccountInfo<'info>,
 ) -> Result<()> {
     let a = &ctx.accounts;
     let mint = a.mint.key();
-    let ix = cpi::kit_init_legs(
+    let token = rewards.kind == bordrless_kit::constants::REWARD_KIND_TOKEN;
+    let reward_mint = if token { *quote.key } else { Pubkey::default() };
+    let ix = cpi::kit_init_legs_with(
         &cpi::KitInitKeys {
             kit_caller: kit.caller.key(),
             payer: a.creator.key(),
@@ -574,14 +942,14 @@ fn install_kit<'info>(
             launch_reserve: a.launch_reserve.key(),
             kit_config: kit.config.key(),
             registry: kit.registry.key(),
-            reward_mint: Pubkey::default(),
+            reward_mint,
             reward_vault: None,
         },
         KitInitArgs {
             launch: a.launch.key(),
             pool,
             creator: a.creator.key(),
-            reward_mint: Pubkey::default(),
+            reward_mint,
             modules: terms.rules.modules(),
             max_wallet_bps: terms.rules.max_wallet_bps,
             creator_unlock_at: terms.creator_unlock_at,
@@ -589,23 +957,24 @@ fn install_kit<'info>(
             early_unlock_at: terms.early_unlock_at,
             kit_caller_bump: kit.caller_bump,
         },
+        rewards,
     );
     let caller_seeds = KitCallerSeeds::new(mint, kit.caller_bump);
-    invoke_signed(
-        &ix,
-        &[
-            kit.caller.clone(),
-            a.creator.to_account_info(),
-            a.mint.to_account_info(),
-            a.launch_reserve.to_account_info(),
-            kit.config.clone(),
-            kit.registry.clone(),
-            a.system_program.to_account_info(),
-            kit.events.clone(),
-            kit.program.clone(),
-        ],
-        &[&caller_seeds.seeds()],
-    )?;
+    let mut infos = vec![
+        kit.caller.clone(),
+        a.creator.to_account_info(),
+        a.mint.to_account_info(),
+        a.launch_reserve.to_account_info(),
+        kit.config.clone(),
+        kit.registry.clone(),
+        a.system_program.to_account_info(),
+        kit.events.clone(),
+        kit.program.clone(),
+    ];
+    if token {
+        infos.push(quote.clone());
+    }
+    invoke_signed(&ix, &infos, &[&caller_seeds.seeds()])?;
     Ok(())
 }
 
@@ -649,7 +1018,9 @@ pub fn leg_registry_list(kit_config: Pubkey) -> HookAccountList {
 /// Accounts of `open_leg(index)`: anyone opens leg `index` of a launch quoted in tokens, paying the
 /// rent of its fee account, its pool, the pool's vaults and registry (and the DEX's pool creation
 /// fee, if any). With kit rules the remaining accounts are the kit, the token program's signer of
-/// its callbacks and the kit config (writable) ([`OPEN_LEG_KIT_ACCOUNTS`]).
+/// its callbacks and the kit config (writable) ([`OPEN_LEG_KIT_ACCOUNTS`]); with a custom hook
+/// (`docs/token-quotes.md` §7), the hook, the token program's signer for it and the hook's extras
+/// for the deposit.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct OpenLeg<'info> {
@@ -720,7 +1091,7 @@ pub struct OpenLeg<'info> {
 /// `owner`, `payer` funding its rent. An address someone already sent lamports to is topped up,
 /// allocated and assigned (a plain create would fail on it, and a leg that can't open would keep
 /// the coin from ever trading).
-fn create_pda_account<'info>(
+pub(crate) fn create_pda_account<'info>(
     payer: &AccountInfo<'info>,
     account: &AccountInfo<'info>,
     system: &AccountInfo<'info>,
@@ -845,23 +1216,112 @@ fn open_leg_kit<'info>(
     ]))
 }
 
+/// The kit config's vault of a leg's token (its associated token account of it,
+/// `docs/token-quotes.md` §7.5.1): where the leg's holder fees go, whatever the coin's reward kind.
+pub fn kit_vault_address(kit_config: &Pubkey, leg: &Leg) -> Pubkey {
+    spl::associated_token_address(
+        kit_config,
+        &leg.quote_mint,
+        &spl::program_id(leg.quote_program),
+    )
+}
+
+/// The kit's vault of the leg on a coin with holder rewards (`docs/token-quotes.md` §7.5.1): the
+/// fourth remaining account of `open_leg` after the kit's three (`KitAccountsMissing` without it,
+/// `WrongKitAccount` at another address), made here when missing (the opener paying), before the
+/// deposit runs the kit (a one-leg coin paying in its token reads it on every transfer). None on a
+/// coin without holder rewards.
+#[inline(never)]
+fn open_kit_vault<'info>(
+    ctx: &Context<'info, OpenLeg<'info>>,
+    leg: &Leg,
+) -> Result<Option<AccountInfo<'info>>> {
+    let a = &ctx.accounts;
+    if !a.launch.rewards_on() {
+        return Ok(None);
+    }
+    let remaining = ctx.remaining_accounts;
+    require!(
+        remaining.len() >= OPEN_LEG_KIT_REWARD_ACCOUNTS,
+        LaunchError::KitAccountsMissing
+    );
+    let vault = &remaining[OPEN_LEG_KIT_ACCOUNTS];
+    require_keys_eq!(
+        *vault.key,
+        kit_vault_address(&a.launch.kit_config, leg),
+        LaunchError::WrongKitAccount
+    );
+    spl::create_ata_idempotent(
+        &a.payer.to_account_info(),
+        vault,
+        &remaining[2],
+        &a.quote_mint.to_account_info(),
+        &a.system_program.to_account_info(),
+        &a.quote_token_program.to_account_info(),
+        &a.associated_token_program.to_account_info(),
+    )?;
+    Ok(Some(vault.clone()))
+}
+
+/// The custom hook's accounts of `open_leg` for a launch made from a config that names one
+/// (`docs/token-quotes.md` §7): its remaining accounts are the hook (`InvalidCustomHook` for another
+/// program), the token program's signer for it (`WrongHookSigner`) and the hook's extras for the
+/// deposit (the launch's holding to the leg pool's, the launch signing), as a client resolves them
+/// from the hook's registry for the mint; the hook checks its extras itself, as on every transfer.
+/// None for a launch without a custom hook (its remaining accounts read as before).
+fn open_leg_custom<'a, 'info>(
+    launch: &Launch,
+    remaining: &'a [AccountInfo<'info>],
+) -> Result<Option<&'a [AccountInfo<'info>]>> {
+    let Some(hook) = launch.custom_hook else {
+        return Ok(None);
+    };
+    require!(remaining.len() >= 2, LaunchError::CustomHookAccountsMissing);
+    require_keys_eq!(*remaining[0].key, hook, LaunchError::InvalidCustomHook);
+    require_keys_eq!(
+        *remaining[1].key,
+        token_client::hook_signer(&hook),
+        LaunchError::WrongHookSigner
+    );
+    Ok(Some(remaining))
+}
+
 /// 2. The leg's pool: DEX `create_spl_pool` as the pool's hook (this program's hook authority
 ///    signs), the launch depositing the leg's share (the launch signs). With kit rules the deposit
 ///    runs the kit (launch to the leg's pool: excluded to excluded), its slice the kit's with the
-///    coin's `Legs`.
+///    coin's `Legs`; with a custom hook, the hook's slice (`[hook, its signer, extras]`).
 #[inline(never)]
 fn create_leg_pool<'info>(
     ctx: &Context<'info, OpenLeg<'info>>,
     leg: &Leg,
     kit: Option<&[AccountInfo<'info>; OPEN_LEG_KIT_ACCOUNTS]>,
+    custom: Option<&[AccountInfo<'info>]>,
+    reward_vault: Option<&AccountInfo<'info>>,
 ) -> Result<()> {
     let a = &ctx.accounts;
     let launch = &a.launch;
     let launch_seeds = LaunchSeeds::new(launch.mint, launch.bump);
     let hook_seeds: &[&[u8]] = &[HOOK_AUTHORITY_SEED, &[HOOK_AUTHORITY_BUMP]];
-    let slice = match kit {
-        Some(_) => cpi::kit_legs_slice(launch.kit_config, a.legs.key()),
-        None => vec![],
+    let slice = match (kit, custom) {
+        // A one-leg coin paying holder rewards in its token: the kit reads its vault on the deposit.
+        (Some(_), _) if reward_vault.is_some() => cpi::kit_legs_slice_with_vault(
+            launch.kit_config,
+            a.legs.key(),
+            reward_vault.map(|v| *v.key).unwrap_or_default(),
+        ),
+        (Some(_), _) => cpi::kit_legs_slice(launch.kit_config, a.legs.key()),
+        (None, Some(c)) => {
+            let extras: Vec<AccountMeta> = c[2..]
+                .iter()
+                .map(|e| AccountMeta {
+                    pubkey: *e.key,
+                    is_signer: false,
+                    is_writable: e.is_writable,
+                })
+                .collect();
+            cpi::custom_slice((*c[0].key, *c[1].key), &extras)
+        }
+        (None, None) => vec![],
     };
     let base_hook_accounts = slice.len() as u8;
     let ix = cpi::dex_create_spl_pool(
@@ -918,6 +1378,12 @@ fn create_leg_pool<'info>(
             config.clone(),
             a.legs.to_account_info(),
         ]);
+        if let Some(vault) = reward_vault {
+            infos.push(vault.clone());
+        }
+    }
+    if let Some(c) = custom {
+        infos.extend(c.iter().cloned());
     }
     invoke_signed(&ix, &infos, &[&launch_seeds.seeds(), hook_seeds])?;
     Ok(())
@@ -944,15 +1410,30 @@ pub fn process_open_leg<'info>(ctx: Context<'info, OpenLeg<'info>>, index: u8) -
     let mint = a.launch.mint;
     let launch_key = a.launch.key();
     let kit = open_leg_kit(&a.launch, ctx.remaining_accounts)?;
+    let custom = open_leg_custom(&a.launch, ctx.remaining_accounts)?;
     create_leg_fees(&ctx, &leg, &mint)?;
-    create_leg_pool(&ctx, &leg, kit.as_ref())?;
-    // 3. The pool's registry: the launch, the leg's fee account, the `Legs`, the kit config.
+    // The kit's vault of the leg (holder rewards, §7.5.1), before the deposit runs the kit.
+    let vault = open_kit_vault(&ctx, &leg)?;
+    let count = ctx.accounts.legs.count;
+    let reward_vault = vault.as_ref().filter(|_| {
+        ctx.accounts.launch.reward_kind(count) == bordrless_kit::constants::REWARD_KIND_TOKEN
+    });
+    create_leg_pool(&ctx, &leg, kit.as_ref(), custom, reward_vault)?;
+    // 3. The pool's registry: the launch, the leg's fee account, the `Legs`, the kit config; with
+    //    holder rewards the kit's vault of the leg (index 9).
     let (registry, registry_bump) = hook_accounts_address(&crate::ID, &leg.pool);
     require_keys_eq!(
         ctx.accounts.registry.key(),
         registry,
         LaunchError::WrongHolding
     );
+    let mut list = leg_registry_list(ctx.accounts.launch.kit_config);
+    if let Some(v) = &vault {
+        list.accounts.push(ExtraAccount {
+            writable: true,
+            source: AccountSource::Key(*v.key),
+        });
+    }
     write_registry(
         &ctx.accounts.payer.to_account_info(),
         &ctx.accounts.registry.to_account_info(),
@@ -960,7 +1441,7 @@ pub fn process_open_leg<'info>(ctx: Context<'info, OpenLeg<'info>>, index: u8) -
         &crate::ID,
         &leg.pool,
         registry_bump,
-        &leg_registry_list(ctx.accounts.launch.kit_config),
+        &list,
     )?;
     // 4. Opened.
     let payer = ctx.accounts.payer.key();
@@ -1010,7 +1491,10 @@ pub fn process_open_leg<'info>(ctx: Context<'info, OpenLeg<'info>>, index: u8) -
 }
 
 /// Accounts of `claim_creator_fees_token(index)`: anyone pays leg `index`'s creator fees to the
-/// creator's associated token account of the leg's quote (created if needed, `payer` paying).
+/// creator's associated token account of the leg's quote (created if needed, `payer` paying). A
+/// companion coin's creator is the companion's creator address, a PDA (`docs/token-quotes.md` §7):
+/// its associated token account is derived and created as a wallet's (the ATA program takes any
+/// owner key), and the companion's script spends it.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct ClaimCreatorFeesToken<'info> {
@@ -1067,6 +1551,15 @@ pub fn process_claim_creator_fees_token<'info>(
     );
     // A leg not yet open has no fee account.
     require!(leg.opened_at != 0, LaunchError::NothingToClaim);
+    // With the SOL switch (`docs/token-quotes.md` §7.5.2) nobody pushes tokens to a wallet creator
+    // who chose SOL: only the creator takes them, signing. A companion's creator address is claimed
+    // into by its own leg claim, which splits it (its parts' currencies are the companion's).
+    require!(
+        !a.launch.sol_switch()
+            || a.creator.is_signer
+            || is_companion_creator(&a.launch.creator, &a.launch.mint),
+        LaunchError::CreatorSignsTokenClaim
+    );
     let program = a.quote_token_program.to_account_info();
     let quote_mint = a.quote_mint.to_account_info();
     let creator_quote = a.creator_quote.to_account_info();

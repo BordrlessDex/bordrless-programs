@@ -248,6 +248,232 @@ pub fn launch(
     build(named, inner, crate::instruction::Launch { args }.data())
 }
 
+/// `launch_token`: `create_token_launch` (built by the launchpad's client, `create_token_launch`
+/// or `create_token_launch_with`, with the creator address as the creator) through the companion
+/// (`docs/token-quotes.md` §7, §7.4): a script companion whose pot is the whole creator fee, or a
+/// preset companion, whose pots on the legs (`companion_legs_address`) it makes. The mint signs.
+pub fn launch_token(
+    launcher: Pubkey,
+    mint: Pubkey,
+    create_token_launch: &Instruction,
+    args: bordrless_launch::instructions::CreateTokenLaunchArgs,
+) -> Instruction {
+    let named = vec![
+        AccountMeta::new_readonly(launcher, true),
+        AccountMeta::new(companion_address(&mint), false),
+        AccountMeta::new(creator_address(&mint), false),
+        AccountMeta::new(companion_legs_address(&mint), false),
+        AccountMeta::new_readonly(LAUNCH_ID, false),
+    ];
+    let inner: Vec<AccountMeta> = create_token_launch
+        .accounts
+        .iter()
+        .map(|m| AccountMeta {
+            pubkey: m.pubkey,
+            is_signer: m.is_signer && m.pubkey == mint,
+            is_writable: m.is_writable,
+        })
+        .collect();
+    build(
+        named,
+        inner,
+        crate::instruction::LaunchToken { args }.data(),
+    )
+}
+
+/// A preset companion's pots on the legs of a coin quoted in tokens: `PDA(["companion-legs", mint])`.
+pub fn companion_legs_address(mint: &Pubkey) -> Pubkey {
+    crate::state::CompanionLegs::address(mint).0
+}
+
+/// The named accounts of a leg step (`claim_fees_leg`, `buyback_leg`).
+fn leg_step(cranker: Pubkey, mint: Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new(cranker, true),
+        AccountMeta::new_readonly(companion_address(&mint), false),
+        AccountMeta::new(creator_address(&mint), false),
+        AccountMeta::new_readonly(launch_client::launch_address(&mint), false),
+        AccountMeta::new(companion_legs_address(&mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]
+}
+
+/// The sender's token account of the leg's token, for the bounty (`bounty`), or nothing.
+fn bounty_meta(keys: &launch_client::LegKeys, cranker: &Pubkey, bounty: bool) -> Vec<AccountMeta> {
+    if bounty {
+        vec![AccountMeta::new(keys.quote_account(cranker), false)]
+    } else {
+        vec![]
+    }
+}
+
+/// `claim_fees_leg(index)` (anyone) of leg `keys` of a preset companion's coin: the launchpad's
+/// `claim_creator_fees_token` accounts (the sender paying the creator address's token account the
+/// first time), and with `bounty` the sender's token account of the leg's token (it must exist).
+pub fn claim_fees_leg(
+    cranker: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+    bounty: bool,
+) -> Instruction {
+    let mint = keys.mint;
+    let mut extra = remaining(
+        &launch_client::claim_creator_fees_token(cranker, creator_address(&mint), keys, index),
+        &[],
+    );
+    extra.extend(bounty_meta(keys, &cranker, bounty));
+    build(
+        leg_step(cranker, mint),
+        extra,
+        crate::instruction::ClaimFeesLeg { index }.data(),
+    )
+}
+
+/// `withdraw_leg(index)` (anyone, `sender` paying the launcher's token account the first time):
+/// the leg's launcher's part to `beneficiary`'s associated token account of the leg's token.
+pub fn withdraw_leg(
+    sender: Pubkey,
+    beneficiary: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+) -> Instruction {
+    let mint = keys.mint;
+    let named = vec![
+        AccountMeta::new(sender, true),
+        AccountMeta::new_readonly(companion_address(&mint), false),
+        AccountMeta::new(creator_address(&mint), false),
+        AccountMeta::new_readonly(beneficiary, false),
+        AccountMeta::new_readonly(launch_client::launch_address(&mint), false),
+        AccountMeta::new(companion_legs_address(&mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ];
+    let extra = vec![
+        AccountMeta::new_readonly(keys.quote_mint, false),
+        AccountMeta::new(keys.quote_account(&creator_address(&mint)), false),
+        AccountMeta::new(keys.quote_account(&beneficiary), false),
+        AccountMeta::new_readonly(keys.quote_program, false),
+        AccountMeta::new_readonly(bordrless_swap::spl::ATA_PROGRAM_ID, false),
+    ];
+    build(
+        named,
+        extra,
+        crate::instruction::WithdrawLeg { index }.data(),
+    )
+}
+
+/// The accounts a leg trade by the creator address takes, as the program builds it: the leg's
+/// `swap_spl` (a buy's; a sell uses the same), the coin's hook slice (`rules`' kit, or `custom`:
+/// its extras as the client resolved them, and its registry, from which the program resolves them
+/// itself), the creator's coin holding's `create_holding` (the sender paying it the first time), the
+/// coin's mint writable (a burn).
+fn leg_trade_accounts(
+    cranker: Pubkey,
+    keys: &launch_client::LegKeys,
+    rules: &bordrless_launch::state::LaunchRules,
+    custom: Option<&CustomHookAccounts>,
+) -> Vec<AccountMeta> {
+    let mint = keys.mint;
+    let creator = creator_address(&mint);
+    let slice = match custom {
+        Some(h) => h.slice(),
+        None => launch_client::leg_base_slice(&mint, rules.modules()),
+    };
+    let swap = launch_client::leg_swap_with_slice(
+        keys,
+        creator,
+        token_client::holding_address(&mint, &creator),
+        keys.quote_account(&creator),
+        1,
+        0,
+        0,
+        slice,
+        true,
+    );
+    let mut extra = remaining(&swap, &[]);
+    extra.extend(registry(&mint, custom));
+    extra.extend(remaining(
+        &token_client::create_holding(cranker, mint, creator),
+        &[],
+    ));
+    // Holder rewards (`docs/token-quotes.md` §7.5.1): the kit's vault of the leg, which the leg
+    // trade pays the holder fee into (and a one-leg coin's kit reads on every transfer).
+    if rules.rewards_on() {
+        extra.push(AccountMeta::new(
+            launch_client::kit_vault_address(keys),
+            false,
+        ));
+    }
+    extra
+}
+
+/// `buyback_leg(index)` (anyone) of leg `keys` of a buyback companion's coin whose rules are
+/// `rules` (and custom hook `custom`, its extras resolved for a buy and a burn): the leg trade's
+/// accounts, the token program's `burn`, and with `bounty` the sender's token account of the leg's
+/// token.
+pub fn buyback_leg(
+    cranker: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+    rules: &bordrless_launch::state::LaunchRules,
+    custom: Option<&CustomHookAccounts>,
+    bounty: bool,
+) -> Instruction {
+    let mint = keys.mint;
+    let creator = creator_address(&mint);
+    let mut extra = leg_trade_accounts(cranker, keys, rules, custom);
+    let (hook, extras) = match custom {
+        Some(h) => (Some(Hook::of(h.program)), h.extras.clone()),
+        None if rules.modules() != 0 => (
+            Some(Hook::of(KIT_ID)),
+            bordrless_kit::client::legs_hook_extras(&mint),
+        ),
+        None => (None, vec![]),
+    };
+    extra.extend(remaining(
+        &token_client::burn_with(
+            creator,
+            token_client::holding_address(&mint, &creator),
+            mint,
+            hook,
+            extras,
+            0,
+        ),
+        &[],
+    ));
+    extra.extend(bounty_meta(keys, &cranker, bounty));
+    build(
+        leg_step(cranker, keys.mint),
+        extra,
+        crate::instruction::BuybackLeg { index }.data(),
+    )
+}
+
+/// `snowball_step_leg(index)` (anyone) of leg `keys` of a Snowball's coin: as [`buyback_leg`], and
+/// the Snowball's terms and the coin's `Legs` (its early-buyer window).
+pub fn snowball_step_leg(
+    cranker: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+    rules: &bordrless_launch::state::LaunchRules,
+    custom: Option<&CustomHookAccounts>,
+    bounty: bool,
+) -> Instruction {
+    let mint = keys.mint;
+    let mut named = leg_step(cranker, mint);
+    named.insert(5, AccountMeta::new_readonly(snowball_address(&mint), false));
+    let mut extra = leg_trade_accounts(cranker, keys, rules, custom);
+    extra.push(AccountMeta::new_readonly(
+        launch_client::legs_address(&mint),
+        false,
+    ));
+    extra.extend(bounty_meta(keys, &cranker, bounty));
+    build(
+        named,
+        extra,
+        crate::instruction::SnowballStepLeg { index }.data(),
+    )
+}
+
 /// [`launch`] of a script companion: its script's address appended last, which the companion
 /// reads (a script that is not native-ready can't launch native) and never forwards. A script
 /// companion's launch while native launches are on needs it.
@@ -1625,4 +1851,231 @@ pub fn set_payout_terms(authority: Pubkey, mint: Pubkey, payout: PayoutTermsArgs
         accounts,
         data: crate::instruction::SetPayoutTerms { payout }.data(),
     }
+}
+
+// ---- Holder rewards in the legs' tokens and the SOL switch (`docs/token-quotes.md` §7.5) ------------
+
+/// [`launch_token`] of a preset companion with payees whose coin pays its launcher's part in the
+/// legs' tokens: its `PayeesLegs` (`["payees-legs", mint]`) appended last, which `launch_token` makes
+/// and never forwards.
+pub fn launch_token_with_payees(
+    launcher: Pubkey,
+    mint: Pubkey,
+    create_token_launch: &Instruction,
+    args: bordrless_launch::instructions::CreateTokenLaunchArgs,
+) -> Instruction {
+    let mut ix = launch_token(launcher, mint, create_token_launch, args);
+    ix.accounts
+        .push(AccountMeta::new(payees_legs_address(&mint), false));
+    ix
+}
+
+/// What a preset companion with payees owes them per leg: `PDA(["payees-legs", mint])`.
+pub fn payees_legs_address(mint: &Pubkey) -> Pubkey {
+    crate::state::PayeesLegs::address(mint).0
+}
+
+/// [`withdraw_leg`] of a companion with payees (`wallets`, in `set_payees`' order): its `Payees`, its
+/// `PayeesLegs` (w), each payee's wallet and associated token account of the leg's token (w; made
+/// when missing, the sender paying) and the system program.
+pub fn withdraw_leg_with_payees(
+    sender: Pubkey,
+    beneficiary: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+    wallets: &[Pubkey],
+) -> Instruction {
+    let mut ix = withdraw_leg(sender, beneficiary, keys, index);
+    let mint = keys.mint;
+    ix.accounts.push(AccountMeta::new_readonly(
+        crate::state::Payees::address(&mint).0,
+        false,
+    ));
+    ix.accounts
+        .push(AccountMeta::new(payees_legs_address(&mint), false));
+    for w in wallets {
+        ix.accounts.push(AccountMeta::new_readonly(*w, false));
+        ix.accounts
+            .push(AccountMeta::new(keys.quote_account(w), false));
+    }
+    ix
+}
+
+/// `share_leg(index)` (anyone) of leg `keys` of a preset companion with a holders' part: the kit's
+/// `share_token` accounts for the creator address, and with `bounty` the sender's token account of
+/// the leg's token.
+pub fn share_leg(
+    cranker: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+    bounty: bool,
+) -> Instruction {
+    let mint = keys.mint;
+    let creator = creator_address(&mint);
+    let mut extra = remaining(
+        &bordrless_kit::client::share_token(
+            creator,
+            mint,
+            index,
+            keys.quote_mint,
+            keys.quote_program,
+            keys.quote_account(&creator),
+            0,
+        ),
+        &[],
+    );
+    extra.extend(bounty_meta(keys, &cranker, bounty));
+    build(
+        leg_step(cranker, mint),
+        extra,
+        crate::instruction::ShareLeg { index }.data(),
+    )
+}
+
+/// `swap_bucket_to_sol(index, part)` (anyone) of leg `keys`: `part` 0 the launcher's, 1 the holders',
+/// 2 a game's pot (`docs/token-quotes.md` §7.6); `venue` the token's reference pool's venue accounts (`bordrless_launch::client::amm_v4_accounts`
+/// and the others, or `via_usdc_accounts` with the creator address as the seller).
+pub fn swap_bucket_to_sol(
+    cranker: Pubkey,
+    keys: &launch_client::LegKeys,
+    index: u8,
+    part: u8,
+    venue: Vec<AccountMeta>,
+) -> Instruction {
+    let mint = keys.mint;
+    let creator = creator_address(&mint);
+    let named = vec![
+        AccountMeta::new(cranker, true),
+        AccountMeta::new(companion_address(&mint), false),
+        AccountMeta::new(creator, false),
+        AccountMeta::new_readonly(launch_client::launch_address(&mint), false),
+        AccountMeta::new(companion_legs_address(&mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+        AccountMeta::new_readonly(LAUNCH_ID, false),
+    ];
+    let rest = launch_client::swap_to_sol_rest(
+        &creator,
+        &mint,
+        &keys.quote_mint,
+        &keys.quote_program,
+        venue,
+    );
+    let mut extra = vec![
+        AccountMeta::new_readonly(launch_client::legs_address(&mint), false),
+        AccountMeta::new_readonly(keys.quote_mint, false),
+        AccountMeta::new(keys.quote_account(&creator), false),
+    ];
+    extra.extend(rest[1..].iter().cloned());
+    build(
+        named,
+        extra,
+        crate::instruction::SwapBucketToSol { index, part }.data(),
+    )
+}
+
+// ---- Games and scripts with a launcher's part on coins quoted in tokens (`docs/token-quotes.md`
+// §7.6) ----------------------------------------------------------------------------------------------
+
+/// `set_game_token_terms(min_pot_bps)` of `mint`'s game (the mint signs), before the launch.
+pub fn set_game_token_terms(mint: Pubkey, min_pot_bps: u16) -> Instruction {
+    build(
+        vec![
+            AccountMeta::new_readonly(mint, true),
+            AccountMeta::new_readonly(companion_address(&mint), false),
+            AccountMeta::new(game_address(&mint), false),
+        ],
+        vec![],
+        crate::instruction::SetGameTokenTerms { min_pot_bps }.data(),
+    )
+}
+
+/// [`launch_token`] of a game companion: its `Game` appended last (writable: its token terms read,
+/// the game marked launched in tokens; never forwarded).
+pub fn launch_token_game(
+    launcher: Pubkey,
+    mint: Pubkey,
+    create_token_launch: &Instruction,
+    args: bordrless_launch::instructions::CreateTokenLaunchArgs,
+) -> Instruction {
+    let mut ix = launch_token(launcher, mint, create_token_launch, args);
+    ix.accounts
+        .push(AccountMeta::new(game_address(&mint), false));
+    ix
+}
+
+/// What a step on a pot kept in the legs' tokens adds: the companion's legs (writable) and the
+/// coin's `Legs`.
+pub fn token_pot_accounts(mint: &Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new(companion_legs_address(mint), false),
+        AccountMeta::new_readonly(launch_client::legs_address(mint), false),
+    ]
+}
+
+/// What paying a game's prize in the legs' tokens (`claim_prize`, `settle`, `claim_share`) adds:
+/// [`token_pot_accounts`], then per leg (`quotes`: each leg's quote mint and token program, in leg
+/// order) the quote mint, the creator address's account of it (writable), the winner's (writable;
+/// made when missing, the sender paying) and, with `bounty`, the sender's (writable); then both
+/// token programs, the associated token account program and the winner.
+pub fn leg_prize_accounts(
+    mint: &Pubkey,
+    quotes: &[(Pubkey, Pubkey)],
+    winner: &Pubkey,
+    cranker: &Pubkey,
+    bounty: bool,
+) -> Vec<AccountMeta> {
+    let creator = creator_address(mint);
+    let ata = |owner: &Pubkey, q: &(Pubkey, Pubkey)| {
+        bordrless_swap::spl::associated_token_address(owner, &q.0, &q.1)
+    };
+    let mut accounts = token_pot_accounts(mint);
+    for q in quotes {
+        accounts.push(AccountMeta::new_readonly(q.0, false));
+        accounts.push(AccountMeta::new(ata(&creator, q), false));
+        accounts.push(AccountMeta::new(ata(winner, q), false));
+        if bounty {
+            accounts.push(AccountMeta::new(ata(cranker, q), false));
+        }
+    }
+    accounts.push(AccountMeta::new_readonly(
+        bordrless_swap::spl::TOKEN_PROGRAM_ID,
+        false,
+    ));
+    accounts.push(AccountMeta::new_readonly(
+        bordrless_swap::spl::TOKEN_2022_PROGRAM_ID,
+        false,
+    ));
+    accounts.push(AccountMeta::new_readonly(
+        bordrless_swap::spl::ATA_PROGRAM_ID,
+        false,
+    ));
+    accounts.push(AccountMeta::new(*winner, false));
+    accounts
+}
+
+/// What a jackpot's `settle` and a `retire` read when a pot in the legs' tokens falls short of its
+/// least (`FeesUnclaimed` when a `claim_fees_leg` of every leg would fund it): per leg, in leg order
+/// (`quotes`: each leg's quote mint and token program), its creator-fee account (the launchpad's
+/// `leg-fees`) and the creator address's associated token account of its token (fees claimed into
+/// it raw, unsplit).
+pub fn leg_fee_accounts(mint: &Pubkey, quotes: &[(Pubkey, Pubkey)]) -> Vec<AccountMeta> {
+    let creator = creator_address(mint);
+    quotes
+        .iter()
+        .flat_map(|(quote, program)| {
+            [
+                AccountMeta::new_readonly(launch_client::leg_fees_address(mint, quote), false),
+                AccountMeta::new_readonly(
+                    bordrless_swap::spl::associated_token_address(&creator, quote, program),
+                    false,
+                ),
+            ]
+        })
+        .collect()
+}
+
+/// `ix` with `extra` appended to its accounts.
+pub fn with_accounts(mut ix: Instruction, extra: Vec<AccountMeta>) -> Instruction {
+    ix.accounts.extend(extra);
+    ix
 }

@@ -552,6 +552,40 @@ impl Launch {
     pub fn set_token_quoted(&mut self) {
         self.reserved[QUOTE_KIND_OFFSET] = QUOTE_KIND_TOKENS;
     }
+
+    /// The payout flags of a launch quoted in tokens (`reserved[19]`, byte 530,
+    /// `docs/token-quotes.md` §7.5): 0 for every launch made before.
+    pub fn payouts(&self) -> u8 {
+        self.reserved[PAYOUTS_OFFSET]
+    }
+
+    /// Records them.
+    pub fn set_payouts(&mut self, flags: u8) {
+        self.reserved[PAYOUTS_OFFSET] = flags;
+    }
+
+    /// Whether a launch quoted in tokens has the SOL switch on: its launcher's part, a companion's
+    /// holders' and launcher's parts and its holder rewards are paid in SOL.
+    pub fn sol_switch(&self) -> bool {
+        self.is_token_quoted() && self.payouts() & PAYOUT_SOL != 0
+    }
+
+    /// How a launch quoted in tokens pays its holder rewards (the kit's reward kind,
+    /// `bordrless_kit::constants`), from its rules, its switch and its number of legs: none without
+    /// a holder fee; SOL with the switch; the leg's token through the kit's accumulator on one leg;
+    /// every leg's token in rounds on several.
+    pub fn reward_kind(&self, legs: u8) -> u8 {
+        use bordrless_kit::constants::{REWARD_KIND_ROUNDS, REWARD_KIND_SOL, REWARD_KIND_TOKEN};
+        if !self.is_token_quoted() || !self.rewards_on() {
+            0
+        } else if self.sol_switch() {
+            REWARD_KIND_SOL
+        } else if legs == 1 {
+            REWARD_KIND_TOKEN
+        } else {
+            REWARD_KIND_ROUNDS
+        }
+    }
 }
 
 /// One leg of a launch quoted in tokens: a DEX curve pool `["pool", mint, quote_mint, lp_fee_bps,
@@ -638,6 +672,10 @@ impl Legs {
     pub const LEG_SHARE: usize = 43;
     /// Offset of `opened_at` within a [`Leg`] (the kit reads it at this offset).
     pub const LEG_OPENED_AT: usize = 131;
+    /// Offset of `quote_program` within a [`Leg`] (the kit reads it at this offset).
+    pub const LEG_QUOTE_PROGRAM: usize = 32;
+    /// Offset of `decimals` within a [`Leg`] (the kit reads it at this offset).
+    pub const LEG_DECIMALS: usize = 33;
     /// Byte offset of `reserved`.
     pub const RESERVED_OFFSET: usize = Self::LEGS_OFFSET + MAX_LEGS * Self::LEG_LEN;
     /// Byte offset of [`Legs::lift_at`] (`reserved[0..8]`).
@@ -704,5 +742,54 @@ impl Legs {
             .unwrap_or(now)
             .saturating_sub(created_at)
             .max(0)
+    }
+}
+
+/// A quote token's reference pool for the SOL switch (`docs/token-quotes.md` §7.5.2), at
+/// `["quote-ref", quote_mint]`, shared by every coin quoted in that token: the pool its tokens are
+/// sold to SOL on (Raydium AMM v4, CPMM, CLMM or Pump AMM, against wrapped SOL or USDC), and the
+/// window that caps what all its sellers together sell per [`SWAP_WINDOW_SLOTS`] slots. Registered
+/// by anyone (`register_quote_pool`), replaced by a deeper pool; paused by the admin.
+#[account]
+#[derive(InitSpace, Debug)]
+pub struct QuoteReference {
+    /// Layout version.
+    pub version: u8,
+    /// Bump.
+    pub bump: u8,
+    /// The quote token.
+    pub quote_mint: Pubkey,
+    /// `crate::venues::venue`: 1 Raydium AMM v4, 2 CPMM, 3 CLMM, 4 Pump AMM.
+    pub venue: u8,
+    /// [`VIA_SOL`] or [`VIA_USDC`].
+    pub via: u8,
+    /// The pool.
+    pub pool: Pubkey,
+    /// Who registered it.
+    pub registrant: Pubkey,
+    /// When.
+    pub registered_at: i64,
+    /// Its SOL-side depth then, lamports.
+    pub depth_at: u64,
+    /// The window of slots the sales below count in (`slot / SWAP_WINDOW_SLOTS`).
+    pub window: u64,
+    /// What the window's sales were worth, lamports.
+    pub window_value: u64,
+    /// Paused by the admin: no sale until unpaused.
+    pub paused: bool,
+    /// Sales so far: the token sold and the lamports they brought (running totals).
+    pub sold_total: u64,
+    pub lamports_total: u64,
+    /// Reserved.
+    pub reserved: [u8; 32],
+}
+
+impl QuoteReference {
+    /// Account size.
+    pub const LEN: usize = DISCRIMINATOR_LEN + Self::INIT_SPACE;
+
+    /// The reference of `quote_mint`, and its bump.
+    pub fn address(quote_mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[QUOTE_REF_SEED, quote_mint.as_ref()], &crate::ID)
     }
 }

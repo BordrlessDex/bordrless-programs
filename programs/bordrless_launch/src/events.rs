@@ -360,3 +360,77 @@ pub struct LegsMaxWalletLifted {
     pub lift_at: u64,
     pub ts: i64,
 }
+
+/// A launch quoted in tokens made from a `LaunchConfig` (`create_token_launch`,
+/// `docs/token-quotes.md` §7), right after its `TokenLaunchCreated` (and before any
+/// `TokenLaunchRules`): the config, and the custom hook it names, now the coin's token hook. Only
+/// for a launch made from a config.
+#[event]
+pub struct TokenLaunchConfigured {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    pub custom_hook: Option<Pubkey>,
+    pub custom_hook_flags: u16,
+    pub ts: i64,
+}
+
+/// The payouts of a coin quoted in tokens (`docs/token-quotes.md` §7.5), after its
+/// `TokenLaunchCreated` (and `TokenLaunchRules`), when it has the SOL switch or holder rewards:
+/// `flags` bit 0 the SOL switch; `reward_kind` how holder rewards are paid (0 none, 1 the leg's
+/// token, 2 every leg's token in rounds of `holder_round_secs`, 3 SOL).
+#[event]
+pub struct TokenLaunchPayouts {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub flags: u8,
+    pub reward_kind: u8,
+    pub holder_round_secs: u32,
+    pub ts: i64,
+}
+
+/// A quote token's reference pool registered or replaced (`register_quote_pool`,
+/// `docs/token-quotes.md` §7.5.2): `venue` 1 Raydium AMM v4, 2 CPMM, 3 CLMM, 4 Pump AMM; `via` 0
+/// wrapped SOL, 1 USDC; `replaced` the pool it replaced; its depth in lamports and fee in millionths
+/// as measured.
+#[event]
+pub struct QuotePoolRegistered {
+    pub quote_mint: Pubkey,
+    pub reference: Pubkey,
+    pub venue: u8,
+    pub via: u8,
+    pub pool: Pubkey,
+    pub replaced: Option<Pubkey>,
+    pub depth_lamports: u64,
+    pub fee_ppm: u32,
+    pub registrant: Pubkey,
+    pub ts: i64,
+}
+
+/// The admin paused or resumed a quote token's reference.
+#[event]
+pub struct QuoteReferencePaused {
+    pub quote_mint: Pubkey,
+    pub paused: bool,
+    pub ts: i64,
+}
+
+/// A coin's tokens sold to SOL on their reference pool (`swap_to_sol`, `swap_creator_fees`):
+/// `authority` the seller (the launch, the kit config or the companion's creator address), which
+/// received `lamports_out`; `price` the reference's lamports per raw unit of the token (Q64.64);
+/// `window_value` what the token's window has sold, in lamports, after this.
+#[event]
+pub struct SwappedToSol {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub quote_mint: Pubkey,
+    pub authority: Pubkey,
+    pub venue: u8,
+    pub via: u8,
+    pub amount_in: u64,
+    pub lamports_out: u64,
+    pub min_out: u64,
+    pub price: u128,
+    pub window_value: u64,
+    pub ts: i64,
+}

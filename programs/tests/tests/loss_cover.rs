@@ -5,7 +5,8 @@
 //! budget runs out touches the rest, and the next round catches up; a holding is measured or paid
 //! once a round; the minimums (holding, loss, age, pot) and the launcher's own holding are skipped;
 //! a round after a gap measures only; a partial sell keeps its cover; graduation changes nothing;
-//! a sender cannot change `f`; and a step's size and compute as the keeper sends it.
+//! a sender cannot change `f`; a step's size and compute as the keeper sends it; and a fast pump
+//! covered at what buyers paid, a record written low repaired with `set_entry` (2026-10-12).
 
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::solana_program::instruction::Instruction;
@@ -24,10 +25,10 @@ use bordrless_launch::state::LaunchRules;
 use bordrless_program_tests::env::{compute_unit_limit, Tx};
 use bordrless_program_tests::fixture::World;
 use bordrless_program_tests::launch::*;
-use bordrless_program_tests::timelock::programdata_hash;
+use bordrless_program_tests::timelock::{programdata_hash, send_as};
 use bordrless_strategy::PoolReserves;
 use bordrless_token::client as token;
-use loss_cover_hook::{client as hook, spot_of, Record};
+use loss_cover_hook::{capped, client as hook, spot_of, Record};
 use loss_cover_script::{
     fraction_of, uncovered_loss, CoverRound, CoverState, CoverTerms, LossCoverScriptError,
     STATE_LEN,
@@ -1117,55 +1118,109 @@ fn the_state_and_the_terms_are_where_the_keeper_reads_them() {
     let _ = CompanionError::MissingAccount;
 }
 
-// ---- Native SOL (phase 3) ---------------------------------------------------------------------------
-
-/// A Lossback coin migrated in place mid-life (between its measuring round and its paying round):
-/// the paying round pays every holder its fraction in SOL from the creator address's lamports (no
-/// unwrap), the hook records each payment as before, and the lamports the creator loses are exactly
-/// what the holders and the cranker gain; the pot always equals its SOL.
+/// The first coin's case (LIFEVEST, 2026-10-12): a fast pump in the first minute, buyers paying up
+/// to three times the first price, then the pumper sells and the price comes back to where the
+/// first version of the hook (a buy's entry capped 20% above a slow reference) would have recorded
+/// every one of them above water. Recorded at what they paid, they are under water and the script
+/// measures them, then pays them the round's share. A record written low as the first version
+/// wrote it (set here with `set_entry`) is above water and skipped; once the hook's upgrade
+/// authority sets it to what was paid, the script measures it in the same round and pays it in
+/// the next, like the others.
 #[test]
-fn a_lossback_coin_migrated_mid_life_pays_in_lamports() {
+fn a_fast_pump_is_covered_at_what_buyers_paid() {
     let mut w = world();
+    w.env.without_sigverify();
     let launcher = w.wallet_with_sol(10 * SOL);
     let mint = launch_coin(&mut w, &launcher, open_terms());
-    let (holders, cranker, _whale) = under_water(&mut w, &mint, &[SOL, 2 * SOL, SOL / 2]);
-    let hs: Vec<Pubkey> = holders.iter().map(|h| h.pubkey()).collect();
-    next_round(&mut w);
-    let list: Vec<(Pubkey, bool)> = hs.iter().map(|h| (*h, false)).collect();
-    step(&mut w, &cranker, &mint, &list).ok();
-
-    let pot = companion_of(&w, &mint).pending_pot;
-    w.migrate_companion_native(&mint).ok();
-    let c = companion_of(&w, &mint);
-    assert!(c.is_native());
-    assert_eq!(c.pending_pot, pot);
-    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
-
-    next_round(&mut w);
-    let creator = companion::creator_address(&mint);
-    let list: Vec<(Pubkey, bool)> = hs.iter().map(|h| (*h, true)).collect();
-    let before: Vec<u64> = hs.iter().map(|h| w.env.lamports(h)).collect();
-    let (c0, k0) = (w.env.lamports(&creator), w.env.lamports(&cranker.pubkey()));
-    let ix = step_ix(&w, cranker.pubkey(), &mint, &list);
-    let payer = w.env.funded(SOL);
-    let tx = w.env.send_paid_by(&[ix], &payer, &[&cranker]);
-    tx.ok();
-    let payouts = tx.events::<ScriptPayout>();
-    let mut paid = 0;
-    for ((h, ev), b) in hs.iter().zip(&payouts).zip(&before) {
-        assert!(ev.lamports > 0);
-        assert_eq!(w.env.lamports(h) - b, ev.lamports);
-        assert_eq!(record(&w, &mint, h).paid, ev.lamports);
-        paid += ev.lamports;
+    let early = holder(&mut w, &mint, SOL / 10);
+    let reference = w
+        .env
+        .read::<loss_cover_hook::LossCoverState>(&hook::state_address(&mint))
+        .reference;
+    // The pump: a wallet buys big, buyers follow seconds apart.
+    let pumper = holder(&mut w, &mint, 12 * SOL);
+    let mut buyers = Vec::new();
+    for _ in 0..4 {
+        w.env.warp(2);
+        buyers.push(holder(&mut w, &mint, 2 * SOL));
     }
-    let bounty = w.env.lamports(&cranker.pubkey()) - k0;
-    assert_eq!(
-        c0 - w.env.lamports(&creator),
-        paid + bounty,
-        "lamports conserved"
-    );
-    let c = companion_of(&w, &mint);
-    assert_eq!(c.pending_pot, pot - paid - bounty);
-    assert_eq!(c.set_aside().unwrap(), w.creator_sol(&mint).1);
-    assert_eq!(w.creator_sol(&mint).0, 0);
+    let hs: Vec<Pubkey> = buyers.iter().map(|b| b.pubkey()).collect();
+    let paid: Vec<u64> = hs.iter().map(|h| record(&w, &mint, h).entry).collect();
+    // The pumper sells everything: the price comes back.
+    let held = w.env.holding(&mint, &pumper.pubkey());
+    w.sell(&pumper, &mint, held).ok();
+    let now_spot = spot(&w, &mint);
+    for (i, h) in hs.iter().enumerate() {
+        // Under water at what it paid; above water at what the first version would have written.
+        assert!(
+            paid[i] > now_spot,
+            "buyer {i}: paid {} vs spot {now_spot}",
+            paid[i]
+        );
+        assert!(
+            capped(paid[i], reference) < now_spot,
+            "buyer {i}: the old cap would have hidden the loss"
+        );
+        assert!(owed(&w, &mint, h) > 0, "buyer {i} is owed");
+    }
+    assert_eq!(owed(&w, &mint, &early.pubkey()), 0, "the early buyer is up");
+    // The last buyer's record as the first version wrote it: the cap.
+    let last = hs[3];
+    send_as(
+        &mut w.env,
+        &[hook::set_entry(
+            BORDRLESS_KEY,
+            mint,
+            last,
+            capped(paid[3], reference),
+        )],
+        &[],
+        &[BORDRLESS_KEY],
+    )
+    .ok();
+    assert_eq!(owed(&w, &mint, &last), 0, "hidden, as on LIFEVEST");
+    let cranker = claim(&mut w, &mint);
+    // Round 1 measures: the three under water are touched, the hidden one is skipped.
+    next_round(&mut w);
+    let r1 = round_now(&w);
+    let owed1: Vec<u64> = hs.iter().map(|h| owed(&w, &mint, h)).collect();
+    let all: Vec<(Pubkey, bool)> = hs.iter().map(|h| (*h, false)).collect();
+    let tx = step(&mut w, &cranker, &mint, &all);
+    tx.ok();
+    let measured: Vec<Pubkey> = tx
+        .events::<ScriptPayout>()
+        .iter()
+        .map(|e| e.owner)
+        .collect();
+    assert_eq!(measured, hs[..3].to_vec());
+    assert_eq!(cover_state(&w, &mint).l_cur, owed1[..3].iter().sum::<u64>());
+    assert_ne!(record(&w, &mint, &last).round, r1);
+    // The repair: the upgrade authority sets the hidden record to what it paid; the script sees
+    // the loss in the same round.
+    send_as(
+        &mut w.env,
+        &[hook::set_entry(BORDRLESS_KEY, mint, last, paid[3])],
+        &[],
+        &[BORDRLESS_KEY],
+    )
+    .ok();
+    let owed_last = owed(&w, &mint, &last);
+    assert!(owed_last > 0);
+    w.env.warp(STEP);
+    let tx = step(&mut w, &cranker, &mint, &[(last, false)]);
+    tx.ok();
+    assert_eq!(tx.events::<ScriptPayout>()[0].owner, last);
+    let s = cover_state(&w, &mint);
+    assert_eq!(s.l_cur, owed1[..3].iter().sum::<u64>() + owed_last);
+    assert_eq!(record(&w, &mint, &last).round, r1);
+    // Round 2 pays all four the same share of what each is owed.
+    next_round(&mut w);
+    let before: Vec<u64> = hs.iter().map(|h| w.env.lamports(h)).collect();
+    let paying: Vec<(Pubkey, bool)> = hs.iter().map(|h| (*h, true)).collect();
+    step(&mut w, &cranker, &mint, &paying).ok();
+    for (i, h) in hs.iter().enumerate() {
+        let got = w.env.lamports(h) - before[i];
+        assert!(got > 0, "buyer {i} was paid");
+        assert_eq!(record(&w, &mint, h).paid, got);
+    }
 }

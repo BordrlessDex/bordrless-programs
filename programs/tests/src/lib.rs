@@ -17,6 +17,7 @@ pub mod quotes;
 pub mod spl;
 pub mod timelock;
 pub mod vault;
+pub mod venues;
 
 pub use env::*;
 pub use events::*;

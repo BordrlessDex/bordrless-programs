@@ -3,6 +3,7 @@ pub mod attest;
 pub mod create;
 pub mod game;
 pub mod kinds;
+pub mod legs;
 pub mod native;
 pub mod payees;
 pub mod payout;
@@ -10,12 +11,15 @@ pub mod script;
 pub mod snowball;
 pub mod steps;
 pub mod strategy;
+pub mod token_games;
+pub mod token_scripts;
 
 pub use approval::*;
 pub use attest::*;
 pub use create::*;
 pub use game::*;
 pub use kinds::*;
+pub use legs::*;
 pub use native::*;
 pub use payees::*;
 pub use payout::*;
@@ -23,6 +27,7 @@ pub use script::*;
 pub use snowball::*;
 pub use steps::*;
 pub use strategy::*;
+pub use token_games::*;
 
 use anchor_lang::prelude::Pubkey;
 

@@ -774,3 +774,181 @@ pub struct CompanionNativeSet {
     pub moved: u64,
     pub spare: u64,
 }
+
+// ---- Preset companions on a coin quoted in tokens (docs/token-quotes.md §7.4). Every amount is in
+// the leg's token (raw units) but `burned` and `tokens` (the coin's). ----
+
+/// A leg's creator fee claimed into the creator address's token account of the leg's token
+/// (`claim_fees_leg`) and split by the companion's split, the bounty first.
+#[event]
+pub struct LegFeesClaimed {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub claimed: u64,
+    pub bounty: u64,
+    pub to_buyback: u64,
+    pub to_holders: u64,
+    pub to_beneficiary: u64,
+    pub to_pot: u64,
+    pub cranker: Pubkey,
+}
+
+/// The launcher's part of a leg paid to their associated token account of the leg's token
+/// (`withdraw_leg`).
+#[event]
+pub struct LegBeneficiaryPaid {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub amount: u64,
+    pub destination: Pubkey,
+}
+
+/// A buyback on a leg (`buyback_leg`): `spent` of the leg's token bought `burned` coins, burned.
+#[event]
+pub struct LegBoughtBack {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub spent: u64,
+    pub burned: u64,
+    pub bounty: u64,
+    pub price_after: u128,
+    pub cranker: Pubkey,
+}
+
+/// A buyback on a leg that waited: the leg's price above its reference (which moved toward it,
+/// when due).
+#[event]
+pub struct LegBuybackWaited {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub price: u128,
+    pub reference: u128,
+}
+
+/// A Snowball's trade on a leg (`snowball_step_leg`): `side` 1 a buy (`quote` of the leg's token
+/// spent, `tokens` coins bought), 0 a sell (`tokens` sold, `quote` back into the leg's pot).
+#[event]
+pub struct LegSnowballTraded {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub side: u8,
+    pub on_step: bool,
+    pub quote: u64,
+    pub tokens: u64,
+    pub bounty: u64,
+    pub price_before: u128,
+    pub price_after: u128,
+    pub pot_after: u64,
+    pub tokens_after: u64,
+    pub cranker: Pubkey,
+}
+
+/// A Snowball's leg followed the price (the side it called for had nothing to trade).
+#[event]
+pub struct LegSnowballFollowed {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub reference_before: u128,
+    pub price: u128,
+}
+
+/// A leg's holders' part shared with the kit's holder rewards in the leg's token (`share_leg`):
+/// streamed over the hour on a one-leg coin, counted at the next round on a coin of several legs.
+#[event]
+pub struct LegSharedWithHolders {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub amount: u64,
+    pub bounty: u64,
+    pub cranker: Pubkey,
+}
+
+/// A leg's launcher's (`part` 0) or holders' (`part` 1) bucket sold to SOL through the launchpad's
+/// `swap_to_sol` (`swap_bucket_to_sol`, the SOL switch): `amount_in` of the leg's token for
+/// `lamports`, credited to the companion's SOL part of the same name.
+#[event]
+pub struct LegSwappedToSol {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub part: u8,
+    pub amount_in: u64,
+    pub lamports: u64,
+    pub cranker: Pubkey,
+}
+
+/// A game on a coin quoted in tokens took its terms (`set_game_token_terms`,
+/// `docs/token-quotes.md` §7.6): its least pot in basis points of the coin's opening value.
+#[event]
+pub struct GameTokenTermsSet {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub min_pot_bps: u16,
+}
+
+/// A game's prizes on a coin quoted in tokens fixed, one per leg in its token: a lottery draw's
+/// (`kind` 0, at the request), or a streak epoch's (`kind` 2, at `close_epoch`). `pot_bps` is the
+/// pot then, in basis points of the coin's opening value.
+#[event]
+pub struct LegPrizesFixed {
+    pub game: Pubkey,
+    pub mint: Pubkey,
+    pub round: u32,
+    pub kind: u8,
+    pub prizes: Vec<u64>,
+    pub pot_bps: u64,
+}
+
+/// A game's prize paid on one leg, in its token: a lottery draw's (`kind` 0, `claim_prize`), a
+/// jackpot round's (1, `settle`) or a streak share (2, `claim_share`); `amount` to `owner`'s
+/// associated token account of the leg's token, `bounty` to the sender's.
+#[event]
+pub struct LegPrizePaid {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub kind: u8,
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub bounty: u64,
+}
+
+/// A leg's game pot (or its part above the hook's cap) moved to the leg's buyback, which buys the
+/// coin back on the leg and burns it (`buyback_leg`): `reason` 0 the cap, 1 a blocked hook, 2
+/// `retire`.
+#[event]
+pub struct LegPotToBuyback {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub amount: u64,
+    pub reason: u8,
+    pub pending_pot: u64,
+}
+
+/// A script's payout in a leg's token (`PayoutAnswer` version 3, `docs/token-quotes.md` §7.6):
+/// `amount` of leg `index`'s token to the holding's owner's associated token account, recorded by
+/// the hook with `tag`.
+#[event]
+pub struct LegScriptPayout {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub holding: Pubkey,
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub tag: u32,
+}
+
+/// A payee's (or, `payee` the beneficiary, the launcher's) share of a leg's launcher's part
+/// (`withdraw_leg` of a companion with payees): `amount` paid now in the leg's token, `owed` what
+/// stays owed to it on this leg (its account missing, frozen or asking for a memo).
+#[event]
+pub struct LegPayeePaid {
+    pub companion: Pubkey,
+    pub index: u8,
+    pub payee: Pubkey,
+    pub amount: u64,
+    pub owed: u64,
+}

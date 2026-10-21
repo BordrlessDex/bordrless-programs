@@ -19,7 +19,10 @@
 //!
 //! The standard `prepare` (every Studio hook has it, unchanged in its accounts): before a launch,
 //! anyone sends it once for the new mint; it creates the state at `["state", mint]` and writes the
-//! registry (the state, writable, then the launch).
+//! registry (the state, writable, then the launch). On a coin quoted in tokens `prepare_legs` takes
+//! its place (`docs/token-quotes.md` §7.6), the same accounts, its registry also naming the coin's
+//! `Legs`, which the launchpad asks of every hook on such a coin; the streak reads nothing of it
+//! (every leg's pool is off the curve, so it never shares: `eligible`).
 
 #![allow(unexpected_cfgs)]
 
@@ -57,6 +60,10 @@ pub const LAUNCH_SEED: &[u8] = b"launch";
 pub const COMPANION_PROGRAM: Pubkey =
     Pubkey::from_str_const("6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo");
 
+/// The launchpad's `["legs", mint]` seed: a coin quoted in tokens' legs (`docs/token-quotes.md`
+/// §7.6).
+pub const LEGS_SEED: &[u8] = b"legs";
+
 /// The callbacks' extra accounts, after the token program's five: the state (written on every
 /// transfer), the launch (read for its pool until the state remembers it).
 pub fn extra_accounts() -> HookAccountList {
@@ -78,6 +85,20 @@ pub fn extra_accounts() -> HookAccountList {
     ])
 }
 
+/// [`extra_accounts`], then the coin's `Legs`: the registry `prepare_legs` writes on a coin quoted
+/// in tokens (`docs/token-quotes.md` §7.6), where the launchpad asks every hook for it.
+pub fn extra_accounts_legs() -> HookAccountList {
+    let mut list = extra_accounts();
+    list.accounts.push(ExtraAccount {
+        writable: false,
+        source: AccountSource::Pda {
+            program: LAUNCH_PROGRAM,
+            seeds: vec![Seed::Literal(LEGS_SEED.to_vec()), Seed::Account(1)],
+        },
+    });
+    list
+}
+
 #[program]
 pub mod studio_hook {
     use super::*;
@@ -85,35 +106,13 @@ pub mod studio_hook {
     /// The standard `prepare`: the state for `mint` (the streak's settings are this program's
     /// constants) and its registry. Anyone may send it, once per mint.
     pub fn prepare(ctx: Context<Prepare>) -> Result<()> {
-        let mint = ctx.accounts.mint.key();
-        let now = Clock::get()?.unix_timestamp;
-        let state = &mut ctx.accounts.state;
-        state.header = GameHeader::new(mint, EPOCH_SECS, now);
-        state.streak = StreakHeader::new(MIN_STREAK_SECS, MIN_WEIGHT);
-        state.version = 1;
-        state.bump = ctx.bumps.state;
-        state.launch =
-            Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_PROGRAM).0;
-        state.pool = Pubkey::default();
-        state.creator =
-            Pubkey::find_program_address(&[b"creator", mint.as_ref()], &COMPANION_PROGRAM).0;
-        state.prepared_by = ctx.accounts.payer.key();
-        state.reserved = [0; 32];
-        let (registry, bump) = hook_accounts_address(&crate::ID, &mint);
-        require_keys_eq!(
-            ctx.accounts.registry.key(),
-            registry,
-            HookError::WrongAccount
-        );
-        write_registry(
-            &ctx.accounts.payer.to_account_info(),
-            &ctx.accounts.registry.to_account_info(),
-            &ctx.accounts.system_program.to_account_info(),
-            &crate::ID,
-            &mint,
-            bump,
-            &extra_accounts(),
-        )
+        prepare_with(ctx, extra_accounts())
+    }
+
+    /// `prepare` for a coin quoted in tokens (`docs/token-quotes.md` §7.6): the same accounts and
+    /// state, the registry also naming the coin's `Legs` (`extra_accounts_legs`).
+    pub fn prepare_legs(ctx: Context<Prepare>) -> Result<()> {
+        prepare_with(ctx, extra_accounts_legs())
     }
 
     /// Anyone, for any holding of the mint: registers its whole balance for the current epoch, when
@@ -208,6 +207,38 @@ pub mod studio_hook {
         }
         Ok(answer)
     }
+}
+
+/// The standard `prepare`'s work: the streak's state for the mint, and its registry `list`.
+fn prepare_with(ctx: Context<Prepare>, list: HookAccountList) -> Result<()> {
+    let mint = ctx.accounts.mint.key();
+    let now = Clock::get()?.unix_timestamp;
+    let state = &mut ctx.accounts.state;
+    state.header = GameHeader::new(mint, EPOCH_SECS, now);
+    state.streak = StreakHeader::new(MIN_STREAK_SECS, MIN_WEIGHT);
+    state.version = 1;
+    state.bump = ctx.bumps.state;
+    state.launch = Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_PROGRAM).0;
+    state.pool = Pubkey::default();
+    state.creator =
+        Pubkey::find_program_address(&[b"creator", mint.as_ref()], &COMPANION_PROGRAM).0;
+    state.prepared_by = ctx.accounts.payer.key();
+    state.reserved = [0; 32];
+    let (registry, bump) = hook_accounts_address(&crate::ID, &mint);
+    require_keys_eq!(
+        ctx.accounts.registry.key(),
+        registry,
+        HookError::WrongAccount
+    );
+    write_registry(
+        &ctx.accounts.payer.to_account_info(),
+        &ctx.accounts.registry.to_account_info(),
+        &ctx.accounts.system_program.to_account_info(),
+        &crate::ID,
+        &mint,
+        bump,
+        &list,
+    )
 }
 
 /// Remembers the launch's pool once the launch can be read (not during its own transaction).

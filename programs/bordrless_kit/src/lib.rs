@@ -37,13 +37,14 @@ pub mod legs;
 pub mod math;
 pub mod mirror;
 pub mod rules;
+pub mod spl;
 pub mod state;
 #[cfg(test)]
 mod unit_tests;
 
 pub use constants::{mint_flags, modules, LAUNCH_ID};
 pub use instructions::*;
-pub use state::{HolderData, KitConfig, KitInitArgs};
+pub use state::{HolderData, KitConfig, KitInitArgs, LegsRewards};
 
 declare_id!("14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH");
 
@@ -118,10 +119,59 @@ pub mod bordrless_kit {
         callbacks::process_before_burn(ctx, args)
     }
 
-    /// Installs the kit on a coin quoted in tokens (`docs/token-quotes.md` §6.1): as `init`,
-    /// without holder rewards or a reward vault, its callbacks taking the coin's `Legs` and every
-    /// leg's pool as the pool. Signed by the launch program's kit-caller PDA for the mint.
-    pub fn init_legs(ctx: Context<InitLegs>, args: KitInitArgs) -> Result<()> {
-        init::process_init_legs(ctx, args)
+    /// Installs the kit on a coin quoted in tokens (`docs/token-quotes.md` §6.1): as `init`, its
+    /// callbacks taking the coin's `Legs` and every leg's pool as the pool. Signed by the launch
+    /// program's kit-caller PDA for the mint. With holder rewards (§7.5.1), `rewards` says how they
+    /// are paid: 1 a one-leg coin's token (the leg's quote mint the first remaining account), 2
+    /// every leg's token in rounds, 3 SOL. Data that ends after `args` reads as no rewards.
+    pub fn init_legs<'info>(
+        ctx: Context<'info, InitLegs<'info>>,
+        args: KitInitArgs,
+        rewards: LegsRewards,
+    ) -> Result<()> {
+        init::process_init_legs(ctx, args, rewards)
+    }
+
+    /// A holder of a one-leg coin quoted in tokens claims its rewards in the leg's token (its
+    /// associated token account made when missing, the holder paying).
+    pub fn claim_token(ctx: Context<ClaimToken>) -> Result<()> {
+        token_rewards::process_claim_token(ctx)
+    }
+
+    /// Anyone pushes a holder's `claim_token` to a token account of the holder's that exists: the
+    /// tokens go only to the holding's owner; `payer` signs and pays the fee only.
+    pub fn claim_token_for(ctx: Context<ClaimTokenFor>) -> Result<()> {
+        token_rewards::process_claim_token_for(ctx)
+    }
+
+    /// Shares `amount` of leg `index`'s token with the holders of a coin quoted in tokens: streamed
+    /// over the hour on a one-leg coin, counted at the next round on a coin of several legs.
+    pub fn share_token(ctx: Context<ShareToken>, index: u8, amount: u64) -> Result<()> {
+        token_rewards::process_share_token(ctx, index, amount)
+    }
+
+    /// Anyone starts the current round of a coin whose holder rewards are paid in rounds: the
+    /// eligible supply and each leg vault's balance, once a round.
+    pub fn start_round(ctx: Context<StartRound>) -> Result<()> {
+        token_rewards::process_start_round(ctx)
+    }
+
+    /// Anyone pays a holding its share of the current round, in every leg's token, on the least it
+    /// held since the round before began; once a round per holding.
+    pub fn pay_round<'info>(
+        ctx: Context<'info, PayRound<'info>>,
+        create_missing: bool,
+    ) -> Result<()> {
+        token_rewards::process_pay_round(ctx, create_missing)
+    }
+
+    /// Anyone sells leg `index`'s holder fees for SOL through the launchpad's `swap_to_sol` on a coin
+    /// whose holder rewards are paid in SOL, and shares what it brings over the hour.
+    pub fn swap_rewards_to_sol<'info>(
+        ctx: Context<'info, SwapRewardsToSol<'info>>,
+        index: u8,
+        amount_in: u64,
+    ) -> Result<()> {
+        token_rewards::process_swap_rewards_to_sol(ctx, index, amount_in)
     }
 }

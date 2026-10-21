@@ -65,3 +65,52 @@ pub struct KitNativeSet {
     pub lamports_base: u64,
     pub ts: i64,
 }
+
+/// Holder rewards of a coin quoted in tokens (`docs/token-quotes.md` §7.5.1), after its
+/// `KitInstalled`: `kind` 1 (a one-leg coin's token through the accumulator, `reward_mint` and
+/// `reward_vault` the leg's token and the config's account of it), 2 (every leg's token in rounds
+/// of `round_secs`) or 3 (SOL, native from birth).
+#[event]
+pub struct LegsRewardsInstalled {
+    pub mint: Pubkey,
+    pub kind: u8,
+    pub round_secs: u32,
+    pub reward_mint: Pubkey,
+    pub reward_vault: Pubkey,
+}
+
+/// A round of a rounds kit started: `supply` the eligible supply it divides by, `amounts` each
+/// leg's vault (in leg order, raw units of each leg's token).
+#[event]
+pub struct RoundStarted {
+    pub mint: Pubkey,
+    pub round: u32,
+    pub supply: u64,
+    pub amounts: Vec<u64>,
+    pub ts: i64,
+}
+
+/// A holding was paid its share of a round: `balance` what it was paid on (the least it held since
+/// the round before began), `amounts` what each leg paid (0 for a leg skipped: its token account
+/// missing or unable to receive).
+#[event]
+pub struct RoundPaid {
+    pub mint: Pubkey,
+    pub round: u32,
+    pub owner: Pubkey,
+    pub balance: u64,
+    pub amounts: Vec<u64>,
+}
+
+/// A SOL kit sold `amount_in` of leg `index`'s vault for `lamports` through the launchpad's
+/// `swap_to_sol`; `shared` whether they stream over the hour as a share (else they are divided at
+/// the next sync, or held while nobody is eligible).
+#[event]
+pub struct RewardsSwappedToSol {
+    pub mint: Pubkey,
+    pub index: u8,
+    pub quote_mint: Pubkey,
+    pub amount_in: u64,
+    pub lamports: u64,
+    pub shared: bool,
+}

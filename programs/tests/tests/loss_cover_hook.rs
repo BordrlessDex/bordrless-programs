@@ -1,10 +1,11 @@
 //! `loss_cover_hook` on a real launch from a plain `LaunchConfig` (not through the companion: that is
 //! `loss_cover.rs`). Prepared for the mint before it exists (the mint's keypair signs), launched,
 //! traded: every rule of `docs/companions.md` "Loss cover" (the hook): a buy's basis at the swap's
-//! curve price against the DEX's write order, the blend, the reference and its cap on a self-pump,
-//! a plain transfer in at the spot, a send and a burn cutting the cover pro rata, an emptied holding
-//! cleared, the exempt owners, graduation, and `record_payout` taking only the companion program's
-//! payout authority.
+//! curve price against the DEX's write order, the blend, the reference, a fast pump recorded at
+//! what each buyer paid (no cap since 2026-10-12), a plain transfer in at the spot, a send and a
+//! burn cutting the cover pro rata, an emptied holding cleared, the exempt owners, graduation,
+//! `record_payout` taking only the companion program's payout authority, and `set_entry` taking
+//! only the hook's upgrade authority.
 
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::Discriminator;
@@ -304,6 +305,7 @@ fn a_buy_sets_the_basis_at_the_swaps_curve_price() {
             paid_at: 0,
             basis_at: now,
             round: 0,
+            leg: 0,
         }
     );
     // The effective price: what went into the curve over what came out, within rounding.
@@ -344,30 +346,282 @@ fn a_buy_sets_the_basis_at_the_swaps_curve_price() {
     assert_eq!(s.reference_at, w.env.now);
 }
 
-/// A buyer's own spike never sets a basis more than 20% above the reference: a whale's buy far
-/// above it takes the capped entry, and so does what arrives by transfer at the spiked spot.
+/// The first coin's first minute (LIFEVEST, 2026-10-12): buyers one after another, seconds apart,
+/// the price going up more than 2.5 times. Each buyer's entry is the price its own buy paid the
+/// curve (`trade_price` of the pool after it; the swap's effective price within rounding), far
+/// above the 20% over the reference the first version would have recorded. The reference still
+/// moves as before (here: not at all, within its 10 minutes) and bounds nothing.
 #[test]
-fn the_reference_caps_a_self_pump() {
+fn a_fast_pump_records_each_buyer_at_what_it_paid() {
+    let mut w = World::new();
+    let (_creator, mint) = launch_cover(&mut w);
+    let first = trader(&mut w, &mint, 5 * SOL);
+    buy(&mut w, &mint, &first, SOL / 10);
+    let reference = state(&w, &mint).reference;
+    let start = spot(&w, &mint);
+    assert!(
+        reference > 0 && reference.abs_diff(start) * 100 <= start,
+        "the reference {reference} is the first spot seen ({start})"
+    );
+    let mut entries = Vec::new();
+    for i in 0..6 {
+        w.env.warp(3);
+        let t = trader(&mut w, &mint, 10 * SOL);
+        let q = w.launch_quote(&mint, &t.pubkey(), true, 4 * SOL);
+        let got = buy(&mut w, &mint, &t, 4 * SOL);
+        assert_eq!(Some(got), q.delivered);
+        let paid = trade_price(&reserves(&w.launch_pool(&mint)), got).unwrap();
+        let r = record(&w, &mint, &t.pubkey());
+        assert_eq!(
+            (r.entry, r.amount, r.basis_at, r.flags),
+            (paid, got, w.env.now, 0),
+            "buyer {i}"
+        );
+        let effective = u128::try_from(q.net_in).unwrap() * loss_cover_hook::PRICE_SCALE
+            / u128::from(q.amount_out.unwrap());
+        assert!(
+            u128::from(paid).abs_diff(effective) * 1_000 <= effective,
+            "buyer {i}: entry {paid} vs the swap's effective price {effective}"
+        );
+        entries.push(paid);
+    }
+    // Each paid more than the one before; the later ones far above the first version's cap.
+    assert!(entries.windows(2).all(|p| p[1] > p[0]));
+    let cap = capped(u64::MAX, reference);
+    assert_eq!(cap, reference * 12_000 / 10_000);
+    assert!(
+        entries.iter().filter(|e| **e > cap).count() >= 4,
+        "{entries:?} vs the old cap {cap}"
+    );
+    let top = spot(&w, &mint);
+    assert!(top > start * 5 / 2, "the price ran from {start} to {top}");
+    assert!(*entries.last().unwrap() > cap * 2);
+    // The reference: unmoved within its interval, as before.
+    assert_eq!(state(&w, &mint).reference, reference);
+}
+
+/// A holder who bought before a pump and again at its top: the basis blends both buys at what each
+/// paid, by weight, with no cap on the second.
+#[test]
+fn a_second_buy_blends_at_what_both_paid() {
+    let mut w = World::new();
+    let (_creator, mint) = launch_cover(&mut w);
+    let a = trader(&mut w, &mint, 10 * SOL);
+    let got1 = buy(&mut w, &mint, &a, SOL);
+    let p1 = trade_price(&reserves(&w.launch_pool(&mint)), got1).unwrap();
+    let reference = state(&w, &mint).reference;
+    let whale = trader(&mut w, &mint, 60 * SOL);
+    buy(&mut w, &mint, &whale, 40 * SOL);
+    w.env.warp(5);
+    let got2 = buy(&mut w, &mint, &a, 3 * SOL);
+    let p2 = trade_price(&reserves(&w.launch_pool(&mint)), got2).unwrap();
+    assert!(
+        p2 > capped(p2, reference) * 2,
+        "the second buy {p2} is far above the old cap"
+    );
+    let blended = (u128::from(p1) * u128::from(got1) + u128::from(p2) * u128::from(got2))
+        / u128::from(got1 + got2);
+    let r = record(&w, &mint, &a.pubkey());
+    assert_eq!(
+        (r.entry, r.amount, r.basis_at, r.flags),
+        (blended as u64, got1 + got2, w.env.now, 0)
+    );
+    // What the two buys cost the curve, over the tokens: the same average, within rounding.
+    assert!(r.entry > p1 && r.entry < p2);
+}
+
+/// Tokens that arrive by a plain transfer still blend at the spot, which is not capped either: a
+/// fresh wallet takes the spot at the top of a pump as its entry, a holder blends it with its own.
+#[test]
+fn a_transfer_in_blends_at_the_spot_after_a_pump() {
     let mut w = World::new();
     let (_creator, mint) = launch_cover(&mut w);
     let a = trader(&mut w, &mint, 5 * SOL);
-    buy(&mut w, &mint, &a, SOL / 10);
+    let got_a = buy(&mut w, &mint, &a, SOL / 10);
     let reference = state(&w, &mint).reference;
     let whale = trader(&mut w, &mint, 100 * SOL);
     let got = buy(&mut w, &mint, &whale, 40 * SOL);
-    let raw = trade_price(&reserves(&w.launch_pool(&mint)), got).unwrap();
-    let cap = capped(raw, reference);
-    assert!(raw > cap, "the pump's price {raw} is above the cap {cap}");
-    assert_eq!(cap, reference * 12_000 / 10_000);
-    assert_eq!(record(&w, &mint, &whale.pubkey()).entry, cap);
-    // Tokens handed to a fresh wallet at the spiked spot: the same cap.
+    let whale_paid = trade_price(&reserves(&w.launch_pool(&mint)), got).unwrap();
+    assert_eq!(record(&w, &mint, &whale.pubkey()).entry, whale_paid);
+    let top = spot(&w, &mint);
+    assert!(
+        top > capped(top, reference) * 2,
+        "the spot {top} is far above the old cap"
+    );
+    // To a wallet with no record: its entry is the spot.
     let c = trader(&mut w, &mint, SOL);
-    w.send_tokens(&whale, mint, &c.pubkey(), got / 2).ok();
-    let now_spot = spot(&w, &mint);
-    assert!(now_spot > cap);
-    assert_eq!(record(&w, &mint, &c.pubkey()).entry, cap);
-    // The reference itself only steps 5% a time: unmoved within its interval.
-    assert_eq!(state(&w, &mint).reference, reference);
+    w.env.warp(10);
+    w.send_tokens(&whale, mint, &c.pubkey(), got / 4).ok();
+    let rc = record(&w, &mint, &c.pubkey());
+    assert_eq!(
+        (rc.entry, rc.amount, rc.paid, rc.flags, rc.basis_at),
+        (top, got / 4, 0, 0, w.env.now)
+    );
+    // To a holder with a record: blended with the spot by weight.
+    let ra = record(&w, &mint, &a.pubkey());
+    w.send_tokens(&whale, mint, &a.pubkey(), got / 4).ok();
+    let blended = (u128::from(ra.entry) * u128::from(got_a)
+        + u128::from(top) * u128::from(got / 4))
+        / u128::from(got_a + got / 4);
+    let ra2 = record(&w, &mint, &a.pubkey());
+    assert_eq!((ra2.entry, ra2.amount), (blended as u64, got_a + got / 4));
+    // The sender's record is cut, its entry (what it paid) kept.
+    let rw = record(&w, &mint, &whale.pubkey());
+    assert_eq!(
+        (rw.entry, rw.amount, rw.flags),
+        (whale_paid, got - 2 * (got / 4), FLAG_SOLD)
+    );
+}
+
+/// `set_entry` takes only this program's upgrade authority as its ProgramData names it (Bordrless's
+/// key, as on mainnet; a key it names later; nobody once immutable), a holding of this mint with a
+/// record whose owner may hold one, and an entry above 0. It sets the entry alone: the balance,
+/// the cover paid, the round, the basis time and the flags stay; the slot is stamped; the state
+/// is not touched.
+#[test]
+fn set_entry_takes_only_the_upgrade_authority() {
+    let mut w = World::new();
+    w.env.without_sigverify();
+    let (_creator, mint) = launch_cover(&mut w);
+    let bordrless = bordrless_launch::constants::HOOK_UPGRADE_AUTHORITIES[1];
+    let set = |w: &mut World, owner: &Pubkey, entry: u64| -> Tx {
+        send_as(
+            &mut w.env,
+            &[hook::set_entry(bordrless, mint, *owner, entry)],
+            &[],
+            &[bordrless],
+        )
+    };
+    let a = trader(&mut w, &mint, 10 * SOL);
+    let got = buy(&mut w, &mint, &a, SOL);
+    record_payout(&mut w, &mint, &a.pubkey(), 3_000, 9).ok();
+    w.sell(&a, &mint, got / 4).ok();
+    let ra = record(&w, &mint, &a.pubkey());
+    assert_eq!(
+        (ra.paid, ra.round, ra.flags),
+        (3_000 * (got - got / 4) / got, 9, FLAG_SOLD)
+    );
+    let state_before = w.env.account(&hook::state_address(&mint)).unwrap().data;
+    // A stranger signing in the authority's place.
+    let stranger = w.env.funded(SOL);
+    refused(
+        &w.env.send_paid_by(
+            &[hook::set_entry(stranger.pubkey(), mint, a.pubkey(), 5)],
+            &stranger,
+            &[],
+        ),
+        LossCoverError::NotUpgradeAuthority,
+    );
+    // The authority unsigned.
+    let mut ix = hook::set_entry(bordrless, mint, a.pubkey(), 5);
+    ix.accounts[0].is_signer = false;
+    w.env.send_paid_by(&[ix], &stranger, &[]).expect_fail();
+    // Another program's ProgramData (the token program's, naming another authority).
+    let mut ix = hook::set_entry(bordrless, mint, a.pubkey(), 5);
+    ix.accounts[1].pubkey = bordrless_hook::authority::programdata_address(&bordrless_token::ID);
+    refused(
+        &send_as(&mut w.env, &[ix], &[], &[bordrless]),
+        LossCoverError::NotUpgradeAuthority,
+    );
+    // An entry of 0.
+    refused(&set(&mut w, &a.pubkey(), 0), LossCoverError::ZeroEntry);
+    // A holding with no record.
+    let empty = trader(&mut w, &mint, SOL);
+    refused(&set(&mut w, &empty.pubkey(), 5), LossCoverError::NoRecord);
+    // The pool's vault: its owner holds no record.
+    let pool = w.launch(&mint).pool;
+    refused(&set(&mut w, &pool, 5), LossCoverError::NotEligible);
+    // A holding of another mint (A's bridged SOL).
+    let mut ix = hook::set_entry(bordrless, mint, a.pubkey(), 5);
+    ix.accounts[3].pubkey = token::holding_address(&w.sol, &a.pubkey());
+    refused(
+        &send_as(&mut w.env, &[ix], &[], &[bordrless]),
+        LossCoverError::WrongMint,
+    );
+    // Another account in the hook authority's place.
+    let mut ix = hook::set_entry(bordrless, mint, a.pubkey(), 5);
+    ix.accounts[5].pubkey = Pubkey::new_unique();
+    refused(
+        &send_as(&mut w.env, &[ix], &[], &[bordrless]),
+        LossCoverError::WrongAccount,
+    );
+    assert_eq!(record(&w, &mint, &a.pubkey()), ra, "nothing was written");
+    // The upgrade authority: the entry set, the rest kept, the slot stamped.
+    w.env.warp(30);
+    let tx = set(&mut w, &a.pubkey(), ra.entry * 3);
+    tx.ok();
+    println!("set_entry: CU {} size {}", tx.cu(), tx.size);
+    let r = record(&w, &mint, &a.pubkey());
+    assert_eq!(
+        r,
+        Record {
+            entry: ra.entry * 3,
+            updated_slot: w.env.slot,
+            ..ra
+        }
+    );
+    assert_eq!(w.env.holding(&mint, &a.pubkey()), r.amount);
+    assert_eq!(
+        w.env.account(&hook::state_address(&mint)).unwrap().data,
+        state_before,
+        "the state is not touched"
+    );
+    // Any price but 0: the program takes it as given (the repair command never lowers one).
+    set(&mut w, &a.pubkey(), 1).ok();
+    assert_eq!(record(&w, &mint, &a.pubkey()).entry, 1);
+    // A key the ProgramData names later signs for real; the one before is refused.
+    let admin = w.env.funded(SOL);
+    w.env
+        .set_upgrade_authority(loss_cover_hook::ID, Some(admin.pubkey()));
+    refused(
+        &set(&mut w, &a.pubkey(), 7),
+        LossCoverError::NotUpgradeAuthority,
+    );
+    w.env
+        .send_paid_by(
+            &[hook::set_entry(admin.pubkey(), mint, a.pubkey(), ra.entry)],
+            &admin,
+            &[],
+        )
+        .ok();
+    assert_eq!(record(&w, &mint, &a.pubkey()).entry, ra.entry);
+    // Immutable: nobody.
+    w.env.set_upgrade_authority(loss_cover_hook::ID, None);
+    refused(
+        &w.env.send_paid_by(
+            &[hook::set_entry(admin.pubkey(), mint, a.pubkey(), 7)],
+            &admin,
+            &[],
+        ),
+        LossCoverError::NotUpgradeAuthority,
+    );
+    // Several in one transaction, as the repair command sends them.
+    w.env
+        .set_upgrade_authority(loss_cover_hook::ID, Some(admin.pubkey()));
+    let holders: Vec<Keypair> = (0..8)
+        .map(|_| {
+            let t = trader(&mut w, &mint, 2 * SOL);
+            buy(&mut w, &mint, &t, SOL / 2);
+            t
+        })
+        .collect();
+    let ixs: Vec<_> = holders
+        .iter()
+        .enumerate()
+        .map(|(i, t)| hook::set_entry(admin.pubkey(), mint, t.pubkey(), 1_000_000 + i as u64))
+        .collect();
+    let tx = w.env.send_paid_by(&ixs, &admin, &[]);
+    tx.ok();
+    println!(
+        "set_entry x{}: CU {} size {} bytes",
+        ixs.len(),
+        tx.cu(),
+        tx.size
+    );
+    assert!(tx.size <= 1_232);
+    for (i, t) in holders.iter().enumerate() {
+        assert_eq!(record(&w, &mint, &t.pubkey()).entry, 1_000_000 + i as u64);
+    }
 }
 
 /// A plain transfer in blends at the spot: the receiver's basis is the price now, the sender's

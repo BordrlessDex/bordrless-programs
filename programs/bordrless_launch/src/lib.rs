@@ -38,6 +38,7 @@ pub mod error;
 pub mod events;
 pub mod instructions;
 pub mod state;
+pub mod venues;
 
 pub use instructions::*;
 
@@ -224,6 +225,11 @@ pub mod bordrless_launch {
     /// (§6.1: the burn, max wallet, the creator wallet lock, the early-buyer lock; no holder fee
     /// yet) as `create_launch` takes them; when they install the kit, the mint names it as its hook
     /// and the kit's six accounts follow the quote mints. Data without rules reads as none.
+    /// Workshop items (§7): the creator may be a companion's creator address (the companion's
+    /// `launch_token` signs for it), and a `LaunchConfig` may follow the quote mints (its rules and
+    /// creator fee repeated; no SOL cut, no author's or partner's share), then its custom hook's
+    /// accounts as `create_launch` takes them (the hook's registry listing the coin's `Legs`) or
+    /// the kit's.
     pub fn create_token_launch<'info>(
         ctx: Context<'info, CreateTokenLaunch<'info>>,
         args: CreateTokenLaunchArgs,
@@ -234,7 +240,8 @@ pub mod bordrless_launch {
     /// Anyone: opens leg `index` of a launch quoted in tokens: its creator-fee account, its pool
     /// on the DEX (this program as the hook, the leg's share deposited) and the pool's registry.
     /// Trading starts once every leg is open. With kit rules, the remaining accounts are the kit,
-    /// the token program's signer of its callbacks and the kit config.
+    /// the token program's signer of its callbacks and the kit config; with a custom hook (§7),
+    /// the hook, the token program's signer for it and its extras for the deposit.
     pub fn open_leg<'info>(ctx: Context<'info, OpenLeg<'info>>, index: u8) -> Result<()> {
         token_launch::process_open_leg(ctx, index)
     }
@@ -246,5 +253,40 @@ pub mod bordrless_launch {
         index: u8,
     ) -> Result<()> {
         token_launch::process_claim_creator_fees_token(ctx, index)
+    }
+
+    /// Anyone: registers (or replaces with a deeper one) a quote token's reference pool for the SOL
+    /// switch (`docs/token-quotes.md` §7.5.2): a Raydium AMM v4, CPMM or CLMM pool or a Pump AMM pool
+    /// of the token against wrapped SOL or USDC, swapping, its fee 0.01% to 3%, 100 SOL deep. The
+    /// remaining accounts are the pool's venue accounts, USDC's reference and pool when needed, and
+    /// when replacing the registered pool's.
+    pub fn register_quote_pool<'info>(ctx: Context<'info, RegisterQuotePool<'info>>) -> Result<()> {
+        sol_switch::process_register_quote_pool(ctx)
+    }
+
+    /// Admin: stops (or resumes) every sale on a quote token's reference.
+    pub fn pause_quote_reference(ctx: Context<PauseQuoteReference>, paused: bool) -> Result<()> {
+        sol_switch::process_pause_quote_reference(ctx, paused)
+    }
+
+    /// A custodian of a coin quoted in tokens with the SOL switch on (its kit config or its
+    /// companion's creator address, signing through its program) sells up to `amount_in` of a leg's
+    /// token to SOL on the token's reference pool: at no less than the reference's price less the
+    /// pool's fee, its impact and 1%, within what the token's 8-slot window has left (half the pool's
+    /// fee times its depth across every seller). The SOL lands on the custodian; the return data is
+    /// `(sold u64, lamports u64)`. The remaining accounts are the venue's.
+    pub fn swap_to_sol<'info>(ctx: Context<'info, SwapToSol<'info>>, amount_in: u64) -> Result<()> {
+        sol_switch::process_swap_to_sol(ctx, amount_in)
+    }
+
+    /// Anyone: sells up to `amount_in` of leg `index`'s creator fees to SOL onto the launch account
+    /// (a wallet creator's coin with the SOL switch on), as `swap_to_sol` sells; the creator claims
+    /// them with `claim_creator_fees_sol`.
+    pub fn swap_creator_fees<'info>(
+        ctx: Context<'info, SwapCreatorFees<'info>>,
+        index: u8,
+        amount_in: u64,
+    ) -> Result<()> {
+        sol_switch::process_swap_creator_fees(ctx, index, amount_in)
     }
 }

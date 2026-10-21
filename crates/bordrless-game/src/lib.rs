@@ -71,8 +71,9 @@
 //! it only for a game of that kind, after its magic): [`jackpot`] (`BRJ1`, the last-buyer jackpot)
 //! and [`streak`] (`BRS1`, the diamond-hands streak). Every phase-1 offset, rule and helper above is
 //! unchanged. [`launch`] reads what a hook needs of its launch (the pool, and whether it is on its
-//! bonding curve), [`holding`] a holding (for `enter`); [`cpi`] is the one call a game hook makes
-//! (`enter`'s `write_hook_data`).
+//! bonding curve), [`legs`] a coin quoted in tokens' legs (`docs/token-quotes.md` §7.6: a buy out of
+//! any leg's pool qualifies), [`holding`] a holding (for `enter`); [`cpi`] is the one call a game
+//! hook makes (`enter`'s `write_hook_data`).
 
 #![forbid(unsafe_code)]
 
@@ -82,6 +83,7 @@ pub mod cpi;
 pub mod holding;
 pub mod jackpot;
 pub mod launch;
+pub mod legs;
 pub mod streak;
 
 pub use cpi::{write_own_hook_data, TOKEN_EVENT_AUTHORITY, TOKEN_PROGRAM_ID};
@@ -92,6 +94,10 @@ pub use jackpot::{
     JackpotHeader, JackpotRound, JACKPOT_ENDED_ROUNDS, JACKPOT_MAGIC,
 };
 pub use launch::{parse_launch, read_launch, LaunchView};
+pub use legs::{
+    legs_address, parse_legs, qualifying_buy_legs, read_legs, LegsView, LEGS_DISCRIMINATOR,
+    LEGS_LEN, LEGS_SEED,
+};
 pub use streak::{
     share_of, streak_on_enter, streak_on_receive, streak_on_send, streak_qualifies, streak_weight,
     StreakHeader, STREAK_MAGIC,

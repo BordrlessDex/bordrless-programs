@@ -316,16 +316,17 @@ pub fn check_rules(rules: &LaunchRules, creator_fee_bps: u16, config: &Config) -
 }
 
 /// The creator's own token hook as the remaining accounts carry it (§5.8): the program, the
-/// token program's signer for it and the registry's extras, each checked in [`plan`].
-struct CustomHook<'info> {
-    program: AccountInfo<'info>,
-    signer: AccountInfo<'info>,
-    extras: Vec<AccountInfo<'info>>,
-    flags: u16,
+/// token program's signer for it and the registry's extras, each checked in [`plan`] (and in
+/// `create_token_launch`, `docs/token-quotes.md` §7).
+pub(crate) struct CustomHook<'info> {
+    pub(crate) program: AccountInfo<'info>,
+    pub(crate) signer: AccountInfo<'info>,
+    pub(crate) extras: Vec<AccountInfo<'info>>,
+    pub(crate) flags: u16,
 }
 
 impl<'info> CustomHook<'info> {
-    fn hook(&self) -> cpi::TokenHook {
+    pub(crate) fn hook(&self) -> cpi::TokenHook {
         (*self.program.key, *self.signer.key)
     }
 }
@@ -473,7 +474,7 @@ fn check_kit_accounts(
 /// the extras, the hook's `Timelock`, which must hold no proposal (`check_timelock_idle`): a coin
 /// never launches with other code already staged for its hook. Every other config's accounts are
 /// exactly as before.
-fn check_custom_hook_accounts<'info>(
+pub(crate) fn check_custom_hook_accounts<'info>(
     remaining: &[AccountInfo<'info>],
     hook: Option<(Pubkey, u16)>,
     timelocked: bool,

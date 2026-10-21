@@ -696,7 +696,9 @@ fn settle_sol<'info>(
 /// Accounts of `claim_creator_fees_sol`: the creator (its wallet receives the SOL) and the native
 /// launch. A launch that pays its config's author also takes, as the remaining accounts, the
 /// `LaunchConfig` and the author's wallet (writable); a launch that pays a partner then takes its
-/// `PartnerFee` (writable) and the partner's wallet (writable).
+/// `PartnerFee` (writable) and the partner's wallet (writable). A coin quoted in tokens with the SOL
+/// switch (`docs/token-quotes.md` §7.5.2) is claimed the same way: `swap_creator_fees` lands each
+/// leg's fees, sold for SOL, on the launch account.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct ClaimCreatorFeesSol<'info> {
@@ -707,7 +709,7 @@ pub struct ClaimCreatorFeesSol<'info> {
         seeds = [LAUNCH_SEED, launch.mint.as_ref()],
         bump = launch.bump,
         has_one = creator @ LaunchError::NotCreator,
-        constraint = launch.is_native() @ LaunchError::NotNativeLaunch
+        constraint = launch.is_native() || launch.sol_switch() @ LaunchError::NotNativeLaunch
     )]
     pub launch: Account<'info, Launch>,
 }

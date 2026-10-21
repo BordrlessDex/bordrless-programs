@@ -173,7 +173,7 @@ pub enum CompanionError {
     BadApproval,
     #[msg("not a script companion")]
     NotAScript,
-    #[msg("the script delegated or closed one of the creator's holdings, changed the creator address's owner or data, or claimed the creator fees")]
+    #[msg("the script delegated or closed one of the creator's holdings or token accounts (or handed one over), changed the creator address's owner or data, or claimed the creator fees")]
     ScriptBrokeCustody,
     #[msg("an approved program must be one only Bordrless can change: immutable, upgradeable only by Bordrless's keys, or behind a hook timelock (passed)")]
     ProgramNotBounded,
@@ -213,4 +213,44 @@ pub enum CompanionError {
     // ---- Payout terms set after the launch (2026-10-15). Appended. ----
     #[msg("only the launch's beneficiary (its launcher) or the script approver sets a script's payout terms")]
     NotTermsAuthority,
+    // ---- Coins quoted in tokens (docs/token-quotes.md §7, 2026-10-21). Appended, one block
+    // (6095 to 6100); the next build appends after `NoSuchLeg` (6100). ----
+    #[msg("unused since docs/token-quotes.md §7.6: every companion but a strategy game launches a coin quoted in tokens (StrategyOnTokenCoin)")]
+    TokenLaunchKind,
+    #[msg("unused since docs/token-quotes.md §7.6: a script with a launcher's part keeps its parts per leg (CompanionLegs)")]
+    TokenCompanionSplit,
+    #[msg("this step trades or pays SOL on the launch's pool: a coin quoted in tokens has none (its legs have their own steps)")]
+    NotOnTokenCoin,
+    #[msg("unused since docs/token-quotes.md §7.5: payees are paid in the legs' tokens (withdraw_leg) or, with the SOL switch, in SOL (withdraw)")]
+    TokenCoinPayees,
+    #[msg("this step is a leg's: the launch is not quoted in tokens")]
+    NotALegStep,
+    #[msg("the launch has no such leg")]
+    NoSuchLeg,
+    // ---- Holder rewards in the quote token and the SOL switch (docs/token-quotes.md §7.5).
+    // Appended after NoSuchLeg (6100). ----
+    #[msg("the coin's SOL switch is off: this part is paid in the leg's token")]
+    SolSwitchOff,
+    #[msg("the coin's SOL switch is on: this part is paid in SOL (swap_bucket_to_sol first)")]
+    SolSwitchOn,
+    #[msg(
+        "only the launcher's part (0), the holders' part (1) and a game's pot (2) are sold to SOL"
+    )]
+    NotSwitchedPart,
+    #[msg("this companion shares its launcher's part: pass its payees and payees-legs accounts (writable)")]
+    PayeesLegsMissing,
+    // ---- Games, Lossback and scripts with a launcher's part on coins quoted in tokens
+    // (docs/token-quotes.md §7.6). Appended after PayeesLegsMissing (6104). ----
+    #[msg("a game on a coin quoted in tokens needs its token terms (set_game_token_terms) before the launch, and none when the coin's SOL switch sells its pot to SOL")]
+    TokenGameTerms,
+    #[msg(
+        "a pot kept in the legs' tokens: pass the companion's legs (writable) and the coin's Legs"
+    )]
+    LegAccountsMissing,
+    #[msg("a payout names no leg of the coin, or its owner's token account of that leg's token was not passed")]
+    PayoutLegInvalid,
+    #[msg("a strategy game runs on SOL coins only: its plans and budgets are lamports, and a coin quoted in tokens has none")]
+    StrategyOnTokenCoin,
+    #[msg("a game's least pot on a coin quoted in tokens is at most 10,000 basis points of the coin's opening value (0 clears it)")]
+    BadTokenTerms,
 }

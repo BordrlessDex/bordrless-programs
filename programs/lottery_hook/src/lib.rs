@@ -68,6 +68,8 @@ solana_security_txt::security_txt! {
 pub const VERSION: u8 = 1;
 /// The launch program's `["launch", mint]` seed.
 pub const LAUNCH_SEED: &[u8] = b"launch";
+/// The launch program's `["legs", mint]` seed: a coin quoted in tokens' legs (`prepare_legs`).
+pub const LEGS_SEED: &[u8] = b"legs";
 /// The launch program.
 pub const LAUNCH_ID: Pubkey = bordrless_launch::ID;
 /// The token program's signer of every callback to this hook: `["hook-authority", lottery_hook]`
@@ -97,67 +99,16 @@ pub mod lottery_hook {
     /// rounds of `round_secs`, and the extra-accounts registry. The mint's keypair signs, so only
     /// whoever launches it chooses its rounds; once per mint.
     pub fn prepare(ctx: Context<Prepare>, round_secs: u32) -> Result<()> {
-        require!(valid_round_secs(round_secs), LotteryError::BadRoundSecs);
-        let mint = ctx.accounts.mint.key();
-        let (expected, registry_bump) = hook_accounts_address(&crate::ID, &mint);
-        require_keys_eq!(
-            ctx.accounts.registry.key(),
-            expected,
-            LotteryError::WrongAccount
-        );
-        let now = Clock::get()?.unix_timestamp;
-        let launch = Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_ID).0;
-        let creator = companion_creator_address(&mint);
-        let payer = ctx.accounts.payer.key();
-        let state_key = ctx.accounts.state.key();
-        let state = &mut ctx.accounts.state;
-        state.header = GameHeader::new(mint, round_secs, now);
-        state.version = VERSION;
-        state.bump = ctx.bumps.state;
-        state.launch = launch;
-        state.pool = Pubkey::default();
-        state.creator = creator;
-        state.prepared_by = payer;
-        state.prepared_at = now;
-        state.reserved = [0; 64];
-        let round = state.header.round;
-        // The callbacks' extras: the state (written every transfer), the launch account (read for
-        // its pool until the state remembers it).
-        let list = HookAccountList::new(vec![
-            ExtraAccount {
-                writable: true,
-                source: AccountSource::Pda {
-                    program: crate::ID,
-                    seeds: vec![Seed::Literal(STATE_SEED.to_vec()), Seed::Account(1)],
-                },
-            },
-            ExtraAccount {
-                writable: false,
-                source: AccountSource::Pda {
-                    program: LAUNCH_ID,
-                    seeds: vec![Seed::Literal(LAUNCH_SEED.to_vec()), Seed::Account(1)],
-                },
-            },
-        ]);
-        write_registry(
-            &ctx.accounts.payer.to_account_info(),
-            &ctx.accounts.registry.to_account_info(),
-            &ctx.accounts.system_program.to_account_info(),
-            &crate::ID,
-            &mint,
-            registry_bump,
-            &list,
-        )?;
-        emit_cpi!(Prepared {
-            mint,
-            state: state_key,
-            round_secs,
-            round,
-            launch,
-            creator,
-            prepared_by: payer,
-        });
-        Ok(())
+        prepare_any(ctx, round_secs, false)
+    }
+
+    /// `prepare` for a coin quoted in tokens (`docs/token-quotes.md` §7.6): the same state and
+    /// accounts, and a registry that also lists the coin's `Legs`, `PDA(["legs", mint],
+    /// launchpad)` (read-only, third), which the launchpad asks of every hook on such a coin. The
+    /// tickets need nothing of the legs: every leg's pool is off the curve, so it never holds
+    /// tickets (`eligible`); the callbacks take the `Legs` as an extra account they do not read.
+    pub fn prepare_legs(ctx: Context<Prepare>, round_secs: u32) -> Result<()> {
+        prepare_any(ctx, round_secs, true)
     }
 
     /// Anyone, for any holding of the mint: registers its whole balance for the current round when
@@ -274,6 +225,81 @@ pub mod lottery_hook {
         }
         Ok(answer)
     }
+}
+
+/// `prepare` (`legs` false) and `prepare_legs` (`legs` true).
+fn prepare_any(ctx: Context<Prepare>, round_secs: u32, legs: bool) -> Result<()> {
+    require!(valid_round_secs(round_secs), LotteryError::BadRoundSecs);
+    let mint = ctx.accounts.mint.key();
+    let (expected, registry_bump) = hook_accounts_address(&crate::ID, &mint);
+    require_keys_eq!(
+        ctx.accounts.registry.key(),
+        expected,
+        LotteryError::WrongAccount
+    );
+    let now = Clock::get()?.unix_timestamp;
+    let launch = Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_ID).0;
+    let creator = companion_creator_address(&mint);
+    let payer = ctx.accounts.payer.key();
+    let state_key = ctx.accounts.state.key();
+    let state = &mut ctx.accounts.state;
+    state.header = GameHeader::new(mint, round_secs, now);
+    state.version = VERSION;
+    state.bump = ctx.bumps.state;
+    state.launch = launch;
+    state.pool = Pubkey::default();
+    state.creator = creator;
+    state.prepared_by = payer;
+    state.prepared_at = now;
+    state.reserved = [0; 64];
+    let round = state.header.round;
+    // The callbacks' extras: the state (written every transfer), the launch account (read for
+    // its pool until the state remembers it).
+    let list = HookAccountList::new(vec![
+        ExtraAccount {
+            writable: true,
+            source: AccountSource::Pda {
+                program: crate::ID,
+                seeds: vec![Seed::Literal(STATE_SEED.to_vec()), Seed::Account(1)],
+            },
+        },
+        ExtraAccount {
+            writable: false,
+            source: AccountSource::Pda {
+                program: LAUNCH_ID,
+                seeds: vec![Seed::Literal(LAUNCH_SEED.to_vec()), Seed::Account(1)],
+            },
+        },
+    ]);
+    let mut list = list;
+    if legs {
+        list.accounts.push(ExtraAccount {
+            writable: false,
+            source: AccountSource::Pda {
+                program: LAUNCH_ID,
+                seeds: vec![Seed::Literal(LEGS_SEED.to_vec()), Seed::Account(1)],
+            },
+        });
+    }
+    write_registry(
+        &ctx.accounts.payer.to_account_info(),
+        &ctx.accounts.registry.to_account_info(),
+        &ctx.accounts.system_program.to_account_info(),
+        &crate::ID,
+        &mint,
+        registry_bump,
+        &list,
+    )?;
+    emit_cpi!(Prepared {
+        mint,
+        state: state_key,
+        round_secs,
+        round,
+        launch,
+        creator,
+        prepared_by: payer,
+    });
+    Ok(())
 }
 
 /// Remembers the launch's pool once the `Launch` account can be read (it is not serialized until
@@ -483,6 +509,27 @@ pub mod client {
             .to_account_metas(None),
             data: crate::instruction::Prepare { round_secs }.data(),
         }
+    }
+
+    /// The coin's `Legs` (the launch program's `["legs", mint]`).
+    pub fn legs_address(mint: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(&[LEGS_SEED, mint.as_ref()], &LAUNCH_ID).0
+    }
+
+    /// The registry's extras of a mint prepared with `prepare_legs` (a coin quoted in tokens): the
+    /// state, writable; the launch and the coin's `Legs`, read-only.
+    pub fn extras_legs(mint: &Pubkey) -> Vec<AccountMeta> {
+        let mut extras = extras(mint);
+        extras.push(AccountMeta::new_readonly(legs_address(mint), false));
+        extras
+    }
+
+    /// `prepare_legs(round_secs)` for `mint` (whose keypair signs), `payer` paying: a coin quoted in
+    /// tokens.
+    pub fn prepare_legs(payer: Pubkey, mint: Pubkey, round_secs: u32) -> Instruction {
+        let mut ix = prepare(payer, mint, round_secs);
+        ix.data = crate::instruction::PrepareLegs { round_secs }.data();
+        ix
     }
 
     /// `enter` for `owner`'s holding of `mint`. No signer: whoever pays the fee sends it.

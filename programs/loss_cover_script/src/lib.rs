@@ -39,17 +39,36 @@
 //! event authority, the bridge's `unwrap_sol` accounts, then the candidates: a holding (writable:
 //! the hook records into it) and, in a paying round, its owner (writable). The order among them
 //! does not matter to this program; the answer's indices are the holdings' positions among them.
+//!
+//! **On a coin quoted in tokens** (`docs/token-quotes.md` §7.6; the launch says so) the pot is kept
+//! per leg, in the leg's token (the companion's `CompanionLegs`), and each holding's basis in the
+//! token of the leg it first bought on (the hook's `Record.leg`). Each leg runs its own rounds:
+//! `b_i` is the leg's pot at the round's first step, `l_prev_i` and `l_cur_i` the loss measured on
+//! the leg, `f_i = min(1, b_i / l_prev_i)`, kept after the first 128 bytes of the state
+//! (`STATE_LEN_LEGS`: per leg `b`, `l_prev`, `l_cur`, `round_paid` (u64) and `measured` (u32), 36
+//! bytes at 128 + 36·i); `min_pot_lamports` is not applied. A holding is measured against its
+//! record leg's spot, in that leg's token, and paid from that leg's pot: a leg's pot pays only
+//! holders whose basis is on that leg. `min_loss` there is basis points of the holding's cost
+//! (`entry * balance`, the site sends 50). The answer is version 3 (`PayoutAnswerLegs`), each entry
+//! naming its leg; the companion pays it within the terms per leg, into the owner's associated
+//! token account of the leg's token, which the step must carry (writable) for a paid entry. The
+//! step also takes the coin's `Legs`, every leg's pool and the companion's `CompanionLegs`.
 
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
 use bordrless_companion::constants::{
-    CREATOR_SEED, MAX_PAYOUTS_PER_STEP, PAYOUT_ANSWER_VERSION, SCRIPT_STATE_SEED, SWAP_ID, TOKEN_ID,
+    COMPANION_LEGS_SEED, CREATOR_SEED, MAX_PAYOUTS_PER_STEP, PAYOUT_ANSWER_LEGS_VERSION,
+    PAYOUT_ANSWER_VERSION, SCRIPT_STATE_SEED, SWAP_ID, TOKEN_ID,
 };
 use bordrless_companion::instructions::{bounty_for, step_budget};
-use bordrless_companion::state::{bps_of, Companion, PayoutAnswer, PayoutEntry, PayoutTerms};
+use bordrless_companion::state::{
+    bps_of, Companion, CompanionLegs, PayoutAnswer, PayoutAnswerLegs, PayoutEntry, PayoutEntryLegs,
+    PayoutTerms,
+};
 use bordrless_game::{eligible, round_of};
 use bordrless_launch::client::read_launch;
+use bordrless_launch::state::Launch;
 use bordrless_strategy::pool_reserves;
 use bordrless_token::client as token_client;
 use loss_cover_hook::{spot_of, Record, PRICE_SCALE};
@@ -65,12 +84,48 @@ solana_security_txt::security_txt! {
     source_code: "https://github.com/BordrlessDex/bordrless-programs"
 }
 
+/// SPL Token and Token-2022, and the associated token account program: a leg's token program by its
+/// index (0, 1), and an owner's associated account of it.
+mod spl {
+    use anchor_lang::prelude::Pubkey;
+    pub const TOKEN_PROGRAM_ID: Pubkey =
+        Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    pub const TOKEN_2022_PROGRAM_ID: Pubkey =
+        Pubkey::from_str_const("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+    pub const ATA_PROGRAM_ID: Pubkey =
+        Pubkey::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+    pub fn program_id(index: u8) -> Pubkey {
+        if index == 1 {
+            TOKEN_2022_PROGRAM_ID
+        } else {
+            TOKEN_PROGRAM_ID
+        }
+    }
+
+    pub fn associated_token_address(owner: &Pubkey, mint: &Pubkey, program: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[owner.as_ref(), program.as_ref(), mint.as_ref()],
+            &ATA_PROGRAM_ID,
+        )
+        .0
+    }
+}
+
 /// The companion program, whose creator address signs every call and which makes the state.
 pub const COMPANION_ID: Pubkey = bordrless_companion::ID;
 /// Layout version of [`CoverState`].
 pub const VERSION: u8 = 1;
 /// The state's size: what `create_script_v2`'s `state_len` must be.
 pub const STATE_LEN: u32 = 128;
+/// The state's size on a coin quoted in tokens (`docs/token-quotes.md` §7.6): the 128 bytes, then
+/// each leg's round, 36 bytes at `128 + 36 * i` (six legs), rounded up.
+pub const STATE_LEN_LEGS: u32 = 384;
+/// Where the legs' rounds start in the state, and the bytes of one.
+pub const LEG_ROUNDS_AT: usize = 128;
+pub const LEG_ROUND_LEN: usize = 36;
+/// The most legs a coin quoted in tokens has.
+pub const MAX_LEGS: usize = 6;
 /// The part of a loss the pot covers when it can: 10% to all of it.
 pub const MIN_COVER_BPS: u16 = 1_000;
 pub const MAX_COVER_BPS: u16 = 10_000;
@@ -197,6 +252,124 @@ pub struct CoverRound {
     pub l_prev: u64,
 }
 
+/// A leg's round rolled on a coin quoted in tokens: its budget `b` and the loss `l_prev` measured
+/// on the leg the round before, in the leg's token.
+#[event]
+pub struct CoverRoundLeg {
+    pub mint: Pubkey,
+    pub round: u32,
+    pub leg: u8,
+    pub b: u64,
+    pub l_prev: u64,
+}
+
+/// A leg's round on a coin quoted in tokens, as the state keeps it after its first 128 bytes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LegRound {
+    /// The leg's budget: its pot at the round's first step.
+    pub b: u64,
+    /// The loss measured on the leg over the round before.
+    pub l_prev: u64,
+    /// Measured on it so far this round.
+    pub l_cur: u64,
+    /// Paid from it so far this round.
+    pub round_paid: u64,
+    /// Holdings measured on it this round.
+    pub measured: u32,
+}
+
+impl LegRound {
+    /// Leg `i`'s round from the state's data (zeros past its end).
+    pub fn read(data: &[u8], i: usize) -> Self {
+        let at = LEG_ROUNDS_AT + LEG_ROUND_LEN * i;
+        let u64_at = |o: usize| {
+            data.get(at + o..at + o + 8)
+                .map_or(0, |b| u64::from_le_bytes(b.try_into().expect("8 bytes")))
+        };
+        Self {
+            b: u64_at(0),
+            l_prev: u64_at(8),
+            l_cur: u64_at(16),
+            round_paid: u64_at(24),
+            measured: data
+                .get(at + 32..at + 36)
+                .map_or(0, |b| u32::from_le_bytes(b.try_into().expect("4 bytes"))),
+        }
+    }
+
+    /// Writes leg `i`'s round into the state's data.
+    pub fn write(&self, data: &mut [u8], i: usize) {
+        let at = LEG_ROUNDS_AT + LEG_ROUND_LEN * i;
+        data[at..at + 8].copy_from_slice(&self.b.to_le_bytes());
+        data[at + 8..at + 16].copy_from_slice(&self.l_prev.to_le_bytes());
+        data[at + 16..at + 24].copy_from_slice(&self.l_cur.to_le_bytes());
+        data[at + 24..at + 32].copy_from_slice(&self.round_paid.to_le_bytes());
+        data[at + 32..at + 36].copy_from_slice(&self.measured.to_le_bytes());
+    }
+}
+
+/// The least uncovered loss that counts on a coin quoted in tokens: `min_loss` basis points (at
+/// most all) of the holding's cost, `entry * balance / 10^12` in its leg's token, and at least 1.
+pub fn min_loss_of_cost(entry: u64, balance: u64, min_loss_bps: u64) -> u64 {
+    let cost = u128::from(entry) * u128::from(balance) / PRICE_SCALE;
+    let min = cost * u128::from(min_loss_bps.min(BPS)) / u128::from(BPS);
+    u64::try_from(min).unwrap_or(u64::MAX).max(1)
+}
+
+/// What `companion_step` answers: a SOL coin's payouts (`PayoutAnswer`, version 1) or, on a coin
+/// quoted in tokens, its payouts in the legs' tokens (`PayoutAnswerLegs`, version 3). Its Borsh is
+/// exactly the answer's (the version first), as the companion reads it from the return data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CoverAnswer {
+    Sol(PayoutAnswer),
+    Legs(PayoutAnswerLegs),
+}
+
+impl AnchorSerialize for CoverAnswer {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        match self {
+            CoverAnswer::Sol(a) => a.serialize(writer),
+            CoverAnswer::Legs(a) => a.serialize(writer),
+        }
+    }
+}
+
+impl AnchorDeserialize for CoverAnswer {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        match bytes.first() {
+            Some(&PAYOUT_ANSWER_LEGS_VERSION) => {
+                Ok(CoverAnswer::Legs(PayoutAnswerLegs::try_from_slice(&bytes)?))
+            }
+            _ => Ok(CoverAnswer::Sol(PayoutAnswer::try_from_slice(&bytes)?)),
+        }
+    }
+}
+
+#[cfg(feature = "idl-build")]
+impl anchor_lang::IdlBuild for CoverAnswer {
+    fn create_type() -> Option<anchor_lang::idl::types::IdlTypeDef> {
+        use anchor_lang::idl::types::*;
+        Some(IdlTypeDef {
+            name: Self::get_full_path(),
+            docs: vec![
+                "The Borsh of a PayoutAnswer (version 1, a SOL coin) or a PayoutAnswerLegs (version 3, a coin quoted in tokens): read the first byte.".into(),
+            ],
+            serialization: IdlSerialization::default(),
+            repr: None,
+            generics: vec![],
+            ty: IdlTypeDefTy::Struct {
+                fields: Some(IdlDefinedFields::Named(vec![IdlField {
+                    name: "version".into(),
+                    docs: vec!["1 or 3; the entries follow as that version's.".into()],
+                    ty: IdlType::U8,
+                }])),
+            },
+        })
+    }
+}
+
 #[program]
 pub mod loss_cover_script {
     use super::*;
@@ -235,7 +408,7 @@ pub mod loss_cover_script {
     /// The companion's `script_step` calls it, the creator address signing: the round rolled when
     /// due, every candidate holding measured and its payment named (see the module). Answers the
     /// payouts; `NothingToDo` when there are none.
-    pub fn companion_step(ctx: Context<CompanionStep>, mint: Pubkey) -> Result<PayoutAnswer> {
+    pub fn companion_step(ctx: Context<CompanionStep>, mint: Pubkey) -> Result<CoverAnswer> {
         let clock = Clock::get()?;
         let now = clock.unix_timestamp;
         let launch = read_launch(&ctx.accounts.launch)?;
@@ -245,6 +418,9 @@ pub mod loss_cover_script {
             ctx.accounts.pool.key(),
             LossCoverScriptError::WrongAccount
         );
+        if launch.is_token_quoted() {
+            return step_legs(ctx, mint, &launch, now).map(CoverAnswer::Legs);
+        }
         // 1. The pool's spot.
         let pool = &ctx.accounts.pool;
         require_keys_eq!(*pool.owner, SWAP_ID, LossCoverScriptError::WrongAccount);
@@ -400,11 +576,252 @@ pub mod loss_cover_script {
             });
         }
         require!(!entries.is_empty(), LossCoverScriptError::NothingToDo);
-        Ok(PayoutAnswer {
+        Ok(CoverAnswer::Sol(PayoutAnswer {
             version: PAYOUT_ANSWER_VERSION,
             entries,
-        })
+        }))
     }
+}
+
+/// What a step reads of the companion's legs (`CompanionLegs`, read in place: the whole account
+/// would not fit the stack): each leg's token, its pot and its payout window.
+struct LegPots {
+    quote_mint: [Pubkey; MAX_LEGS],
+    quote_program: [u8; MAX_LEGS],
+    pot: [u64; MAX_LEGS],
+    prize: [u64; MAX_LEGS],
+    prize_paid: [u64; MAX_LEGS],
+}
+
+impl LegPots {
+    /// The companion's legs of `mint` from its account (the companion's discriminator, this mint),
+    /// `count` of them: `LegPot`s at 43 + 203·i (the token at 0, its program at 32, `pending_pot`
+    /// at 59, `prize` at 187, `prize_paid` at 195).
+    fn read(info: &AccountInfo, mint: &Pubkey, count: usize) -> Result<Self> {
+        use anchor_lang::Discriminator;
+        let data = info.try_borrow_data()?;
+        require!(
+            data.len() >= CompanionLegs::LEN
+                && data[..8] == *CompanionLegs::DISCRIMINATOR
+                && data[10..42] == mint.to_bytes(),
+            LossCoverScriptError::NoLegs
+        );
+        let u64_at = |at: usize| u64::from_le_bytes(data[at..at + 8].try_into().expect("8 bytes"));
+        let mut out = Self {
+            quote_mint: [Pubkey::default(); MAX_LEGS],
+            quote_program: [0; MAX_LEGS],
+            pot: [0; MAX_LEGS],
+            prize: [0; MAX_LEGS],
+            prize_paid: [0; MAX_LEGS],
+        };
+        for i in 0..count {
+            let at = 43 + 203 * i;
+            out.quote_mint[i] = Pubkey::new_from_array(data[at..at + 32].try_into().expect("32"));
+            out.quote_program[i] = data[at + 32];
+            out.pot[i] = u64_at(at + 59);
+            out.prize[i] = u64_at(at + 187);
+            out.prize_paid[i] = u64_at(at + 195);
+        }
+        Ok(out)
+    }
+}
+
+/// The step on a coin quoted in tokens: each leg's round, each candidate measured on its record
+/// leg and paid from that leg's pot (see the module).
+#[inline(never)]
+fn step_legs(
+    ctx: Context<CompanionStep>,
+    mint: Pubkey,
+    launch: &Launch,
+    now: i64,
+) -> Result<PayoutAnswerLegs> {
+    let remaining = ctx.remaining_accounts;
+    // 1. The legs: their pools (the launchpad's `Legs`) and their pots (the companion's legs).
+    let legs = remaining
+        .iter()
+        .find_map(|a| bordrless_game::read_legs(a, &mint))
+        .ok_or(LossCoverScriptError::NoLegs)?;
+    let count = usize::from(legs.count).min(MAX_LEGS);
+    let pots_key =
+        Pubkey::find_program_address(&[COMPANION_LEGS_SEED, mint.as_ref()], &COMPANION_ID).0;
+    let pots_info = remaining
+        .iter()
+        .find(|a| *a.key == pots_key && *a.owner == COMPANION_ID)
+        .ok_or(LossCoverScriptError::NoLegs)?;
+    let pots = LegPots::read(pots_info, &mint, count)?;
+    // Each leg's spot, in its token (a pool not passed: none, and its holdings wait).
+    let mut spots = [None; MAX_LEGS];
+    for (i, spot) in spots.iter_mut().enumerate().take(count) {
+        *spot = remaining
+            .iter()
+            .find(|a| *a.key == legs.pools[i] && *a.owner == SWAP_ID)
+            .and_then(|a| {
+                let data = a.try_borrow_data().ok()?;
+                pool_reserves(&data)
+            })
+            .filter(|r| r.base_mint == mint)
+            .and_then(|r| spot_of(&r));
+    }
+    // 2. The rounds, per leg.
+    let c = &ctx.accounts.companion;
+    let s = &mut ctx.accounts.state;
+    require!(s.version == VERSION, LossCoverScriptError::NotInitialized);
+    let state_info = s.to_account_info();
+    require!(
+        state_info.data_len() >= LEG_ROUNDS_AT + LEG_ROUND_LEN * MAX_LEGS,
+        LossCoverScriptError::NotInitialized
+    );
+    let mut rounds = [LegRound::default(); MAX_LEGS];
+    {
+        let data = state_info.try_borrow_data()?;
+        for (i, r) in rounds.iter_mut().enumerate().take(count) {
+            *r = LegRound::read(&data, i);
+        }
+    }
+    let r = round_of(now, s.round_secs);
+    if r > s.round {
+        let consecutive = r == s.round.saturating_add(1);
+        for (i, lr) in rounds.iter_mut().enumerate().take(count) {
+            lr.l_prev = if consecutive { lr.l_cur } else { 0 };
+            lr.l_cur = 0;
+            lr.round_paid = 0;
+            lr.measured = 0;
+            lr.b = pots.pot[i];
+            emit!(CoverRoundLeg {
+                mint,
+                round: r,
+                leg: i as u8,
+                b: lr.b,
+                l_prev: lr.l_prev,
+            });
+        }
+        s.l_prev = 0;
+        s.l_cur = 0;
+        s.round_paid = 0;
+        s.measured = 0;
+        s.b = 0;
+        s.round = r;
+        s.rounds = s.rounds.saturating_add(1);
+    }
+    // The companion's bounds per leg, exactly as it computes them: its terms, the window per leg
+    // (rolled when this step is its first), no bounty (a payout in tokens takes none).
+    let terms_key = PayoutTerms::address(&mint).0;
+    let terms_info = remaining
+        .iter()
+        .find(|a| *a.key == terms_key)
+        .ok_or(LossCoverScriptError::NoTerms)?;
+    require_keys_eq!(
+        *terms_info.owner,
+        COMPANION_ID,
+        LossCoverScriptError::NoTerms
+    );
+    let t = {
+        let data = terms_info.try_borrow_data()?;
+        PayoutTerms::try_deserialize(&mut &data[..])
+            .map_err(|_| error!(LossCoverScriptError::NoTerms))?
+    };
+    require_keys_eq!(t.mint, mint, LossCoverScriptError::NoTerms);
+    let rolled = t.window_start != t.window_start_at(now);
+    let mut budget_left = [0u64; MAX_LEGS];
+    let mut holding_cap = [0u64; MAX_LEGS];
+    for i in 0..count {
+        let (window_pot, window_paid) = if rolled {
+            (pots.pot[i], 0)
+        } else {
+            (pots.prize[i], pots.prize_paid[i])
+        };
+        let budget = step_budget(
+            pots.pot[i],
+            pots.pot[i],
+            0,
+            window_pot,
+            window_paid,
+            t.step_bps,
+            t.window_bps,
+        );
+        budget_left[i] = budget;
+        holding_cap[i] = bps_of(budget, u64::from(t.holding_bps));
+    }
+    // 3. The candidates, in the order given.
+    let hook = launch.custom_hook.unwrap_or_default();
+    let excluded = [
+        ctx.accounts.launch.key(),
+        launch.pool,
+        ctx.accounts.creator.key(),
+        c.key(),
+        crate::ID,
+        s.key(),
+        terms_key,
+        hook,
+    ];
+    let mut entries: Vec<PayoutEntryLegs> = Vec::with_capacity(MAX_PAYOUTS_PER_STEP);
+    for (i, info) in remaining.iter().enumerate() {
+        if entries.len() == MAX_PAYOUTS_PER_STEP {
+            break;
+        }
+        if *info.owner != TOKEN_ID {
+            continue;
+        }
+        let Ok(h) = token_client::read_holding(info) else {
+            continue;
+        };
+        if h.mint != mint || !eligible(&h.owner, &excluded) || h.owner == c.beneficiary {
+            continue;
+        }
+        let rec = Record::decode(&h.hook_data);
+        let leg = usize::from(rec.leg);
+        if !rec.is_set()
+            || leg >= count
+            || rec.amount != h.amount
+            || rec.round == r
+            || h.amount < s.min_holding
+            || now.saturating_sub(rec.basis_at) < i64::from(s.min_age_secs)
+        {
+            continue;
+        }
+        let Some(spot) = spots[leg] else {
+            continue;
+        };
+        let uncovered = uncovered_loss(rec.entry, spot, h.amount, s.cover_bps, rec.paid);
+        if uncovered == 0 || uncovered < min_loss_of_cost(rec.entry, h.amount, s.min_loss) {
+            continue;
+        }
+        let lr = &mut rounds[leg];
+        let pay = fraction_of(uncovered, lr.b, lr.l_prev)
+            .min(lr.b.saturating_sub(lr.round_paid))
+            .min(budget_left[leg])
+            .min(holding_cap[leg]);
+        if pay > 0 {
+            // Paid only into the owner's account of the leg's token, passed writable: otherwise
+            // the holding waits for a step that carries it (not measured, not touched).
+            let program = spl::program_id(pots.quote_program[leg]);
+            let key = spl::associated_token_address(&h.owner, &pots.quote_mint[leg], &program);
+            if !remaining.iter().any(|a| *a.key == key && a.is_writable) {
+                continue;
+            }
+        }
+        lr.l_cur = lr.l_cur.saturating_add(uncovered - pay);
+        lr.measured = lr.measured.saturating_add(1);
+        lr.round_paid = lr.round_paid.saturating_add(pay);
+        budget_left[leg] -= pay;
+        entries.push(PayoutEntryLegs {
+            account: i as u8,
+            amount: pay,
+            tag: r,
+            leg: leg as u8,
+        });
+    }
+    {
+        let mut data = state_info.try_borrow_mut_data()?;
+        for (i, lr) in rounds.iter().enumerate().take(count) {
+            lr.write(&mut data, i);
+        }
+    }
+    require!(!entries.is_empty(), LossCoverScriptError::NothingToDo);
+    Ok(PayoutAnswerLegs {
+        version: PAYOUT_ANSWER_LEGS_VERSION,
+        entries,
+    })
 }
 
 /// Accounts of `companion_init`, as the companion passes them.
@@ -461,6 +878,8 @@ pub enum LossCoverScriptError {
     NoTerms,
     #[msg("nothing to measure or pay in this batch")]
     NothingToDo,
+    #[msg("a coin quoted in tokens: pass its Legs and the companion's legs (CompanionLegs)")]
+    NoLegs,
 }
 
 #[cfg(test)]

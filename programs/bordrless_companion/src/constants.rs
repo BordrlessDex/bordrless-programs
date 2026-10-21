@@ -384,6 +384,42 @@ pub const MAX_PAYEES: usize = 10;
 pub const VERSION_WITH_PAYEES: u8 = 2;
 /// `Payees.version`.
 pub const PAYEES_VERSION: u8 = 1;
+/// `PDA(["companion-legs", mint])`: a preset companion's pots on a coin quoted in tokens, one per
+/// leg in that leg's token (`docs/token-quotes.md` §7.4).
+pub const COMPANION_LEGS_SEED: &[u8] = b"companion-legs";
+/// `CompanionLegs.version`.
+pub const COMPANION_LEGS_VERSION: u8 = 1;
+/// The most legs a coin quoted in tokens has (the launchpad's `MAX_LEGS`).
+pub const MAX_COMPANION_LEGS: usize = 6;
+/// A leg pot's currency (`LegPot.currency`): the leg's own token.
+pub const LEG_CURRENCY_TOKEN: u8 = 0;
+/// A leg pot's currency with the launch's SOL switch (`docs/token-quotes.md` §7.5.2): the launcher's
+/// and the holders' parts are sold to SOL (`swap_bucket_to_sol`) and paid as a SOL coin's.
+pub const LEG_CURRENCY_SOL: u8 = 1;
+/// `PDA(["payees-legs", mint])`: what payees are owed per leg in the legs' tokens (`PayeesLegs`).
+pub const PAYEES_LEGS_SEED: &[u8] = b"payees-legs";
+/// `PayeesLegs.version`.
+pub const PAYEES_LEGS_VERSION: u8 = 1;
+/// `swap_bucket_to_sol`'s parts: the launcher's (and its payees') part.
+pub const PART_LAUNCHER: u8 = 0;
+/// `swap_bucket_to_sol`'s parts: the holders' part.
+pub const PART_HOLDERS: u8 = 1;
+/// `swap_bucket_to_sol`'s parts: a game's pot, on a coin whose SOL switch is on
+/// (`docs/token-quotes.md` §7.6): it pays its prizes as a SOL coin's game does.
+pub const PART_POT: u8 = 2;
+/// A game's SOL bounds read on a coin quoted in tokens (`docs/token-quotes.md` §7.6): this many
+/// lamports stand for the coin's whole opening value (10,000 basis points), so the 10 SOL pot cap
+/// is 2,000 basis points (20%) of it and the 0.1 SOL dormant floor 20 (`lamports_as_bps`). No
+/// price is read: a threshold is a share of what the coin was worth at its opening, in its tokens.
+pub const TOKEN_POT_SCALE: u64 = 50_000_000_000;
+/// The least a dormant game's pot in tokens needs to be drawn: 20 basis points of the opening value
+/// (`MIN_MIN_POT` read as `lamports_as_bps`).
+pub const TOKEN_MIN_MIN_POT_BPS: u64 = 20;
+/// `PayoutAnswer.version` of a script's payouts in the legs' tokens (`docs/token-quotes.md` §7.6):
+/// each entry names its leg.
+pub const PAYOUT_ANSWER_LEGS_VERSION: u8 = 3;
+/// The least a Snowball trade on a leg moves, raw units of the leg's token.
+pub const MIN_LEG_TRADE: u64 = 1_000;
 /// `PayoutTerms.reserved[0]` of a script allowed wallet payouts (`allow_wallet_payouts`).
 pub const WALLET_PAYOUTS_ALLOWED: u8 = 1;
 /// The most entries one answer carries (213 bytes of return data at most).

@@ -316,6 +316,85 @@
           "type": "u32"
         }
       ]
+    },
+    {
+      "name": "prepare_legs",
+      "docs": [
+        "`prepare` for a coin quoted in tokens (`docs/token-quotes.md` §7.6): the same state and",
+        "accounts, and a registry that also lists the coin's `Legs`, `PDA([\"legs\", mint],",
+        "launchpad)` (read-only, third), which the launchpad asks of every hook on such a coin. The",
+        "tickets need nothing of the legs: every leg's pool is off the curve, so it never holds",
+        "tickets (`eligible`); the callbacks take the `Legs` as an extra account they do not read."
+      ],
+      "discriminator": [
+        148,
+        118,
+        22,
+        93,
+        28,
+        83,
+        212,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The mint the hook is prepared for (not created yet); its keypair signs."
+          ],
+          "signer": true
+        },
+        {
+          "name": "state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_secs",
+          "type": "u32"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -375,7 +454,7 @@
     {
       "code": 6002,
       "name": "BadRoundSecs",
-      "msg": "a round lasts from an hour to 30 days"
+      "msg": "a round lasts from 5 minutes to 30 days"
     },
     {
       "code": 6003,

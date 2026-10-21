@@ -711,14 +711,16 @@ fn create_token_launch_refuses_what_section_2_2_refuses() {
         .send_paid_by(&[ix], &creator, &[&mint])
         .expect_code(lcode(LaunchError::InvalidMetadata));
     // A companion coin (its creator the companion's PDA for the mint, signing as a companion
-    // would): refused.
+    // would): taken since §7 (docs/token-quotes.md, 21 Oct 2026; refused with
+    // `CompanionTokenLaunch` before). Only the companion program can sign for that address, through
+    // its `launch_token` (`token_quotes_builders.rs`); here the test fakes its signature.
     let mint = Keypair::new();
     let companion = bordrless_companion::client::creator_address(&mint.pubkey());
     w.env.fund(companion, 10_000_000_000);
     let ix = w.token_launch_ix(&companion, &mint.pubkey(), FEE, &[(usdc, CAP_USDC)]);
     w.env.without_sigverify();
-    send_as(&mut w.env, &[ix], &[&mint], &[companion])
-        .expect_code(lcode(LaunchError::CompanionTokenLaunch));
+    send_as(&mut w.env, &[ix], &[&mint], &[companion]).ok();
+    assert_eq!(w.launch(&mint.pubkey()).creator, companion);
 }
 
 #[test]

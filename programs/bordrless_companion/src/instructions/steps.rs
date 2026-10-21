@@ -54,7 +54,7 @@ pub(crate) struct OpKeys {
 /// registry `PDA(["bordrless-hook-accounts", mint], hook)` (owner and address checked), with the
 /// token program's callback prefix: its signer for the hook, the mint, the source, the destination
 /// and the authority.
-fn custom_extras(
+pub(crate) fn custom_extras(
     available: &[AccountInfo],
     hook: &Pubkey,
     mint: &Pubkey,
@@ -445,6 +445,12 @@ pub fn process_dev_buy<'info>(
         now <= c.launched_at.saturating_add(DEV_BUY_WINDOW),
         CompanionError::DevBuyWindowClosed
     );
+    // A coin quoted in tokens has no SOL pool to buy on (`docs/token-quotes.md` §7): its launcher
+    // buys on a leg with their own tokens.
+    require!(
+        !ctx.accounts.launch.is_token_quoted(),
+        CompanionError::NotOnTokenCoin
+    );
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
     let seeds = CreatorSeeds::of(c);
     system_program::transfer(
@@ -565,6 +571,12 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     }
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
+    // A preset companion on a coin quoted in tokens claims each leg (`claim_fees_leg`); a script's
+    // claim books SOL that reached the creator address to its pot.
+    require!(
+        c.is_script() || !ctx.accounts.launch.is_token_quoted(),
+        CompanionError::NotOnTokenCoin
+    );
     let (mint, creator) = (c.mint, ctx.accounts.creator.key());
     let seeds = CreatorSeeds::of(c);
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
@@ -580,7 +592,10 @@ pub fn process_claim_fees<'info>(ctx: Context<'info, Step<'info>>) -> Result<()>
     };
     let launch_key = launch_client::launch_address(&mint);
     let before = sol_held(&all, &seeds, &creator)?;
-    if fees_waiting(&all, &seeds, &launch_key)? > 0 {
+    // A coin quoted in tokens has no SOL fees to claim (each leg's fee is the launchpad's
+    // `claim_creator_fees_token`'s, into the creator address's token accounts): its claim only
+    // books SOL that reached the creator address otherwise, which on such a coin is the pot's.
+    if !ctx.accounts.launch.is_token_quoted() && fees_waiting(&all, &seeds, &launch_key)? > 0 {
         // A native companion's launch pays its fees as lamports to the creator address.
         let claim = if seeds.native {
             launch_client::claim_creator_fees_sol(creator, mint, None, None)
@@ -950,7 +965,13 @@ pub fn pool_share_bps(launch: &Launch) -> u64 {
 
 /// `reference` moved toward `spot` once for every `interval` since `reference_at` (at least once,
 /// at most `MAX_REFERENCE_STEPS`), so one crank after a long quiet catches up.
-fn catch_up(reference: u128, spot: u128, reference_at: i64, interval: i64, now: i64) -> u128 {
+pub(crate) fn catch_up(
+    reference: u128,
+    spot: u128,
+    reference_at: i64,
+    interval: i64,
+    now: i64,
+) -> u128 {
     let steps = (now.saturating_sub(reference_at) / interval.max(1)).clamp(1, MAX_REFERENCE_STEPS);
     let mut r = reference;
     for _ in 0..steps {
@@ -975,6 +996,11 @@ pub fn process_buyback<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
+    // A coin quoted in tokens buys back on each leg (`buyback_leg`).
+    require!(
+        !ctx.accounts.launch.is_token_quoted(),
+        CompanionError::NotOnTokenCoin
+    );
     let due_at = c
         .last_buyback_at
         .checked_add(c.buyback_interval)
@@ -1108,6 +1134,13 @@ pub fn process_buyback<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
 pub fn process_share<'info>(ctx: Context<'info, Step<'info>>) -> Result<()> {
     let c = &ctx.accounts.companion;
     require!(c.launched, CompanionError::NotLaunched);
+    // A coin quoted in tokens keeps its holders' part per leg, in the leg's token (`share_leg`);
+    // with its SOL switch the part is sold to SOL (`swap_bucket_to_sol`) and shared here, with the
+    // coin's kit paying SOL (`docs/token-quotes.md` §7.5.2).
+    require!(
+        !ctx.accounts.launch.is_token_quoted() || ctx.accounts.launch.sol_switch(),
+        CompanionError::NotOnTokenCoin
+    );
     let total = c.pending_holders;
     let bounty = bps_of(total, u64::from(c.bounty_bps));
     let amount = total - bounty;

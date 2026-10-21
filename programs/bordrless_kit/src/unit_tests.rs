@@ -1289,3 +1289,6 @@ fn seeded_walk_keeps_the_vault_solvent() {
 
 /// Coins quoted in tokens (`docs/token-quotes.md` §6.1): every leg's pool is the pool.
 mod legs;
+
+/// Holder rewards on coins quoted in tokens (`docs/token-quotes.md` §7.5.1): reward kinds and rounds.
+mod rounds;

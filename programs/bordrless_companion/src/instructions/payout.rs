@@ -92,11 +92,13 @@ pub(crate) fn read_answer(script: &Pubkey) -> Result<Option<ScriptAnswer>> {
     Ok(answer)
 }
 
-/// A script's answer: holdings to pay (version 1) or wallets (version 2).
+/// A script's answer: holdings to pay (version 1), wallets (version 2), or holdings to pay in
+/// the legs' tokens (version 3, a coin quoted in tokens whose parts are kept per leg).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScriptAnswer {
     Holdings(PayoutAnswer),
     Wallets(WalletPayoutAnswer),
+    LegHoldings(PayoutAnswerLegs),
 }
 
 impl ScriptAnswer {
@@ -105,6 +107,7 @@ impl ScriptAnswer {
         match self {
             ScriptAnswer::Holdings(a) => a.entries.len(),
             ScriptAnswer::Wallets(a) => a.entries.len(),
+            ScriptAnswer::LegHoldings(a) => a.entries.len(),
         }
     }
 
@@ -113,9 +116,9 @@ impl ScriptAnswer {
     }
 }
 
-/// `bytes` as a script's answer by its first byte, the version: a [`PayoutAnswer`] (1) or a
-/// [`WalletPayoutAnswer`] (2), exactly its Borsh, at most `MAX_PAYOUTS_PER_STEP` entries;
-/// `BadPayoutAnswer` otherwise.
+/// `bytes` as a script's answer by its first byte, the version: a [`PayoutAnswer`] (1), a
+/// [`WalletPayoutAnswer`] (2) or a [`PayoutAnswerLegs`] (3, `docs/token-quotes.md` §7.6), exactly
+/// its Borsh, at most `MAX_PAYOUTS_PER_STEP` entries; `BadPayoutAnswer` otherwise.
 pub fn decode_script_answer(bytes: &[u8]) -> Result<ScriptAnswer> {
     match bytes.first() {
         Some(&PAYOUT_ANSWER_WALLETS_VERSION) => {
@@ -126,6 +129,15 @@ pub fn decode_script_answer(bytes: &[u8]) -> Result<ScriptAnswer> {
                 CompanionError::BadPayoutAnswer
             );
             Ok(ScriptAnswer::Wallets(answer))
+        }
+        Some(&PAYOUT_ANSWER_LEGS_VERSION) => {
+            let answer = PayoutAnswerLegs::try_from_slice(bytes)
+                .map_err(|_| error!(CompanionError::BadPayoutAnswer))?;
+            require!(
+                answer.entries.len() <= MAX_PAYOUTS_PER_STEP,
+                CompanionError::BadPayoutAnswer
+            );
+            Ok(ScriptAnswer::LegHoldings(answer))
         }
         _ => Ok(ScriptAnswer::Holdings(decode_answer(bytes)?)),
     }
@@ -201,7 +213,7 @@ pub(crate) fn payable(account: &AccountInfo) -> bool {
 
 /// The script's payout terms among the step's accounts (writable, the companion's, of the mint):
 /// their address, their account and their counters; `PayoutsOff` without them.
-fn load_terms<'a, 'info>(
+pub(crate) fn load_terms<'a, 'info>(
     p: &StepPayouts<'a, 'info>,
 ) -> Result<(Pubkey, &'a AccountInfo<'info>, PayoutTerms)> {
     let mint = p.companion.mint;
@@ -588,6 +600,8 @@ pub(crate) fn pay_answer<'info>(p: &StepPayouts<'_, 'info>, answer: &ScriptAnswe
     match answer {
         ScriptAnswer::Holdings(a) => pay_holdings(p, a),
         ScriptAnswer::Wallets(a) => pay_wallets(p, a),
+        // Paid by `script_step` from the legs' pots (`token_scripts::pay_leg_holdings`): never here.
+        ScriptAnswer::LegHoldings(_) => err!(CompanionError::BadPayoutAnswer),
     }
 }
 

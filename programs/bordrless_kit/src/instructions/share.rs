@@ -49,6 +49,11 @@ pub struct Share<'info> {
 /// streaming ends later or earlier.
 pub fn process_share(ctx: Context<Share>, amount: u64) -> Result<()> {
     require!(!ctx.accounts.kit_config.is_native(), KitError::NativeKit);
+    // A coin quoted in tokens takes shares by `share_token` or, in SOL, `share_sol`.
+    require!(
+        ctx.accounts.kit_config.reward_kind() == 0,
+        KitError::WrongRewardKind
+    );
     let now = Clock::get()?.unix_timestamp;
     let before = holding_amount(&ctx.accounts.reward_vault)?;
     {

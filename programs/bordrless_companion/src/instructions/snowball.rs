@@ -197,7 +197,7 @@ pub struct SnowballStep<'info> {
 /// The fee bound of a sell on the launch's pool, in basis points of the quote it pays out: the LP
 /// fee, the creator and holder fees, Bordrless's share of them (rounded up). The burn on sells comes
 /// off the input instead.
-fn sell_fee_bound(launch: &Launch) -> u64 {
+pub(crate) fn sell_fee_bound(launch: &Launch) -> u64 {
     let r = &launch.rules;
     let cuts = u64::from(launch.creator_fee_bps) + u64::from(r.holder_fee_sell_bps);
     u64::from(launch.lp_fee_bps) + cuts + cuts.div_ceil(4)
@@ -205,7 +205,7 @@ fn sell_fee_bound(launch: &Launch) -> u64 {
 
 /// Base units that sell for `quote_out` on the curve `x * y` (rounded down): what keeps a sell
 /// within the trade cap.
-fn base_for_quote(quote_out: u64, base_side: u128, quote_side: u128) -> u64 {
+pub(crate) fn base_for_quote(quote_out: u64, base_side: u128, quote_side: u128) -> u64 {
     let out = u128::from(quote_out);
     if out >= quote_side {
         return u64::MAX;
@@ -329,6 +329,8 @@ pub fn process_snowball_step<'info>(ctx: Context<'info, SnowballStep<'info>>) ->
     require!(c.launched, CompanionError::NotLaunched);
     let s = &ctx.accounts.snowball;
     let launch = &ctx.accounts.launch;
+    // A coin quoted in tokens trades each leg (`snowball_step_leg`).
+    require!(!launch.is_token_quoted(), CompanionError::NotOnTokenCoin);
     let opens = c
         .launched_at
         .saturating_add(BUYBACK_AFTER_LAUNCH)

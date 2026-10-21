@@ -163,7 +163,14 @@ impl KitConfig {
         let total = vault_amount
             .checked_add(self.total_claimed)
             .ok_or(KitError::MathOverflow)?;
-        // A shortfall is a bug: only `claim` moves lamports out, and it counts them as claimed.
+        // A one-leg token kit's vault is the leg token's account, which the token's issuer may draw
+        // on (a permanent delegate, a burn) as the kit can't: the shortfall is taken as the new base
+        // (nothing fresh), so the coin keeps trading and claims pay what is there
+        // (`docs/token-quotes.md` §7.5.5). Every other kit: a shortfall is a bug (only a claim moves
+        // rewards out, and it counts them as claimed), refused below.
+        if self.pays_token() && total < self.seen {
+            self.seen = total;
+        }
         let fresh = total
             .checked_sub(self.seen)
             .and_then(|arrived| arrived.checked_add(released))

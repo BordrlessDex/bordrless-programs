@@ -369,16 +369,19 @@ fn leg_answer(
         (at, count)
     };
     let buy = args.direction == 1;
-    // The launch's rules: its creator fee and burn (a launch quoted in tokens has no holder fee).
-    let rates = bordrless_core::LaunchFeeRates {
-        holder_fee_buy_bps: 0,
-        holder_fee_sell_bps: 0,
-        ..a.launch.rules.fee_rates(a.launch.creator_fee_bps)
+    // The launch's rules: its creator fee, its holder fee (the kit's holder rewards, §7.5.1, taken
+    // only while holders hold the kit's threshold, as on a SOL coin) and its burn.
+    let rates = a.launch.rules.fee_rates(a.launch.creator_fee_bps);
+    let side_holder_bps = match (before, buy) {
+        (true, true) => rates.holder_fee_buy_bps,
+        (false, false) => rates.holder_fee_sell_bps,
+        _ => 0,
     };
+    let (eligible, min_eligible) = eligibility(ctx, side_holder_bps)?;
     let cut = if before {
-        launch_before_swap(buy, args.amount_in, &rates, 0, 0)
+        launch_before_swap(buy, args.amount_in, &rates, eligible, min_eligible)
     } else {
-        launch_after_swap(buy, args.amount_out, &rates, 0, 0)
+        launch_after_swap(buy, args.amount_out, &rates, eligible, min_eligible)
     };
     let mut ret = HookReturn {
         burn: cut.burn,
@@ -395,6 +398,28 @@ fn leg_answer(
         let accrued = u64::from_le_bytes(data[field..field + 8].try_into().expect("8"));
         data[field..field + 8]
             .copy_from_slice(&accrued.saturating_add(cut.creator_fee).to_le_bytes());
+    }
+    if cut.holder_fee > 0 {
+        // Into the kit's vault of this leg's token (index 9): the kit config's associated token
+        // account of it, derived here so no trader can name an account of its own.
+        let vault = ctx
+            .remaining_accounts
+            .first()
+            .ok_or(LaunchError::WrongKitVault)?;
+        let program = legs_info.try_borrow_data()?[at + Legs::LEG_QUOTE_PROGRAM];
+        let expected = bordrless_swap::spl::associated_token_address(
+            &a.launch.kit_config,
+            &a.quote_mint.key(),
+            &bordrless_swap::spl::program_id(program),
+        );
+        require!(
+            *vault.key == expected && vault.is_writable,
+            LaunchError::WrongKitVault
+        );
+        ret.deltas.push(Delta {
+            amount: cut.holder_fee,
+            account: KIT_VAULT_INDEX,
+        });
     }
     if !before && a.launch.modules & bordrless_kit::modules::MAX_WALLET != 0 {
         count_leg_sales(&legs_info, a.launch.key(), a.launch.mint, args, at, count)?;

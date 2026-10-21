@@ -615,6 +615,45 @@ impl Game {
         self.hook_audit_slot = memo.unwrap_or(0);
     }
 
+    /// A game's token terms (`docs/token-quotes.md` §7.6, `set_game_token_terms`): its least pot
+    /// on a coin quoted in tokens, in basis points of the coin's opening value summed over the legs
+    /// (`reserved[0..2]`, 1 to 10,000). 0 for a game without them, as every SOL coin's.
+    pub fn min_pot_bps(&self) -> u16 {
+        u16::from_le_bytes([self.reserved[0], self.reserved[1]])
+    }
+
+    /// Whether the pot is kept per leg in the legs' tokens: the game has its token terms
+    /// ([`Self::min_pot_bps`]) and `launch_token` launched it on a coin quoted in tokens with them
+    /// (`reserved[2]` 1, [`Self::set_launched_in_tokens`]). Terms set before a SOL coin's `launch`
+    /// never count: that game's pot is lamports and it plays as every SOL coin's does.
+    pub fn in_tokens(&self) -> bool {
+        self.min_pot_bps() > 0 && self.reserved[2] == 1
+    }
+
+    pub fn set_min_pot_bps(&mut self, bps: u16) {
+        self.reserved[..2].copy_from_slice(&bps.to_le_bytes());
+    }
+
+    /// Marks the game launched in the legs' tokens (`launch_token`, with its terms).
+    pub fn set_launched_in_tokens(&mut self) {
+        self.reserved[2] = 1;
+    }
+
+    /// The least a draw at `now` needs in a pot kept in tokens, in basis points of the opening
+    /// value, before any cap: `min_pot_bps`, or `TOKEN_MIN_MIN_POT_BPS` once the game is dormant
+    /// (as [`Self::min_pot_at`]).
+    pub fn min_pot_bps_at(&self, now: i64, launched_at: i64) -> u64 {
+        let dormant_at = self
+            .idle_since(launched_at)
+            .saturating_add(self.dormant_secs());
+        let min = u64::from(self.min_pot_bps());
+        if now >= dormant_at {
+            min.min(TOKEN_MIN_MIN_POT_BPS)
+        } else {
+            min
+        }
+    }
+
     pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[GAME_SEED, mint.as_ref()], &crate::ID)
     }
@@ -920,6 +959,19 @@ impl HookTerms {
     /// lower (a pot full at its cap is drawn, never stuck below a minimum it can't reach).
     pub fn draw_threshold(&self, min_pot: u64) -> u64 {
         self.cap().map_or(min_pot, |cap| min_pot.min(cap))
+    }
+
+    /// The cap of a pot kept in the legs' tokens (`docs/token-quotes.md` §7.6), in basis points of
+    /// the coin's opening value: the lamport cap scaled as `TOKEN_POT_SCALE` reads it (the 10 SOL
+    /// default about 20% of a $5,000 opening); none for an audited hook.
+    pub fn cap_bps(&self) -> Option<u64> {
+        self.cap().map(lamports_as_bps)
+    }
+
+    /// [`Self::draw_threshold`] for a pot kept in tokens, in basis points of the opening value.
+    pub fn draw_threshold_bps(&self, min_pot_bps: u64) -> u64 {
+        self.cap_bps()
+            .map_or(min_pot_bps, |cap| min_pot_bps.min(cap))
     }
 }
 
@@ -1269,6 +1321,168 @@ pub struct PayoutAnswer {
     pub entries: Vec<PayoutEntry>,
 }
 
+/// One entry of a script's payout answer in the legs' tokens (`PayoutAnswerLegs`,
+/// `docs/token-quotes.md` §7.6): `account` an index into the step's remaining accounts (a holding
+/// of the launch's mint), `amount` of leg `leg`'s token paid to its owner's associated token
+/// account of it (0: a touch, recorded and not paid), `tag` the script's, passed to the hook's
+/// `record_payout` untouched.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PayoutEntryLegs {
+    pub account: u8,
+    pub amount: u64,
+    pub tag: u32,
+    pub leg: u8,
+}
+
+/// A script's payouts on a coin quoted in tokens whose parts are kept per leg
+/// (`PAYOUT_ANSWER_LEGS_VERSION`, `1 + 4 + 14 * n` bytes of Borsh, `n` at most
+/// `MAX_PAYOUTS_PER_STEP`): each entry paid from its leg's pot, within the terms per leg.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct PayoutAnswerLegs {
+    /// `PAYOUT_ANSWER_LEGS_VERSION`.
+    pub version: u8,
+    pub entries: Vec<PayoutEntryLegs>,
+}
+
+/// One leg's pot of a preset companion on a coin quoted in tokens (`docs/token-quotes.md` §7.4),
+/// counted in the leg's token: what the creator address's associated token account of that token
+/// holds set aside for each part, and the leg's buyback or Snowball state.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq, InitSpace,
+)]
+pub struct LegPot {
+    /// The leg's token (the launchpad's `Legs`, copied at `launch_token`).
+    pub quote_mint: Pubkey,
+    /// Its program: 0 SPL Token, 1 Token-2022.
+    pub quote_program: u8,
+    pub decimals: u8,
+    /// What this leg's paid parts (the launcher's and the holders') pay in: `LEG_CURRENCY_TOKEN`
+    /// the leg's token, `LEG_CURRENCY_SOL` SOL (the launch's SOL switch, `docs/token-quotes.md`
+    /// §7.5.2: `swap_bucket_to_sol` sells them into the companion's SOL parts). The buyback and the
+    /// Snowball's pot stay in the leg's token either way. Read only by
+    /// [`CompanionLegs::pays_in_token`].
+    pub currency: u8,
+    /// Set aside for the buyback, the holders, the launcher, the pot (a Snowball's).
+    pub pending_buyback: u64,
+    pub pending_holders: u64,
+    pub pending_beneficiary: u64,
+    pub pending_pot: u64,
+    /// A Snowball's coins bought with this leg's pot (what its sells on this leg sell).
+    pub tokens_held: u64,
+    /// The buyback's reference price on this leg (quote units per coin unit times `PRICE_SCALE`):
+    /// the leg's opening price at the launch; moved only by `buyback_leg` (review3 F1: the Snowball
+    /// keeps its own, as on a SOL coin `Companion.reference_price` and `Snowball.reference_price`
+    /// are apart).
+    pub reference_price: u128,
+    pub reference_at: i64,
+    /// The last buyback on this leg (0: none).
+    pub last_at: i64,
+    /// Running totals, in the leg's token (`burned` in coins).
+    pub claimed_total: u64,
+    pub bounties_total: u64,
+    pub spent_total: u64,
+    pub burned_total: u64,
+    pub paid_beneficiary_total: u64,
+    /// The Snowball's reference price on this leg: the leg's opening price at the launch, then the
+    /// price its trades and follows leave (review3 F1).
+    pub snowball_reference: u128,
+    /// The Snowball's last trade or follow on this leg (0: none).
+    pub snowball_last_at: i64,
+    /// The holders' part shared with the kit so far (`share_leg`), in the leg's token.
+    pub shared_total: u64,
+    /// The launcher's and holders' parts sold to SOL so far (`swap_bucket_to_sol`), in the leg's
+    /// token.
+    pub swapped_total: u64,
+    /// A game's prize on this leg (`docs/token-quotes.md` §7.6, from what was `reserved`): a
+    /// lottery draw's, a jackpot round's or a streak epoch's amount of this leg's pot, fixed when
+    /// the draw is requested or the epoch closed. A script with payout terms keeps its payout
+    /// window's pot of this leg here (`window_pot`). One companion is one kind, so the bytes never
+    /// mean both. Zero on every other companion.
+    pub prize: u64,
+    /// What of `prize` was paid (a script's: `window_paid`).
+    pub prize_paid: u64,
+}
+
+impl LegPot {
+    /// What the leg's prize still owes (a streak epoch's lock, a lottery draw's prize).
+    pub fn prize_left(&self) -> u64 {
+        self.prize.saturating_sub(self.prize_paid)
+    }
+
+    /// Everything this leg's parts hold set aside in the creator address's token account.
+    pub fn set_aside(&self) -> Option<u64> {
+        self.pending_buyback
+            .checked_add(self.pending_holders)?
+            .checked_add(self.pending_beneficiary)?
+            .checked_add(self.pending_pot)
+    }
+}
+
+/// A preset companion's pots on a coin quoted in tokens (`docs/token-quotes.md` §7.4),
+/// `PDA(["companion-legs", mint])`, made by `launch_token` for a buyback, launcher's part or
+/// Snowball companion (a script's pot is the script's: none). Every leg's fee is claimed into the
+/// creator address's associated token account of the leg's token and split there by the companion's
+/// split; each part is spent in that token.
+#[account]
+#[derive(InitSpace)]
+pub struct CompanionLegs {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// Legs in use (the launch's `Legs.count`).
+    pub count: u8,
+    pub legs: [LegPot; MAX_COMPANION_LEGS],
+    pub reserved: [u8; 32],
+}
+
+impl CompanionLegs {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[COMPANION_LEGS_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// Whether leg `i`'s paid parts (the launcher's and the holders') are paid in the leg's token:
+    /// the one place a pot's currency is decided (`launch_token` sets it from the launch's SOL
+    /// switch, `docs/token-quotes.md` §7.5.2).
+    pub fn pays_in_token(&self, i: usize) -> bool {
+        self.legs[i].currency == LEG_CURRENCY_TOKEN
+    }
+}
+
+/// What a preset companion with payees owes them on a coin quoted in tokens whose launcher's part is
+/// paid in the legs' tokens (`docs/token-quotes.md` §7.5, the owner's "allow more freedom"): per leg,
+/// each payee's and the beneficiary's part that `withdraw_leg` could not pay yet (the account
+/// missing, frozen or asking for a memo), part of that leg's `pending_beneficiary`, in the leg's
+/// token. `PDA(["payees-legs", mint])`, made by `launch_token` (the creator address paying).
+#[account]
+#[derive(InitSpace)]
+pub struct PayeesLegs {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// `owed[leg][payee]`, in the order of `Payees.payees`.
+    pub owed: [[u64; MAX_PAYEES]; MAX_COMPANION_LEGS],
+    /// The beneficiary's own part owed, per leg.
+    pub beneficiary_owed: [u64; MAX_COMPANION_LEGS],
+    pub reserved: [u8; 32],
+}
+
+impl PayeesLegs {
+    pub const LEN: usize = 8 + Self::INIT_SPACE;
+
+    pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[PAYEES_LEGS_SEED, mint.as_ref()], &crate::ID)
+    }
+
+    /// What leg `i` owes in all (its payees' and the beneficiary's).
+    pub fn owed_on(&self, i: usize) -> u64 {
+        self.owed[i]
+            .iter()
+            .fold(self.beneficiary_owed[i], |a, b| a.saturating_add(*b))
+    }
+}
+
 /// The pool's price: its quote side over its base side, real and virtual, times `PRICE_SCALE`.
 pub fn spot_price(
     quote_reserve: u64,
@@ -1292,6 +1506,13 @@ pub fn step_toward(reference: u128, spot: u128) -> u128 {
     } else {
         spot.max(reference.saturating_sub(step))
     }
+}
+
+/// Lamports read as basis points of a coin's opening value (`docs/token-quotes.md` §7.6): a game's
+/// SOL bounds on a coin quoted in tokens, `lamports * 10,000 / TOKEN_POT_SCALE` (10 SOL is 2,000
+/// basis points, 20%, of the $5,000 opening it stands for).
+pub fn lamports_as_bps(lamports: u64) -> u64 {
+    u64::try_from(u128::from(lamports) * 10_000 / u128::from(TOKEN_POT_SCALE)).unwrap_or(u64::MAX)
 }
 
 /// `part` basis points of `amount`, rounded down.
@@ -1695,6 +1916,22 @@ mod tests {
         assert_eq!(kind, [2, 1]);
         // A receipt is small: its rent is about 0.0015 SOL.
         assert_eq!(ShareReceipt::LEN, 8 + 1 + 1 + 32 + 4 + 32 + 32 + 8 + 8);
+    }
+
+    /// A game's pot is in the legs' tokens only with its terms and `launch_token`'s mark: terms set
+    /// before a SOL coin's `launch` (no mark) leave it a SOL game (`docs/token-quotes.md` §7.6).
+    #[test]
+    fn a_game_is_in_tokens_only_with_its_terms_and_launch_tokens_mark() {
+        let mut g = timing_game(3_600, 300, 6);
+        assert!(!g.in_tokens());
+        g.set_min_pot_bps(100);
+        assert_eq!(g.min_pot_bps(), 100);
+        assert!(!g.in_tokens(), "terms alone: a SOL coin's game");
+        g.set_launched_in_tokens();
+        assert!(g.in_tokens());
+        assert_eq!(g.reserved[..3], [100, 0, 1]);
+        g.set_min_pot_bps(0);
+        assert!(!g.in_tokens(), "the mark alone");
     }
 
     /// A lottery game with `round_secs` and its claim windows, nothing drawn yet.

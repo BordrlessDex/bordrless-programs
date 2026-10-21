@@ -19,16 +19,22 @@
 //! liquidity to the pool and take it out again, and that is a transfer out of the pool no hook can
 //! tell from a buy. The jackpot ends at graduation (the round under way is still paid).
 //!
+//! On a coin quoted in tokens (`docs/token-quotes.md` §7.6) a buy out of any leg's pool counts
+//! (`qualifying_buy_legs`): no leg ever graduates and the DEX refuses liquidity on every one, so a
+//! leg's sends to wallets are buys. The coin's `Legs` then follows the registry's two accounts
+//! (`prepare_legs`); without it (`prepare`, a SOL coin) the SOL rule above applies.
+//!
 //! The standard `prepare` (every Studio hook has it, unchanged in its accounts): before a launch,
 //! anyone sends it once for the new mint; it creates the state at `["state", mint]` and writes the
-//! registry (the state, writable, then the launch).
+//! registry (the state, writable, then the launch). On a coin quoted in tokens `prepare_legs` takes
+//! its place, the same accounts, its registry also naming the coin's `Legs`.
 
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
 use bordrless_game::{
-    eligible, jackpot_on_buy, jackpot_on_receive, jackpot_on_send, qualifying_buy, read_launch,
-    GameHeader, JackpotHeader, Slots,
+    eligible, jackpot_on_buy, jackpot_on_receive, jackpot_on_send, qualifying_buy,
+    qualifying_buy_legs, read_launch, read_legs, GameHeader, JackpotHeader, Slots,
 };
 use bordrless_hook::{
     hook_accounts_address, hook_signer, write_registry, AccountSource, ExtraAccount,
@@ -56,6 +62,9 @@ pub const LAUNCH_SEED: &[u8] = b"launch";
 pub const COMPANION_PROGRAM: Pubkey =
     Pubkey::from_str_const("6ZUM1gWBH9hBBNoJoaVAGwSftyZ6CUda6vUZTW9MsJuo");
 
+/// The launchpad's `["legs", mint]` seed: a coin quoted in tokens' legs.
+pub const LEGS_SEED: &[u8] = b"legs";
+
 /// The callbacks' extra accounts, after the token program's five: the state (written on every
 /// transfer), the launch (read for its pool and its curve).
 pub fn extra_accounts() -> HookAccountList {
@@ -77,6 +86,20 @@ pub fn extra_accounts() -> HookAccountList {
     ])
 }
 
+/// [`extra_accounts`], then the coin's `Legs`: the registry `prepare_legs` writes on a coin quoted
+/// in tokens (`docs/token-quotes.md` §7.6), where the launchpad asks every hook for it.
+pub fn extra_accounts_legs() -> HookAccountList {
+    let mut list = extra_accounts();
+    list.accounts.push(ExtraAccount {
+        writable: false,
+        source: AccountSource::Pda {
+            program: LAUNCH_PROGRAM,
+            seeds: vec![Seed::Literal(LEGS_SEED.to_vec()), Seed::Account(1)],
+        },
+    });
+    list
+}
+
 #[program]
 pub mod studio_hook {
     use super::*;
@@ -84,34 +107,13 @@ pub mod studio_hook {
     /// The standard `prepare`: the state for `mint` (the jackpot's settings are this program's
     /// constants) and its registry. Anyone may send it, once per mint.
     pub fn prepare(ctx: Context<Prepare>) -> Result<()> {
-        let mint = ctx.accounts.mint.key();
-        let now = Clock::get()?.unix_timestamp;
-        let state = &mut ctx.accounts.state;
-        state.header = GameHeader::new(mint, 0, now);
-        state.jackpot = JackpotHeader::new(TIMER_SECS, MIN_TOKENS);
-        state.version = 1;
-        state.bump = ctx.bumps.state;
-        state.launch =
-            Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_PROGRAM).0;
-        state.creator =
-            Pubkey::find_program_address(&[b"creator", mint.as_ref()], &COMPANION_PROGRAM).0;
-        state.prepared_by = ctx.accounts.payer.key();
-        state.reserved = [0; 32];
-        let (registry, bump) = hook_accounts_address(&crate::ID, &mint);
-        require_keys_eq!(
-            ctx.accounts.registry.key(),
-            registry,
-            HookError::WrongAccount
-        );
-        write_registry(
-            &ctx.accounts.payer.to_account_info(),
-            &ctx.accounts.registry.to_account_info(),
-            &ctx.accounts.system_program.to_account_info(),
-            &crate::ID,
-            &mint,
-            bump,
-            &extra_accounts(),
-        )
+        prepare_with(ctx, extra_accounts())
+    }
+
+    /// `prepare` for a coin quoted in tokens (`docs/token-quotes.md` §7.6): the same accounts and
+    /// state, the registry also naming the coin's `Legs` (`extra_accounts_legs`).
+    pub fn prepare_legs(ctx: Context<Prepare>) -> Result<()> {
+        prepare_with(ctx, extra_accounts_legs())
     }
 
     /// Before every transfer: a sender's mark is cleared (it no longer holds all it bought); a
@@ -140,14 +142,31 @@ pub mod studio_hook {
             let mut slots = Slots::decode(&args.destination_hook_data);
             let after = args.destination_balance.saturating_add(args.amount);
             jackpot_on_receive(&mut slots, after, now);
-            if qualifying_buy(
-                launch.as_ref(),
-                &args.source_owner,
-                &args.destination_owner,
-                args.amount,
-                state.jackpot.min_tokens,
-                &excluded,
-            ) {
+            // A coin quoted in tokens (its `Legs` after the extras, `prepare_legs`): a buy out of
+            // any leg's pool; a SOL coin: out of the launch pool while on the curve.
+            let legs = ctx
+                .remaining_accounts
+                .first()
+                .and_then(|info| read_legs(info, &args.mint));
+            let qualifies = match legs {
+                Some(legs) => qualifying_buy_legs(
+                    &legs,
+                    &args.source_owner,
+                    &args.destination_owner,
+                    args.amount,
+                    state.jackpot.min_tokens,
+                    &excluded,
+                ),
+                None => qualifying_buy(
+                    launch.as_ref(),
+                    &args.source_owner,
+                    &args.destination_owner,
+                    args.amount,
+                    state.jackpot.min_tokens,
+                    &excluded,
+                ),
+            };
+            if qualifies {
                 let JackpotState {
                     header, jackpot, ..
                 } = &mut ***state;
@@ -185,6 +204,37 @@ pub mod studio_hook {
         }
         Ok(answer)
     }
+}
+
+/// The standard `prepare`'s work: the jackpot's state for the mint, and its registry `list`.
+fn prepare_with(ctx: Context<Prepare>, list: HookAccountList) -> Result<()> {
+    let mint = ctx.accounts.mint.key();
+    let now = Clock::get()?.unix_timestamp;
+    let state = &mut ctx.accounts.state;
+    state.header = GameHeader::new(mint, 0, now);
+    state.jackpot = JackpotHeader::new(TIMER_SECS, MIN_TOKENS);
+    state.version = 1;
+    state.bump = ctx.bumps.state;
+    state.launch = Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_PROGRAM).0;
+    state.creator =
+        Pubkey::find_program_address(&[b"creator", mint.as_ref()], &COMPANION_PROGRAM).0;
+    state.prepared_by = ctx.accounts.payer.key();
+    state.reserved = [0; 32];
+    let (registry, bump) = hook_accounts_address(&crate::ID, &mint);
+    require_keys_eq!(
+        ctx.accounts.registry.key(),
+        registry,
+        HookError::WrongAccount
+    );
+    write_registry(
+        &ctx.accounts.payer.to_account_info(),
+        &ctx.accounts.registry.to_account_info(),
+        &ctx.accounts.system_program.to_account_info(),
+        &crate::ID,
+        &mint,
+        bump,
+        &list,
+    )
 }
 
 /// Every callback: signed by the token program's signer for this hook, about this state's mint.
@@ -244,7 +294,9 @@ pub struct Prepare<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Accounts of every callback: the token program's five, then the registry's extras.
+/// Accounts of every callback: the token program's five, then the registry's extras (on a coin
+/// quoted in tokens the coin's `Legs` follows them, a remaining account: `bordrless_game::read_legs`
+/// takes only the launchpad's `Legs` of this mint).
 #[derive(Accounts)]
 pub struct Callback<'info> {
     /// CHECK: the token program's signer for this hook (checked in `check_call`).

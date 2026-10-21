@@ -509,6 +509,135 @@
       "args": []
     },
     {
+      "name": "buyback_leg",
+      "docs": [
+        "Anyone: buys the coin back on leg `index` with that leg's buyback part (capped, spaced, at",
+        "no less than the leg's own curve gives less its fees and the slippage) and burns it."
+      ],
+      "discriminator": [
+        7,
+        89,
+        175,
+        198,
+        143,
+        220,
+        244,
+        221
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty in the leg's token."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion_legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "claim_fees",
       "docs": [
         "Anyone: claims the creator fees and splits them."
@@ -599,6 +728,137 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "claim_fees_leg",
+      "docs": [
+        "Anyone: claims leg `index`'s creator fee into the creator address's token account of the",
+        "leg's token (the launchpad's `claim_creator_fees_token`) and splits what arrived by the",
+        "companion's split into the leg's parts, in that token; the bounty to the sender's token",
+        "account of it, when passed."
+      ],
+      "discriminator": [
+        138,
+        18,
+        22,
+        121,
+        42,
+        84,
+        138,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty in the leg's token."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion_legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "claim_prize",
@@ -2812,6 +3072,145 @@
       ]
     },
     {
+      "name": "launch_token",
+      "docs": [
+        "A companion's launch of a coin quoted in tokens: `create_token_launch` through the",
+        "launchpad, the creator address signing as its creator (as `launch` wraps `create_launch`).",
+        "A script's whole creator fee is its pot (`pot_bps` 10,000): each leg's fee, in that leg's",
+        "token, is claimed into the creator address's associated token account of it by the",
+        "launchpad's `claim_creator_fees_token` (anyone), and the script spends it. A preset's",
+        "(a buyback, the launcher's part, a Snowball) pots on the legs are made here",
+        "(`CompanionLegs`, its rent paid by the creator address), each leg's reference its opening",
+        "price. The companion is native from its launch (its SOL, if any reaches it, is its creator",
+        "address's lamports). The remaining accounts are `create_token_launch`'s. Since",
+        "`docs/token-quotes.md` §7.6 a game (its `Game` appended, writable) and a script with a",
+        "launcher's part launch here too, their pots kept per leg (`CompanionLegs`)."
+      ],
+      "discriminator": [
+        10,
+        128,
+        86,
+        171,
+        3,
+        137,
+        161,
+        244
+      ],
+      "accounts": [
+        {
+          "name": "launcher",
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "companion_legs",
+          "docs": [
+            "(its pots on the legs); a script companion's is left alone (its pot is the script's)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch_program",
+          "address": "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateTokenLaunchArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "migrate_companion_to_native",
       "docs": [
         "The upgrade authority, with the DEX paused, the companion's launch native: turns the",
@@ -4125,6 +4524,92 @@
       "args": []
     },
     {
+      "name": "set_game_token_terms",
+      "docs": [
+        "Before the launch, the mint signing (`docs/token-quotes.md` §7.6): a game's least pot on a",
+        "coin quoted in tokens, in basis points of the coin's opening value. `launch_token` requires",
+        "it on such a coin whose SOL switch is off and marks the game's pot kept per leg, in the legs'",
+        "tokens; a SOL coin's `launch` leaves it unread."
+      ],
+      "discriminator": [
+        67,
+        250,
+        105,
+        41,
+        132,
+        254,
+        101,
+        35
+      ],
+      "accounts": [
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's mint (not created yet): it signs, as for `create_game`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_pot_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "set_hook_status",
       "docs": [
         "The protocol's upgrade authority: whether a game hook is audited, its pots' cap while not,",
@@ -4748,6 +5233,135 @@
       "args": []
     },
     {
+      "name": "share_leg",
+      "docs": [
+        "Anyone: shares leg `index`'s holders' part with the coin's holders in the leg's token through",
+        "the kit's `share_token` (`docs/token-quotes.md` §7.5.1), the bounty in that token."
+      ],
+      "discriminator": [
+        142,
+        154,
+        231,
+        230,
+        12,
+        87,
+        172,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Whoever sends it; paid the bounty in the leg's token."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion_legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "snowball_step",
       "docs": [
         "Anyone: a Snowball's trade on its pool, a buy on a dip or a sell on a rise of its step from",
@@ -4867,6 +5481,297 @@
       "args": []
     },
     {
+      "name": "snowball_step_leg",
+      "docs": [
+        "Anyone: a Snowball's trade on leg `index` with that leg's pot, as `snowball_step` trades the",
+        "pool of a SOL coin."
+      ],
+      "discriminator": [
+        162,
+        69,
+        58,
+        216,
+        225,
+        206,
+        201,
+        56
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion_legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "snowball",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  110,
+                  111,
+                  119,
+                  98,
+                  97,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "swap_bucket_to_sol",
+      "docs": [
+        "Anyone: with the coin's SOL switch (`docs/token-quotes.md` §7.5.2), sells leg `index`'s",
+        "launcher's (`part` 0) or holders' (`part` 1) bucket, or a game's pot (`part` 2, §7.6), to",
+        "SOL through the launchpad's `swap_to_sol`, the creator address signing, into the",
+        "companion's SOL part of the same name (paid by `withdraw` and `share`; the game's SOL pot)."
+      ],
+      "discriminator": [
+        167,
+        180,
+        186,
+        221,
+        140,
+        42,
+        178,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Sends it; pays the wrapped-SOL account's rent for the swap (returned by it)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion_legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "launch_program",
+          "address": "1jcBymHxBjniZDhNPy51Vgm5Nz7pLUdxa9UBHc4TavC"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        },
+        {
+          "name": "part",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "withdraw",
       "docs": [
         "Anyone: pays the beneficiary their part as SOL."
@@ -4954,6 +5859,138 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "withdraw_leg",
+      "docs": [
+        "Anyone: pays leg `index`'s launcher's part to the launcher's associated token account of the",
+        "leg's token (made when missing, the sender paying)."
+      ],
+      "discriminator": [
+        117,
+        48,
+        61,
+        232,
+        242,
+        110,
+        191,
+        127
+      ],
+      "accounts": [
+        {
+          "name": "sender",
+          "docs": [
+            "Whoever sends it; pays the launcher's token account's rent when it is made."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "companion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  114,
+                  101,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary"
+        },
+        {
+          "name": "launch"
+        },
+        {
+          "name": "companion_legs",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  97,
+                  110,
+                  105,
+                  111,
+                  110,
+                  45,
+                  108,
+                  101,
+                  103,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "companion.mint",
+                "account": "Companion"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -4981,6 +6018,19 @@
         100,
         10,
         15
+      ]
+    },
+    {
+      "name": "CompanionLegs",
+      "discriminator": [
+        142,
+        157,
+        104,
+        253,
+        163,
+        175,
+        244,
+        234
       ]
     },
     {
@@ -5363,6 +6413,19 @@
       ]
     },
     {
+      "name": "GameTokenTermsSet",
+      "discriminator": [
+        25,
+        182,
+        98,
+        0,
+        189,
+        218,
+        42,
+        235
+      ]
+    },
+    {
       "name": "HookAttested",
       "discriminator": [
         232,
@@ -5438,6 +6501,175 @@
         30,
         119,
         68
+      ]
+    },
+    {
+      "name": "LegBeneficiaryPaid",
+      "discriminator": [
+        131,
+        139,
+        21,
+        220,
+        145,
+        41,
+        17,
+        123
+      ]
+    },
+    {
+      "name": "LegBoughtBack",
+      "discriminator": [
+        99,
+        192,
+        185,
+        194,
+        227,
+        155,
+        118,
+        89
+      ]
+    },
+    {
+      "name": "LegBuybackWaited",
+      "discriminator": [
+        84,
+        37,
+        128,
+        162,
+        107,
+        48,
+        166,
+        211
+      ]
+    },
+    {
+      "name": "LegFeesClaimed",
+      "discriminator": [
+        123,
+        40,
+        17,
+        2,
+        255,
+        88,
+        243,
+        162
+      ]
+    },
+    {
+      "name": "LegPayeePaid",
+      "discriminator": [
+        7,
+        77,
+        54,
+        131,
+        103,
+        203,
+        131,
+        102
+      ]
+    },
+    {
+      "name": "LegPotToBuyback",
+      "discriminator": [
+        181,
+        134,
+        193,
+        98,
+        249,
+        161,
+        48,
+        161
+      ]
+    },
+    {
+      "name": "LegPrizePaid",
+      "discriminator": [
+        161,
+        178,
+        31,
+        21,
+        16,
+        51,
+        11,
+        168
+      ]
+    },
+    {
+      "name": "LegPrizesFixed",
+      "discriminator": [
+        70,
+        192,
+        30,
+        82,
+        71,
+        141,
+        16,
+        74
+      ]
+    },
+    {
+      "name": "LegScriptPayout",
+      "discriminator": [
+        180,
+        212,
+        135,
+        9,
+        80,
+        49,
+        115,
+        41
+      ]
+    },
+    {
+      "name": "LegSharedWithHolders",
+      "discriminator": [
+        162,
+        206,
+        106,
+        117,
+        253,
+        99,
+        11,
+        79
+      ]
+    },
+    {
+      "name": "LegSnowballFollowed",
+      "discriminator": [
+        69,
+        68,
+        67,
+        5,
+        45,
+        248,
+        152,
+        92
+      ]
+    },
+    {
+      "name": "LegSnowballTraded",
+      "discriminator": [
+        90,
+        169,
+        255,
+        96,
+        152,
+        169,
+        17,
+        34
+      ]
+    },
+    {
+      "name": "LegSwappedToSol",
+      "discriminator": [
+        240,
+        35,
+        146,
+        26,
+        208,
+        75,
+        124,
+        88
       ]
     },
     {
@@ -6160,7 +7392,7 @@
     {
       "code": 6078,
       "name": "ScriptBrokeCustody",
-      "msg": "the script delegated or closed one of the creator's holdings, changed the creator address's owner or data, or claimed the creator fees"
+      "msg": "the script delegated or closed one of the creator's holdings or token accounts (or handed one over), changed the creator address's owner or data, or claimed the creator fees"
     },
     {
       "code": 6079,
@@ -6241,6 +7473,81 @@
       "code": 6094,
       "name": "NotTermsAuthority",
       "msg": "only the launch's beneficiary (its launcher) or the script approver sets a script's payout terms"
+    },
+    {
+      "code": 6095,
+      "name": "TokenLaunchKind",
+      "msg": "unused since docs/token-quotes.md §7.6: every companion but a strategy game launches a coin quoted in tokens (StrategyOnTokenCoin)"
+    },
+    {
+      "code": 6096,
+      "name": "TokenCompanionSplit",
+      "msg": "unused since docs/token-quotes.md §7.6: a script with a launcher's part keeps its parts per leg (CompanionLegs)"
+    },
+    {
+      "code": 6097,
+      "name": "NotOnTokenCoin",
+      "msg": "this step trades or pays SOL on the launch's pool: a coin quoted in tokens has none (its legs have their own steps)"
+    },
+    {
+      "code": 6098,
+      "name": "TokenCoinPayees",
+      "msg": "unused since docs/token-quotes.md §7.5: payees are paid in the legs' tokens (withdraw_leg) or, with the SOL switch, in SOL (withdraw)"
+    },
+    {
+      "code": 6099,
+      "name": "NotALegStep",
+      "msg": "this step is a leg's: the launch is not quoted in tokens"
+    },
+    {
+      "code": 6100,
+      "name": "NoSuchLeg",
+      "msg": "the launch has no such leg"
+    },
+    {
+      "code": 6101,
+      "name": "SolSwitchOff",
+      "msg": "the coin's SOL switch is off: this part is paid in the leg's token"
+    },
+    {
+      "code": 6102,
+      "name": "SolSwitchOn",
+      "msg": "the coin's SOL switch is on: this part is paid in SOL (swap_bucket_to_sol first)"
+    },
+    {
+      "code": 6103,
+      "name": "NotSwitchedPart",
+      "msg": "only the launcher's part (0), the holders' part (1) and a game's pot (2) are sold to SOL"
+    },
+    {
+      "code": 6104,
+      "name": "PayeesLegsMissing",
+      "msg": "this companion shares its launcher's part: pass its payees and payees-legs accounts (writable)"
+    },
+    {
+      "code": 6105,
+      "name": "TokenGameTerms",
+      "msg": "a game on a coin quoted in tokens needs its token terms (set_game_token_terms) before the launch, and none when the coin's SOL switch sells its pot to SOL"
+    },
+    {
+      "code": 6106,
+      "name": "LegAccountsMissing",
+      "msg": "a pot kept in the legs' tokens: pass the companion's legs (writable) and the coin's Legs"
+    },
+    {
+      "code": 6107,
+      "name": "PayoutLegInvalid",
+      "msg": "a payout names no leg of the coin, or its owner's token account of that leg's token was not passed"
+    },
+    {
+      "code": 6108,
+      "name": "StrategyOnTokenCoin",
+      "msg": "a strategy game runs on SOL coins only: its plans and budgets are lamports, and a coin quoted in tokens has none"
+    },
+    {
+      "code": 6109,
+      "name": "BadTokenTerms",
+      "msg": "a game's least pot on a coin quoted in tokens is at most 10,000 basis points of the coin's opening value (0 clears it)"
     }
   ],
   "types": [
@@ -6977,6 +8284,62 @@
       }
     },
     {
+      "name": "CompanionLegs",
+      "docs": [
+        "A preset companion's pots on a coin quoted in tokens (`docs/token-quotes.md` §7.4),",
+        "`PDA([\"companion-legs\", mint])`, made by `launch_token` for a buyback, launcher's part or",
+        "Snowball companion (a script's pot is the script's: none). Every leg's fee is claimed into the",
+        "creator address's associated token account of the leg's token and split there by the companion's",
+        "split; each part is spent in that token."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "count",
+            "docs": [
+              "Legs in use (the launch's `Legs.count`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "legs",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "LegPot"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "CompanionNativeSet",
       "docs": [
         "A companion moved between bridged SOL (its creator's holding) and native SOL (its creator",
@@ -7334,6 +8697,82 @@
               "Trade every interval even when the price is within its steps (on the side that rebalances)."
             ],
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateTokenLaunchArgs",
+      "docs": [
+        "Arguments of `create_token_launch`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "docs": [
+              "Name."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "docs": [
+              "Symbol."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "docs": [
+              "Metadata URI."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "creator_fee_bps",
+            "docs": [
+              "Creator fee in basis points of the quote side of every trade, within the config's bounds."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "virtual_quotes",
+            "docs": [
+              "Each leg's virtual quote, raw units of its token, in the order of the quote mints."
+            ],
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, as `create_launch` takes them and within the same bounds",
+              "(`docs/token-quotes.md` §6.1, §7.5.1): the holder fee (the kit's holder rewards, paid in the",
+              "legs' tokens or in SOL by `payouts`), the burn on buys and sells (every leg's pool hook), max",
+              "wallet, the creator wallet lock and the early-buyer lock (the kit). Optional in the data:",
+              "data that ends after `virtual_quotes`, as every call made before rules, reads as no rules."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "payouts",
+            "docs": [
+              "How the coin pays out (`docs/token-quotes.md` §7.5): the SOL switch and the holder rounds.",
+              "Optional in the data, after `rules`: absent reads as zero, and zero is written as nothing,",
+              "so a launch without them sends exactly the data it always sent."
+            ],
+            "type": {
+              "defined": {
+                "name": "TokenPayouts"
+              }
+            }
           }
         ]
       }
@@ -8267,6 +9706,30 @@
       }
     },
     {
+      "name": "GameTokenTermsSet",
+      "docs": [
+        "A game on a coin quoted in tokens took its terms (`set_game_token_terms`,",
+        "`docs/token-quotes.md` §7.6): its least pot in basis points of the coin's opening value."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "min_pot_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
       "name": "HookAttestation",
       "docs": [
         "Bordrless Studio's attestation of a program's code, `PDA([\"attest\", program])`, written only by",
@@ -9177,6 +10640,664 @@
               "off)."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegBeneficiaryPaid",
+      "docs": [
+        "The launcher's part of a leg paid to their associated token account of the leg's token",
+        "(`withdraw_leg`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "destination",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegBoughtBack",
+      "docs": [
+        "A buyback on a leg (`buyback_leg`): `spent` of the leg's token bought `burned` coins, burned."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "spent",
+            "type": "u64"
+          },
+          {
+            "name": "burned",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "price_after",
+            "type": "u128"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegBuybackWaited",
+      "docs": [
+        "A buyback on a leg that waited: the leg's price above its reference (which moved toward it,",
+        "when due)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "reference",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegFeesClaimed",
+      "docs": [
+        "A leg's creator fee claimed into the creator address's token account of the leg's token",
+        "(`claim_fees_leg`) and split by the companion's split, the bounty first."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimed",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "to_buyback",
+            "type": "u64"
+          },
+          {
+            "name": "to_holders",
+            "type": "u64"
+          },
+          {
+            "name": "to_beneficiary",
+            "type": "u64"
+          },
+          {
+            "name": "to_pot",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegPayeePaid",
+      "docs": [
+        "A payee's (or, `payee` the beneficiary, the launcher's) share of a leg's launcher's part",
+        "(`withdraw_leg` of a companion with payees): `amount` paid now in the leg's token, `owed` what",
+        "stays owed to it on this leg (its account missing, frozen or asking for a memo)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "payee",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "owed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegPot",
+      "docs": [
+        "One leg's pot of a preset companion on a coin quoted in tokens (`docs/token-quotes.md` §7.4),",
+        "counted in the leg's token: what the creator address's associated token account of that token",
+        "holds set aside for each part, and the leg's buyback or Snowball state."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quote_mint",
+            "docs": [
+              "The leg's token (the launchpad's `Legs`, copied at `launch_token`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_program",
+            "docs": [
+              "Its program: 0 SPL Token, 1 Token-2022."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "currency",
+            "docs": [
+              "What this leg's paid parts (the launcher's and the holders') pay in: `LEG_CURRENCY_TOKEN`",
+              "the leg's token, `LEG_CURRENCY_SOL` SOL (the launch's SOL switch, `docs/token-quotes.md`",
+              "§7.5.2: `swap_bucket_to_sol` sells them into the companion's SOL parts). The buyback and the",
+              "Snowball's pot stay in the leg's token either way. Read only by",
+              "[`CompanionLegs::pays_in_token`]."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "pending_buyback",
+            "docs": [
+              "Set aside for the buyback, the holders, the launcher, the pot (a Snowball's)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pending_holders",
+            "type": "u64"
+          },
+          {
+            "name": "pending_beneficiary",
+            "type": "u64"
+          },
+          {
+            "name": "pending_pot",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_held",
+            "docs": [
+              "A Snowball's coins bought with this leg's pot (what its sells on this leg sell)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "reference_price",
+            "docs": [
+              "The buyback's reference price on this leg (quote units per coin unit times `PRICE_SCALE`):",
+              "the leg's opening price at the launch; moved only by `buyback_leg` (review3 F1: the Snowball",
+              "keeps its own, as on a SOL coin `Companion.reference_price` and `Snowball.reference_price`",
+              "are apart)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "reference_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_at",
+            "docs": [
+              "The last buyback on this leg (0: none)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "claimed_total",
+            "docs": [
+              "Running totals, in the leg's token (`burned` in coins)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bounties_total",
+            "type": "u64"
+          },
+          {
+            "name": "spent_total",
+            "type": "u64"
+          },
+          {
+            "name": "burned_total",
+            "type": "u64"
+          },
+          {
+            "name": "paid_beneficiary_total",
+            "type": "u64"
+          },
+          {
+            "name": "snowball_reference",
+            "docs": [
+              "The Snowball's reference price on this leg: the leg's opening price at the launch, then the",
+              "price its trades and follows leave (review3 F1)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "snowball_last_at",
+            "docs": [
+              "The Snowball's last trade or follow on this leg (0: none)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "shared_total",
+            "docs": [
+              "The holders' part shared with the kit so far (`share_leg`), in the leg's token."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "swapped_total",
+            "docs": [
+              "The launcher's and holders' parts sold to SOL so far (`swap_bucket_to_sol`), in the leg's",
+              "token."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prize",
+            "docs": [
+              "A game's prize on this leg (`docs/token-quotes.md` §7.6, from what was `reserved`): a",
+              "lottery draw's, a jackpot round's or a streak epoch's amount of this leg's pot, fixed when",
+              "the draw is requested or the epoch closed. A script with payout terms keeps its payout",
+              "window's pot of this leg here (`window_pot`). One companion is one kind, so the bytes never",
+              "mean both. Zero on every other companion."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prize_paid",
+            "docs": [
+              "What of `prize` was paid (a script's: `window_paid`)."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegPotToBuyback",
+      "docs": [
+        "A leg's game pot (or its part above the hook's cap) moved to the leg's buyback, which buys the",
+        "coin back on the leg and burns it (`buyback_leg`): `reason` 0 the cap, 1 a blocked hook, 2",
+        "`retire`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": "u8"
+          },
+          {
+            "name": "pending_pot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegPrizePaid",
+      "docs": [
+        "A game's prize paid on one leg, in its token: a lottery draw's (`kind` 0, `claim_prize`), a",
+        "jackpot round's (1, `settle`) or a streak share (2, `claim_share`); `amount` to `owner`'s",
+        "associated token account of the leg's token, `bounty` to the sender's."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegPrizesFixed",
+      "docs": [
+        "A game's prizes on a coin quoted in tokens fixed, one per leg in its token: a lottery draw's",
+        "(`kind` 0, at the request), or a streak epoch's (`kind` 2, at `close_epoch`). `pot_bps` is the",
+        "pot then, in basis points of the coin's opening value."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "u32"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "prizes",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "pot_bps",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegScriptPayout",
+      "docs": [
+        "A script's payout in a leg's token (`PayoutAnswer` version 3, `docs/token-quotes.md` §7.6):",
+        "`amount` of leg `index`'s token to the holding's owner's associated token account, recorded by",
+        "the hook with `tag`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "holding",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "tag",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegSharedWithHolders",
+      "docs": [
+        "A leg's holders' part shared with the kit's holder rewards in the leg's token (`share_leg`):",
+        "streamed over the hour on a one-leg coin, counted at the next round on a coin of several legs."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegSnowballFollowed",
+      "docs": [
+        "A Snowball's leg followed the price (the side it called for had nothing to trade)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "reference_before",
+            "type": "u128"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegSnowballTraded",
+      "docs": [
+        "A Snowball's trade on a leg (`snowball_step_leg`): `side` 1 a buy (`quote` of the leg's token",
+        "spent, `tokens` coins bought), 0 a sell (`tokens` sold, `quote` back into the leg's pot)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "on_step",
+            "type": "bool"
+          },
+          {
+            "name": "quote",
+            "type": "u64"
+          },
+          {
+            "name": "tokens",
+            "type": "u64"
+          },
+          {
+            "name": "bounty",
+            "type": "u64"
+          },
+          {
+            "name": "price_before",
+            "type": "u128"
+          },
+          {
+            "name": "price_after",
+            "type": "u128"
+          },
+          {
+            "name": "pot_after",
+            "type": "u64"
+          },
+          {
+            "name": "tokens_after",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegSwappedToSol",
+      "docs": [
+        "A leg's launcher's (`part` 0) or holders' (`part` 1) bucket sold to SOL through the launchpad's",
+        "`swap_to_sol` (`swap_bucket_to_sol`, the SOL switch): `amount_in` of the leg's token for",
+        "`lamports`, credited to the companion's SOL part of the same name."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "companion",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "part",
+            "type": "u8"
+          },
+          {
+            "name": "amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "cranker",
+            "type": "pubkey"
           }
         ]
       }
@@ -11123,6 +13244,28 @@
                 15
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenPayouts",
+      "docs": [
+        "Optional at the end of the data: 5 bytes (flags u8, holder_round_secs u32) when either is set, none when both are 0."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "flags",
+            "docs": [
+              "Bit 0: the SOL switch."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "holder_round_secs",
+            "type": "u32"
           }
         ]
       }

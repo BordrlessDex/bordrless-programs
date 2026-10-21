@@ -337,6 +337,7 @@ impl World {
             creator_fee_bps,
             virtual_quotes: quotes.iter().map(|q| q.1).collect(),
             rules,
+            payouts: Default::default(),
         }
     }
 
@@ -445,9 +446,10 @@ impl World {
         amount_in: u64,
     ) -> Instruction {
         let l: Launch = self.env.read(&launch::launch_address(mint));
-        launch::leg_swap_with_rules(
+        launch::leg_swap_for(
+            &l,
+            self.legs(mint).count,
             &self.leg_keys(mint, index),
-            &l.rules,
             *trader,
             *recipient,
             direction,

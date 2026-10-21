@@ -10,7 +10,7 @@ use bordrless_hook::hook_accounts_address;
 use bordrless_token::client as token_client;
 
 use crate::constants::*;
-use crate::state::{KitConfig, KitInitArgs};
+use crate::state::{KitConfig, KitInitArgs, LegsRewards};
 
 /// This program's event authority.
 pub fn event_authority() -> Pubkey {
@@ -101,19 +101,288 @@ pub fn init_legs(
     mint: Pubkey,
     args: KitInitArgs,
 ) -> Instruction {
+    init_legs_with(kit_caller, payer, mint, args, LegsRewards::default())
+}
+
+/// `init_legs` with holder rewards of `rewards.kind` (`docs/token-quotes.md` §7.5.1): kind 1 names
+/// the leg's quote mint (`args.reward_mint`) after the event accounts. Kind 0 sends exactly the data
+/// `init_legs` always took (no rewards bytes).
+pub fn init_legs_with(
+    kit_caller: Pubkey,
+    payer: Pubkey,
+    mint: Pubkey,
+    args: KitInitArgs,
+    rewards: LegsRewards,
+) -> Instruction {
+    let reward_mint = args.reward_mint;
+    let mut accounts = with_events(vec![
+        AccountMeta::new_readonly(kit_caller, true),
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(mint, false),
+        AccountMeta::new_readonly(token_client::holding_address(&mint, &args.launch), false),
+        AccountMeta::new(kit_config_address(&mint), false),
+        AccountMeta::new(registry_address(&mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    if rewards.kind == REWARD_KIND_TOKEN {
+        accounts.push(AccountMeta::new_readonly(reward_mint, false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: init_legs_data(args, rewards),
+    }
+}
+
+/// `init_legs`' data: the discriminator and `args`, then `rewards` (5 bytes) unless its kind is 0.
+pub fn init_legs_data(args: KitInitArgs, rewards: LegsRewards) -> Vec<u8> {
+    let mut data = crate::instruction::InitLegs { args, rewards }.data();
+    if rewards.kind == 0 {
+        data.truncate(data.len() - 5);
+    }
+    data
+}
+
+/// The kit config's vault of a leg's token for `mint`: its associated token account of
+/// `quote_mint` under `quote_program`. A one-leg coin's kind-1 reward vault; every holder-rewards
+/// leg's holder fee lands there.
+pub fn leg_vault_address(mint: &Pubkey, quote_mint: &Pubkey, quote_program: &Pubkey) -> Pubkey {
+    crate::spl::associated_address(&kit_config_address(mint), quote_mint, quote_program)
+}
+
+/// The three extra accounts every callback of a one-leg coin paying holder rewards in its token
+/// (kind 1) takes: the config (writable), the reward vault (read-only), the `Legs`.
+pub fn token_rewards_hook_extras(mint: &Pubkey, reward_vault: Pubkey) -> Vec<AccountMeta> {
+    let mut extras = hook_extras(mint, Some(reward_vault));
+    extras.push(AccountMeta::new_readonly(legs_address(mint), false));
+    extras
+}
+
+/// [`legs_hook_slice`] of a kind-1 coin: the reward vault in place of the kit's id.
+pub fn token_rewards_hook_slice(mint: &Pubkey, reward_vault: Pubkey) -> Vec<AccountMeta> {
+    let mut slice = vec![
+        AccountMeta::new_readonly(crate::ID, false),
+        AccountMeta::new_readonly(TOKEN_HOOK_AUTHORITY, false),
+    ];
+    slice.extend(token_rewards_hook_extras(mint, reward_vault));
+    slice
+}
+
+/// `claim_token` by `owner` of a kind-1 coin's rewards, into its associated token account of the
+/// leg's token (`reward_mint` under `reward_program`), made when missing.
+pub fn claim_token(
+    owner: Pubkey,
+    mint: Pubkey,
+    reward_mint: Pubkey,
+    reward_program: Pubkey,
+) -> Instruction {
+    let vault = leg_vault_address(&mint, &reward_mint, &reward_program);
     Instruction {
         program_id: crate::ID,
         accounts: with_events(vec![
-            AccountMeta::new_readonly(kit_caller, true),
-            AccountMeta::new(payer, true),
-            AccountMeta::new_readonly(mint, false),
-            AccountMeta::new_readonly(token_client::holding_address(&mint, &args.launch), false),
+            AccountMeta::new(owner, true),
             AccountMeta::new(kit_config_address(&mint), false),
-            AccountMeta::new(registry_address(&mint), false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(token_client::holding_address(&mint, &owner), false),
+            AccountMeta::new_readonly(reward_mint, false),
+            AccountMeta::new(vault, false),
+            AccountMeta::new(
+                crate::spl::associated_address(&owner, &reward_mint, &reward_program),
+                false,
+            ),
+            AccountMeta::new_readonly(legs_address(&mint), false),
+            AccountMeta::new_readonly(HOOK_AUTHORITY, false),
+            AccountMeta::new_readonly(TOKEN_ID, false),
+            AccountMeta::new_readonly(TOKEN_EVENT_AUTHORITY, false),
+            AccountMeta::new_readonly(reward_program, false),
+            AccountMeta::new_readonly(crate::spl::ATA_PROGRAM_ID, false),
             AccountMeta::new_readonly(system_program::ID, false),
         ]),
-        data: crate::instruction::InitLegs { args }.data(),
+        data: crate::instruction::ClaimToken {}.data(),
     }
+}
+
+/// `claim_token_for`: `owner`'s kind-1 rewards pushed by `payer` into `destination` (a token account
+/// of the leg's token the owner owns: its associated account by default).
+pub fn claim_token_for(
+    payer: Pubkey,
+    owner: Pubkey,
+    mint: Pubkey,
+    reward_mint: Pubkey,
+    reward_program: Pubkey,
+    destination: Option<Pubkey>,
+) -> Instruction {
+    let vault = leg_vault_address(&mint, &reward_mint, &reward_program);
+    let destination = destination
+        .unwrap_or_else(|| crate::spl::associated_address(&owner, &reward_mint, &reward_program));
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new_readonly(payer, true),
+            AccountMeta::new_readonly(owner, false),
+            AccountMeta::new(kit_config_address(&mint), false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(token_client::holding_address(&mint, &owner), false),
+            AccountMeta::new_readonly(reward_mint, false),
+            AccountMeta::new(vault, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(legs_address(&mint), false),
+            AccountMeta::new_readonly(HOOK_AUTHORITY, false),
+            AccountMeta::new_readonly(TOKEN_ID, false),
+            AccountMeta::new_readonly(TOKEN_EVENT_AUTHORITY, false),
+            AccountMeta::new_readonly(reward_program, false),
+        ]),
+        data: crate::instruction::ClaimTokenFor {}.data(),
+    }
+}
+
+/// `share_token(index, amount)` by `sharer` from `source` (an account of leg `index`'s token,
+/// `quote_mint` under `quote_program`) with the holders of `mint`.
+pub fn share_token(
+    sharer: Pubkey,
+    mint: Pubkey,
+    index: u8,
+    quote_mint: Pubkey,
+    quote_program: Pubkey,
+    source: Pubkey,
+    amount: u64,
+) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new_readonly(sharer, true),
+            AccountMeta::new(kit_config_address(&mint), false),
+            AccountMeta::new_readonly(legs_address(&mint), false),
+            AccountMeta::new_readonly(quote_mint, false),
+            AccountMeta::new(source, false),
+            AccountMeta::new(leg_vault_address(&mint, &quote_mint, &quote_program), false),
+            AccountMeta::new_readonly(quote_program, false),
+        ]),
+        data: crate::instruction::ShareToken { index, amount }.data(),
+    }
+}
+
+/// `["kit-rounds", mint]`.
+pub fn kit_rounds_address(mint: &Pubkey) -> Pubkey {
+    crate::state::KitRounds::address(mint).0
+}
+
+/// `start_round` of `mint`, whose legs' tokens are `legs` (quote mint, quote program, in leg
+/// order), sent and (the first time) paid by `payer`.
+pub fn start_round(payer: Pubkey, mint: Pubkey, legs: &[(Pubkey, Pubkey)]) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(kit_config_address(&mint), false),
+        AccountMeta::new(kit_rounds_address(&mint), false),
+        AccountMeta::new_readonly(legs_address(&mint), false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    accounts.extend(legs.iter().map(|(quote_mint, program)| {
+        AccountMeta::new_readonly(leg_vault_address(&mint, quote_mint, program), false)
+    }));
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::StartRound {}.data(),
+    }
+}
+
+/// `pay_round(create_missing)` of `owner`'s holding of `mint`, whose legs' tokens are `legs` (quote
+/// mint, quote program, in leg order), sent by `payer`.
+pub fn pay_round(
+    payer: Pubkey,
+    owner: Pubkey,
+    mint: Pubkey,
+    legs: &[(Pubkey, Pubkey)],
+    create_missing: bool,
+) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(kit_config_address(&mint), false),
+        AccountMeta::new(kit_rounds_address(&mint), false),
+        AccountMeta::new_readonly(mint, false),
+        AccountMeta::new(token_client::holding_address(&mint, &owner), false),
+        AccountMeta::new_readonly(owner, false),
+        AccountMeta::new_readonly(legs_address(&mint), false),
+        AccountMeta::new_readonly(HOOK_AUTHORITY, false),
+        AccountMeta::new_readonly(TOKEN_ID, false),
+        AccountMeta::new_readonly(TOKEN_EVENT_AUTHORITY, false),
+        AccountMeta::new_readonly(system_program::ID, false),
+    ]);
+    let mut programs: Vec<Pubkey> = Vec::new();
+    for (quote_mint, program) in legs {
+        accounts.push(AccountMeta::new(
+            leg_vault_address(&mint, quote_mint, program),
+            false,
+        ));
+        accounts.push(AccountMeta::new_readonly(*quote_mint, false));
+        accounts.push(AccountMeta::new(
+            crate::spl::associated_address(&owner, quote_mint, program),
+            false,
+        ));
+        if !programs.contains(program) {
+            programs.push(*program);
+        }
+    }
+    accounts.extend(
+        programs
+            .iter()
+            .map(|p| AccountMeta::new_readonly(*p, false)),
+    );
+    if create_missing {
+        accounts.push(AccountMeta::new_readonly(crate::spl::ATA_PROGRAM_ID, false));
+    }
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::PayRound { create_missing }.data(),
+    }
+}
+
+/// `swap_rewards_to_sol(index, amount_in)` of `mint`'s leg `index` (`quote_mint` under
+/// `quote_program`), sent by `crank`; `swap_rest` the launchpad's `swap_to_sol` accounts from its
+/// third (the launch) on, without its fourth to sixth (the `Legs`, the quote mint, the source), as
+/// `bordrless_launch::client::swap_to_sol_rest` gives them.
+pub fn swap_rewards_to_sol(
+    crank: Pubkey,
+    mint: Pubkey,
+    index: u8,
+    quote_mint: Pubkey,
+    quote_program: Pubkey,
+    amount_in: u64,
+    swap_rest: Vec<AccountMeta>,
+) -> Instruction {
+    let mut accounts = with_events(vec![
+        AccountMeta::new(crank, true),
+        AccountMeta::new(kit_config_address(&mint), false),
+        AccountMeta::new_readonly(legs_address(&mint), false),
+        AccountMeta::new_readonly(quote_mint, false),
+        AccountMeta::new(leg_vault_address(&mint, &quote_mint, &quote_program), false),
+        AccountMeta::new_readonly(LAUNCH_ID, false),
+    ]);
+    accounts.extend(swap_rest);
+    Instruction {
+        program_id: crate::ID,
+        accounts,
+        data: crate::instruction::SwapRewardsToSol { index, amount_in }.data(),
+    }
+}
+
+/// [`claim_sol`] of a coin quoted in tokens (SOL rewards): the coin's `Legs` appended, which the
+/// claim excludes every leg's pool by.
+pub fn claim_sol_legs(owner: Pubkey, mint: Pubkey) -> Instruction {
+    let mut ix = claim_sol(owner, mint);
+    ix.accounts
+        .push(AccountMeta::new_readonly(legs_address(&mint), false));
+    ix
+}
+
+/// [`claim_sol_for`] of a coin quoted in tokens: the coin's `Legs` appended.
+pub fn claim_sol_for_legs(payer: Pubkey, owner: Pubkey, mint: Pubkey) -> Instruction {
+    let mut ix = claim_sol_for(payer, owner, mint);
+    ix.accounts
+        .push(AccountMeta::new_readonly(legs_address(&mint), false));
+    ix
 }
 
 /// `init`, signed by `kit_caller` (the launch's kit-caller PDA for `mint`) and paid by `payer`.

@@ -10,18 +10,16 @@ use crate::constants::modules;
 use crate::error::KitError;
 use crate::legs::LegPools;
 use crate::math::settle;
-use crate::state::{HolderData, KitConfig};
+use crate::state::{HolderData, KitConfig, RoundData};
 
-/// The answer for the hook data of the sides that changed. No deltas, no burn.
+/// The answer for the hook data of the sides that changed (each side: the bytes read, the bytes it
+/// now holds). No deltas, no burn.
 fn answer(
-    source: Option<(&[u8; 64], &HolderData)>,
-    destination: Option<(&[u8; 64], &HolderData)>,
+    source: Option<(&[u8; 64], [u8; 64])>,
+    destination: Option<(&[u8; 64], [u8; 64])>,
 ) -> HookReturn {
-    let changed = |side: Option<(&[u8; 64], &HolderData)>| {
-        side.and_then(|(read, data)| {
-            let bytes = data.to_bytes();
-            (bytes != *read).then_some(bytes)
-        })
+    let changed = |side: Option<(&[u8; 64], [u8; 64])>| {
+        side.and_then(|(read, bytes)| (bytes != *read).then_some(bytes))
     };
     HookReturn {
         source_hook_data: changed(source),
@@ -30,9 +28,19 @@ fn answer(
     }
 }
 
-/// The reward vault's balance when holder rewards are on (the callback passed it then).
+/// The bytes a holder side holds after a callback: its fields, and on a rounds kit its round record
+/// (bytes 32..56). Every other kit's bytes 32..64 are zero, as they always were.
+fn side_bytes(data: &HolderData, rounds: Option<&RoundData>) -> [u8; 64] {
+    let mut bytes = data.to_bytes();
+    if let Some(r) = rounds {
+        r.write(&mut bytes);
+    }
+    bytes
+}
+
+/// The reward vault's balance when the accumulator runs (the callback passed it then).
 fn vault_of(config: &KitConfig, vault_amount: Option<u64>) -> Result<Option<u64>> {
-    match (config.rewards_on(), vault_amount) {
+    match (config.accumulates(), vault_amount) {
         (true, Some(amount)) => Ok(Some(amount)),
         (true, None) => err!(KitError::MissingRewardVault),
         (false, _) => Ok(None),
@@ -158,7 +166,7 @@ pub fn before_transfer_with(
     }
 
     // 5. and 6. Each holder's rewards up to now, at its balance before the transfer.
-    if config.rewards_on() {
+    if config.accumulates() {
         if !source_excluded {
             settle(
                 &mut source,
@@ -225,10 +233,32 @@ pub fn before_transfer_with(
         _ => {}
     }
 
-    // 10. The data of each holder side that changed. Excluded owners' data is never written.
+    // 10. A rounds kit's records: the least each holder side held this round and the one before
+    //     (`RoundData`), rolled to the current round; an emptied holding's record cleared.
+    let round = config.pays_rounds().then(|| config.round_at(now));
+    let rounds = |read: &[u8; 64], before: u64, after: u64| {
+        round.map(|r| {
+            let mut data = RoundData::read(read);
+            data.on_transfer(r, before, after);
+            data
+        })
+    };
+    let source_round = rounds(&source_read, args.source_balance, source_after);
+    let destination_round = rounds(
+        &destination_read,
+        args.destination_balance,
+        destination_after,
+    );
+
+    // 11. The data of each holder side that changed. Excluded owners' data is never written.
     Ok(answer(
-        (!source_excluded).then_some((&source_read, &source)),
-        (!destination_excluded).then_some((&destination_read, &destination)),
+        (!source_excluded).then(|| (&source_read, side_bytes(&source, source_round.as_ref()))),
+        (!destination_excluded).then(|| {
+            (
+                &destination_read,
+                side_bytes(&destination, destination_round.as_ref()),
+            )
+        }),
     ))
 }
 
@@ -277,7 +307,7 @@ pub fn before_burn_with(
     if early && now < early_unlock_at {
         require!(after >= source.early_locked, KitError::EarlyLocked);
     }
-    if config.rewards_on() {
+    if config.accumulates() {
         settle(
             &mut source,
             args.source_balance,
@@ -292,5 +322,14 @@ pub fn before_burn_with(
         .eligible
         .checked_sub(args.amount)
         .ok_or(KitError::MathOverflow)?;
-    Ok(answer(Some((&read, &source)), None))
+    // A rounds kit's record: the burn lowers what the holder held this round.
+    let round = config.pays_rounds().then(|| {
+        let mut data = RoundData::read(&read);
+        data.on_transfer(config.round_at(now), args.source_balance, after);
+        data
+    });
+    Ok(answer(
+        Some((&read, side_bytes(&source, round.as_ref()))),
+        None,
+    ))
 }

@@ -76,7 +76,10 @@ use crate::constants::*;
 use crate::error::CompanionError;
 use crate::events::*;
 use crate::instructions::steps::{
-    available, decode_registry, enforce_terms, find, game_hook_terms, pay_sol,
+    available, decode_registry, enforce_terms, find, game_hook_terms, pay_sol, sol_held,
+};
+use crate::instructions::token_games::{
+    enforce_terms_legs, fix_prizes, LegPayout, TokenPots, PRIZE_DRAW,
 };
 use crate::instructions::CreatorSeeds;
 use crate::invoke::invoke_built;
@@ -580,7 +583,8 @@ pub(crate) fn apply_status(
     let (terms, memo) =
         game_hook_terms(available, &g.hook, hook_status, g.hook_audit_memo(), true)?;
     g.set_hook_audit_memo(memo);
-    let moved = enforce_terms(c, &terms, Clock::get()?.unix_timestamp)?;
+    let now = Clock::get()?.unix_timestamp;
+    let moved = enforce_terms(c, &terms, now)?;
     if moved > 0 {
         emit_event(
             event_authority,
@@ -592,11 +596,30 @@ pub(crate) fn apply_status(
             },
         )?;
     }
+    // A pot kept in the legs' tokens (`docs/token-quotes.md` §7.6): each leg's above its share of
+    // the cap, or all of it under a block, to the leg's buyback (a streak's locked epoch aside).
+    let moved_legs = if g.in_tokens() {
+        let locked = g.kind == GameKind::Streak && g.status == DrawStatus::Revealed;
+        enforce_terms_legs(
+            event_authority,
+            companion_key,
+            c,
+            &terms,
+            locked,
+            available,
+            now,
+        )?
+    } else {
+        0
+    };
     if !terms.blocked {
         return Ok(Some(terms));
     }
     let ended = g.status != DrawStatus::Idle;
-    require!(moved > 0 || ended, CompanionError::NothingToDo);
+    require!(
+        moved > 0 || moved_legs > 0 || ended,
+        CompanionError::NothingToDo
+    );
     if ended {
         rolled_over(event_authority, game_key, c, g, RolloverReason::Blocked)?;
     }
@@ -864,11 +887,20 @@ pub fn process_draw<'info>(
         CompanionError::RoundNotOver
     );
     // At least the minimum, or the cap when the cap is lower: a pot full at its cap is drawn. A
-    // dormant game's minimum is the floor: a pot its fees no longer grow is still paid out.
-    require!(
-        c.pending_pot >= terms.draw_threshold(g.min_pot_at(now, c.launched_at)),
-        CompanionError::PotTooSmall
-    );
+    // dormant game's minimum is the floor: a pot its fees no longer grow is still paid out. A pot in
+    // the legs' tokens is measured in basis points of the coin's opening value.
+    if g.in_tokens() {
+        let pots = TokenPots::load(ctx.remaining_accounts, &c.mint)?;
+        require!(
+            pots.holds(&terms, g.min_pot_bps_at(now, c.launched_at)),
+            CompanionError::PotTooSmall
+        );
+    } else {
+        require!(
+            c.pending_pot >= terms.draw_threshold(g.min_pot_at(now, c.launched_at)),
+            CompanionError::PotTooSmall
+        );
+    }
     // Too late in the round after it for the reveal and a whole claim window: the round rolls
     // over undrawn.
     if now > g.last_draw(round) {
@@ -880,6 +912,19 @@ pub fn process_draw<'info>(
         return rolled_over(&event_authority, game_key, c, g, RolloverReason::Late);
     }
     let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
+    // A lottery in the legs' tokens pays its oracle from its SOL float (`pending_pot`): SOL anyone
+    // sent the creator address since is booked into it first.
+    if ctx.accounts.game.in_tokens() {
+        let c = &mut ctx.accounts.companion;
+        let seeds = CreatorSeeds::of(c);
+        let held = sol_held(&all, &seeds, &ctx.accounts.creator.key())?;
+        let spare = held.saturating_sub(c.set_aside().ok_or(CompanionError::MathOverflow)?);
+        c.pending_pot = c
+            .pending_pot
+            .checked_add(spare)
+            .ok_or(CompanionError::MathOverflow)?;
+    }
+    let (c, g) = (&ctx.accounts.companion, &ctx.accounts.game);
     // The round's tickets, from the hook's header: final, since every write after the round
     // goes to a later one.
     let state = state_address_at(&g.hook, &g.mint, g.state_bump)
@@ -945,6 +990,21 @@ pub fn process_draw<'info>(
     let c = &mut ctx.accounts.companion;
     let g = &mut ctx.accounts.game;
     book_request(c, g, &r, now)?;
+    // In the legs' tokens: each leg's prize is `prize_bps` of its pot now; the float pays no prize.
+    if g.in_tokens() {
+        g.prize = 0;
+        let mut pots = TokenPots::load(&all, &c.mint)?;
+        let (prizes, pot_bps) = fix_prizes(&mut pots, g.prize_bps);
+        pots.save()?;
+        emit_cpi!(LegPrizesFixed {
+            game: game_key,
+            mint: g.mint,
+            round: g.round,
+            kind: PRIZE_DRAW,
+            prizes,
+            pot_bps,
+        });
+    }
     emit_cpi!(DrawRequested {
         game: game_key,
         mint: g.mint,
@@ -1075,6 +1135,53 @@ pub fn process_claim_prize<'info>(
         wins(&holding.hook_data, g.round, ticket, holding.amount),
         CompanionError::NotTheWinner
     );
+    // In the legs' tokens: each leg's prize, what is left of it and of the leg's pot, to the
+    // winner's account of the leg's token.
+    if g.in_tokens() {
+        let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
+        let seeds = CreatorSeeds::of(c);
+        let creator_info = ctx.accounts.creator.to_account_info();
+        let cranker_info = ctx.accounts.cranker.to_account_info();
+        let mut pots = TokenPots::load(&all, &mint)?;
+        let mut amounts = [0u64; MAX_COMPANION_LEGS];
+        for (i, a) in amounts.iter_mut().enumerate().take(pots.count()) {
+            *a = pots.legs.legs[i].prize_left();
+        }
+        let payout = LegPayout {
+            all: &all,
+            creator: &creator_info,
+            seeds: &seeds,
+            sender: &cranker_info,
+            event_authority: &event_authority,
+            companion: companion_key,
+            bounty_bps: c.bounty_bps,
+        };
+        let paid = payout.pay(&mut pots, &holding.owner, &amounts, PRIZE_DRAW)?;
+        require!(paid.iter().any(|&p| p > 0), CompanionError::NothingToDo);
+        for (i, p) in paid.iter().enumerate().take(pots.count()) {
+            pots.legs.legs[i].prize_paid = pots.legs.legs[i].prize_paid.saturating_add(*p);
+        }
+        pots.save()?;
+        let g = &mut ctx.accounts.game;
+        g.status = DrawStatus::Idle;
+        g.prizes_paid = g.prizes_paid.saturating_add(1);
+        g.last_winner = holding.owner;
+        g.settled_at = now;
+        emit_cpi!(PrizePaid {
+            game: game_key,
+            mint,
+            round: g.round,
+            attempt,
+            ticket,
+            holding: holding_key,
+            winner: holding.owner,
+            prize: 0,
+            bounty: 0,
+            pending_pot: ctx.accounts.companion.pending_pot,
+            cranker: ctx.accounts.cranker.key(),
+        });
+        return Ok(());
+    }
     let prize = g.prize.min(c.pending_pot);
     require!(prize > 0, CompanionError::NothingToDo);
     let bounty = bps_of(prize, u64::from(c.bounty_bps));
@@ -1248,6 +1355,46 @@ pub fn process_retire<'info>(ctx: Context<'info, GameStep<'info>>) -> Result<()>
         );
     }
     let idle_since = g.idle_since(c.launched_at);
+    // In the legs' tokens: every leg's pot to its buyback (which buys the coin back on the leg and
+    // burns it); the SOL float stays for the oracle.
+    if g.in_tokens() {
+        let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
+        let mut pots = TokenPots::load(&all, &c.mint)?;
+        let mut moved_any = false;
+        for i in 0..pots.count() {
+            let p = &mut pots.legs.legs[i];
+            let amount = p.pending_pot;
+            if amount == 0 {
+                continue;
+            }
+            p.pending_pot = 0;
+            p.pending_buyback = p
+                .pending_buyback
+                .checked_add(amount)
+                .ok_or(CompanionError::MathOverflow)?;
+            moved_any = true;
+            emit_cpi!(LegPotToBuyback {
+                companion: companion_key,
+                index: i as u8,
+                amount,
+                reason: 2,
+                pending_pot: 0,
+            });
+        }
+        require!(moved_any, CompanionError::NothingToDo);
+        pots.save()?;
+        let g = &mut ctx.accounts.game;
+        g.settled_at = now;
+        emit_cpi!(PotRetired {
+            game: game_key,
+            mint: g.mint,
+            lamports: 0,
+            idle_since,
+            pending_buyback: ctx.accounts.companion.pending_buyback,
+            cranker: ctx.accounts.cranker.key(),
+        });
+        return Ok(());
+    }
     let lamports = c.pending_pot;
     require!(lamports > 0, CompanionError::NothingToDo);
     let c = &mut ctx.accounts.companion;

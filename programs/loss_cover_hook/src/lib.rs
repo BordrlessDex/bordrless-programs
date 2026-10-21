@@ -4,25 +4,41 @@
 //! cover it has been paid and the round it was last recorded in. The Loss cover script reads these
 //! and names the holders who are under water; the Bordrless companion pays them SOL from its pot and
 //! has this program record each payment (`record_payout`). This program only keeps the records: it
-//! never sees SOL, never refuses a transfer and takes no cut.
+//! never sees SOL and takes no cut, and it never refuses a SOL coin's transfer (a coin quoted in
+//! tokens' transfer only when it lacks the accounts its prices need, below).
 //!
 //! - **A buy** (the source's owner is the launch pool, the destination's a wallet) blends the
 //!   buyer's basis with the trade's curve price, fees aside, read from the pool as it stands in the
 //!   callback: the DEX writes its reserves and exits the pool account before it delivers the output,
 //!   so the price is `Q' * 10^12 / (B' + a)`, the reserves after the trade (real plus virtual) and the
-//!   amount delivered (`trade_price`). With a reference price set, the basis never takes more than
-//!   `ENTRY_CAP_BPS` above it: a buyer's own spike never sets a basis it can be covered for.
+//!   amount delivered (`trade_price`): what the buyer paid the curve for each token, with no cap.
 //! - **A plain transfer in** (any source owner but the pool) blends at the spot now: tokens that
 //!   arrive by transfer carry no loss, so a wallet cannot hand its loss to another.
 //! - **A send or a burn** cuts the record to what is left: the cover paid goes with the tokens pro
 //!   rata (a partial sell keeps its cover), the entry stays, the `SOLD` flag is set. A holding left
 //!   with nothing is cleared to zeros, so it can be closed.
 //! - **The reference** moves at most once per `REFERENCE_SECS` by at most `REFERENCE_STEP_BPS`
-//!   toward the spot, on any callback, from the first spot seen. It only bounds a buy's entry.
+//!   toward the spot, on any callback, from the first spot seen. It bounds nothing: it stays in the
+//!   state (same layout, so every state account decodes as before) for whoever reads it.
 //! - **`record_payout(lamports, tag)`**, signed only by the companion program's
 //!   `PDA(["payout-authority"])`: `paid` grows by `lamports`, `round` becomes `tag`, the record is
 //!   written through the token program's `write_hook_data`, signed by this program's
 //!   `["hook-authority"]`. A holding with no record is refused: the script never asks for one.
+//! - **`set_entry(entry)`**, signed only by this program's upgrade authority (read from its
+//!   ProgramData): a holding's recorded `entry` set to `entry`, its balance, cover paid, round and
+//!   basis time left as they are, written the same way. The repair of records an earlier rule wrote
+//!   wrong; a holding with no record, an owner that holds none, or an entry of 0 is refused.
+//!
+//! **Entries are what buyers paid** (2026-10-12). The first version of this hook capped a buy's
+//! entry at `ENTRY_CAP_BPS` above the slow reference, so that a buyer's own spike could not set a
+//! basis it could be covered for. On the first coin that ran it, the price went up 2.7 times in its
+//! first minute; every buy of that run was recorded at the cap or below while the wallets paid up
+//! to 2.2 times as much, and once the price came back no holder was under water by the records while
+//! several were really down. Lossback covers real losses, so a buy's entry is now its price.
+//! Gaming (one wallet pumping the price for another to buy high, then selling into it) is bounded
+//! by the script, not here: a holding counts only after its holding age (`min_age_secs`, from the
+//! last buy), and a round pays each holding a share of its loss within the round's budget and the
+//! companion's payout terms (per step, per holding, per window), never the pot at once.
 //!
 //! Who never holds a record: the launch (`["launch", mint]` under the launchpad), its pool (derived
 //! at `prepare` from the launchpad's config), the companion's creator address, the default key and
@@ -32,11 +48,35 @@
 //! For a launch: `prepare` for the new mint, signed by the mint's keypair; a `LaunchConfig` naming
 //! this program with [`FLAGS`]; then the launch. Registry extras: the state (writable), the launch
 //! (read-only), the pool (read-only), so every transfer of the token carries three extra accounts.
+//!
+//! **A coin quoted in tokens** (`docs/token-quotes.md` §7.6) trades on up to six pools, one a leg,
+//! each against its own token: `prepare_legs` for it, with the legs' pools. A record's basis is kept
+//! per leg, in the token of the leg its holding first bought on (`Record.leg`, byte 54; 0 on every
+//! SOL coin's record): `entry` is raw units of that leg's token per base unit times `PRICE_SCALE`.
+//! No cross rate between the tokens is read, so a push of one leg's price can re-price nothing
+//! but that one trade:
+//!
+//! - **A buy on the record's leg** (out of that leg's pool) blends at the trade's price, read from
+//!   that pool after the trade, as above;
+//! - **anything else that arrives** (a buy on another leg, a plain transfer) blends at the record
+//!   leg's spot, as a transfer in does: it carries no loss in; a holding with no record takes the
+//!   leg it buys on, or leg 0 for a transfer;
+//! - sends, burns, `record_payout` (`paid` in the record leg's token) and `set_entry` as above.
+//!
+//! The registry of such a coin: the state (writable), the launch, leg 0's pool, the coin's `Legs`
+//! (which the launchpad asks of every hook on it), then the other legs' pools (all read-only).
+//! The callbacks find each leg's pool among them by the `Legs`. The token program hands a hook
+//! whatever extras the sender passes, so a transfer must carry the `Legs`, the record leg's pool
+//! and, on a buy, the pool it buys out of (`WrongAccount` otherwise, as the kit refuses a leg trade
+//! without its `Legs`): a transaction built from the registry always does. Without them an arrival
+//! would be priced at leg 0's spot whatever its record's leg, or keep the record's old entry for
+//! the new coins, and a leg's cover would pay losses nobody took.
 
 #![allow(unexpected_cfgs, clippy::manual_checked_ops)]
 
 use anchor_lang::prelude::*;
 use bordrless_game::{companion_creator_address, eligible, write_own_hook_data};
+use bordrless_hook::authority::{parse_programdata, BPF_LOADER_UPGRADEABLE_ID};
 use bordrless_hook::{
     hook_accounts_address, token_flags, write_registry, AccountSource, ExtraAccount,
     HookAccountList, HookReturn, Seed, TokenHookArgs, TokenOp, HOOK_DATA_LEN,
@@ -64,6 +104,10 @@ pub const RECORD_VERSION: u8 = 1;
 pub const STATE_SEED: &[u8] = b"state";
 /// The launch program's `["launch", mint]` seed.
 pub const LAUNCH_SEED: &[u8] = b"launch";
+/// The launch program's `["legs", mint]` seed: a coin quoted in tokens' legs (`prepare_legs`).
+pub const LEGS_SEED: &[u8] = b"legs";
+/// The most legs a coin quoted in tokens has.
+pub const MAX_LEGS: usize = 6;
 /// The launch program.
 pub const LAUNCH_ID: Pubkey = bordrless_launch::ID;
 /// The launchpad's `["config"]`, read at `prepare` for the launch pools' LP fee.
@@ -91,6 +135,11 @@ pub const TOKEN_EVENT_AUTHORITY: Pubkey = bordrless_token::EVENT_AUTHORITY_AND_B
 /// companion's constant; the LiteSVM suite checks the two agree).
 pub const PAYOUT_AUTHORITY: Pubkey =
     Pubkey::from_str_const("8XJcBCYmYyggTQBNvK3RausfyRMpmtjJTjKd53W3StkG");
+/// This program's ProgramData under the upgradeable loader, `PDA([loss_cover_hook], loader)`, whose
+/// header names the upgrade authority, the one signer of `set_entry` (checked against its
+/// derivation in the unit tests).
+pub const PROGRAM_DATA: Pubkey =
+    Pubkey::from_str_const("FndUwNW68djMCYWemsEsGWj3xfdZM4qfzwf2HdrYRgkG");
 /// The flags a `LaunchConfig` names for this hook: `before_transfer` and `before_burn`, which write
 /// hook data. No deltas (the hook takes no cut), no mint callbacks.
 pub const FLAGS: u16 =
@@ -99,10 +148,12 @@ pub const FLAGS: u16 =
 /// token, SOL per whole token is `price / 10^15`.
 pub const PRICE_SCALE: u128 = 1_000_000_000_000;
 pub const BPS: u64 = 10_000;
-/// A buy's basis takes at most this much above the reference price: 20%.
+/// The first version's cap on a buy's basis, 20% above the reference price ([`capped`]). No longer
+/// applied: a buy's entry is what it paid (the module's "Entries are what buyers paid"). Kept so
+/// the records that version wrote, and the vectors that pin its arithmetic, still read.
 pub const ENTRY_CAP_BPS: u64 = 2_000;
 /// The reference moves at most once per this many seconds, by at most `REFERENCE_STEP_BPS` of
-/// itself.
+/// itself. It bounds nothing.
 pub const REFERENCE_SECS: i64 = 600;
 pub const REFERENCE_STEP_BPS: u64 = 500;
 /// `Record.flags`: the holding sold or burned since its last buy.
@@ -129,8 +180,11 @@ pub mod record_offsets {
     /// `round: u32`: the tag of the last `record_payout`: the round the script last measured or
     /// paid it in (0: none).
     pub const ROUND: usize = 50;
-    /// 10 reserved bytes, zero.
-    pub const RESERVED: usize = 54;
+    /// `leg: u8`: on a coin quoted in tokens, the leg whose token the basis is kept in (the leg of
+    /// the holding's first buy); 0 on every SOL coin's record.
+    pub const LEG: usize = 54;
+    /// 9 reserved bytes, zero.
+    pub const RESERVED: usize = 55;
 }
 
 /// A holding's record, as the hook data lays it out ([`record_offsets`]).
@@ -145,6 +199,8 @@ pub struct Record {
     pub paid_at: i64,
     pub basis_at: i64,
     pub round: u32,
+    /// The leg whose token the basis is kept in (a coin quoted in tokens; 0 otherwise).
+    pub leg: u8,
 }
 
 fn u64_at(data: &[u8], at: usize) -> u64 {
@@ -169,6 +225,7 @@ impl Record {
             paid_at: u64_at(data, o::PAID_AT) as i64,
             basis_at: u64_at(data, o::BASIS_AT) as i64,
             round: u32::from_le_bytes(round),
+            leg: data[o::LEG],
         }
     }
 
@@ -185,6 +242,7 @@ impl Record {
         out[o::PAID_AT..o::PAID_AT + 8].copy_from_slice(&self.paid_at.to_le_bytes());
         out[o::BASIS_AT..o::BASIS_AT + 8].copy_from_slice(&self.basis_at.to_le_bytes());
         out[o::ROUND..o::ROUND + 4].copy_from_slice(&self.round.to_le_bytes());
+        out[o::LEG] = self.leg;
         out
     }
 
@@ -223,7 +281,8 @@ pub fn trade_price(r: &PoolReserves, amount: u64) -> Option<u64> {
     (base > 0).then(|| price_u64(quote * PRICE_SCALE / base))
 }
 
-/// `price`, at most `ENTRY_CAP_BPS` above `reference` when the reference is set.
+/// `price`, at most `ENTRY_CAP_BPS` above `reference` when the reference is set: the first
+/// version's rule for a buy's entry, no longer applied ([`ENTRY_CAP_BPS`]).
 pub fn capped(price: u64, reference: u64) -> u64 {
     if reference == 0 {
         return price;
@@ -280,6 +339,7 @@ pub fn on_receive(r: &mut Record, price: u64, amount: u64, now: i64, slot: u64) 
         paid_at: if r.is_set() { r.paid_at } else { 0 },
         basis_at: now,
         round: if r.is_set() { r.round } else { 0 },
+        leg: if r.is_set() { r.leg } else { 0 },
     };
 }
 
@@ -317,103 +377,29 @@ pub mod loss_cover_hook {
     /// creates it naming this program as its hook): the state and the extra-accounts registry. The
     /// launch pool's address follows from the launchpad's config (its LP fee). The mint's keypair
     /// signs; once per mint.
-    pub fn prepare(ctx: Context<Prepare>) -> Result<()> {
-        let mint = ctx.accounts.mint.key();
-        let (expected, registry_bump) = hook_accounts_address(&crate::ID, &mint);
-        require_keys_eq!(
-            ctx.accounts.registry.key(),
-            expected,
-            LossCoverError::WrongAccount
-        );
-        let now = Clock::get()?.unix_timestamp;
-        let launch = Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_ID).0;
-        let lp_fee_bps = ctx.accounts.launch_config.lp_fee_bps;
-        let fee_seed = lp_fee_bps.to_le_bytes();
-        let pool = Pubkey::find_program_address(
-            &[
-                POOL_SEED,
-                mint.as_ref(),
-                BRIDGED_SOL_MINT.as_ref(),
-                &fee_seed,
-                LAUNCH_ID.as_ref(),
-            ],
-            &SWAP_ID,
-        )
-        .0;
-        let creator = companion_creator_address(&mint);
-        let payer = ctx.accounts.payer.key();
-        let state_key = ctx.accounts.state.key();
-        let state = &mut ctx.accounts.state;
-        state.version = VERSION;
-        state.bump = ctx.bumps.state;
-        state.mint = mint;
-        state.launch = launch;
-        state.pool = pool;
-        state.creator = creator;
-        state.reference = 0;
-        state.reference_at = 0;
-        state.paid_total = 0;
-        state.records = 0;
-        state.prepared_by = payer;
-        state.prepared_at = now;
-        state.reserved = [0; 64];
-        // The callbacks' extras: the state (written every transfer), the launch (read-only), the
-        // pool (read-only: the price), each a PDA of its program with the mint among its seeds.
-        let list = HookAccountList::new(vec![
-            ExtraAccount {
-                writable: true,
-                source: AccountSource::Pda {
-                    program: crate::ID,
-                    seeds: vec![Seed::Literal(STATE_SEED.to_vec()), Seed::Account(1)],
-                },
-            },
-            ExtraAccount {
-                writable: false,
-                source: AccountSource::Pda {
-                    program: LAUNCH_ID,
-                    seeds: vec![Seed::Literal(LAUNCH_SEED.to_vec()), Seed::Account(1)],
-                },
-            },
-            ExtraAccount {
-                writable: false,
-                source: AccountSource::Pda {
-                    program: SWAP_ID,
-                    seeds: vec![
-                        Seed::Literal(POOL_SEED.to_vec()),
-                        Seed::Account(1),
-                        Seed::Literal(BRIDGED_SOL_MINT.to_bytes().to_vec()),
-                        Seed::Literal(fee_seed.to_vec()),
-                        Seed::Literal(LAUNCH_ID.to_bytes().to_vec()),
-                    ],
-                },
-            },
-        ]);
-        write_registry(
-            &ctx.accounts.payer.to_account_info(),
-            &ctx.accounts.registry.to_account_info(),
-            &ctx.accounts.system_program.to_account_info(),
-            &crate::ID,
-            &mint,
-            registry_bump,
-            &list,
-        )?;
-        emit_cpi!(Prepared {
-            mint,
-            state: state_key,
-            launch,
-            pool,
-            creator,
-            lp_fee_bps,
-            prepared_by: payer,
-        });
-        Ok(())
+    pub fn prepare<'info>(ctx: Context<'info, Prepare<'info>>) -> Result<()> {
+        prepare_any(ctx, false)
+    }
+
+    /// `prepare` for a coin quoted in tokens (`docs/token-quotes.md` §7.6): the same state and
+    /// accounts, then the coin's legs' pools, in leg order, as remaining accounts (1 to 6; their
+    /// keys are written, not read: the pools need not exist yet). The state's `pool` is leg 0's,
+    /// `reserved[0]` the number of legs; the registry lists the state, the launch, leg 0's pool, the
+    /// coin's `Legs` and the other legs' pools.
+    pub fn prepare_legs<'info>(ctx: Context<'info, Prepare<'info>>) -> Result<()> {
+        prepare_any(ctx, true)
     }
 
     /// `before_transfer`: the reference moved when due; the sender's record cut to what it keeps
     /// (the cover paid pro rata with it), the receiver's basis blended at the trade's price (a buy
-    /// out of the pool) or the spot (any other transfer); each answered as the holding's hook data
-    /// when its owner may hold a record. Never refuses a transfer, never takes a cut.
-    pub fn before_transfer(ctx: Context<Callback>, args: TokenHookArgs) -> Result<HookReturn> {
+    /// out of the pool: what it paid, uncapped) or the spot (any other transfer); each answered as
+    /// the holding's hook data when its owner may hold a record. Never takes a cut, never refuses a
+    /// SOL coin's transfer. On a coin quoted in tokens each price is the record leg's, and a
+    /// transfer without the accounts it needs is refused (the module).
+    pub fn before_transfer<'info>(
+        ctx: Context<'info, Callback<'info>>,
+        args: TokenHookArgs,
+    ) -> Result<HookReturn> {
         require_keys_eq!(
             args.mint,
             ctx.accounts.mint.key(),
@@ -421,6 +407,20 @@ pub mod loss_cover_hook {
         );
         let clock = Clock::get()?;
         let reserves = read_pool(&ctx.accounts.pool);
+        // A coin quoted in tokens: its legs, from the `Legs` among the callback's extras. The token
+        // program forwards whatever extras the sender passes, so a transfer without the `Legs` is
+        // refused: it would be priced down a SOL coin's path, at leg 0's spot whatever the record's
+        // leg (the registry lists the `Legs`, so a transaction built from it always carries it).
+        let legs = if ctx.accounts.state.leg_count() > 0 && args.op == TokenOp::Transfer {
+            Some(
+                ctx.remaining_accounts
+                    .iter()
+                    .find_map(|a| bordrless_game::read_legs(a, &args.mint))
+                    .ok_or(LossCoverError::WrongAccount)?,
+            )
+        } else {
+            None
+        };
         let state = &mut ctx.accounts.state;
         move_reference(state, reserves.as_ref(), clock.unix_timestamp);
         if args.op != TokenOp::Transfer {
@@ -439,14 +439,68 @@ pub mod loss_cover_hook {
         }
         if eligible(&args.destination_owner, &excluded) {
             let mut r = Record::decode(&args.destination_hook_data);
-            let price = if args.source_owner == state.pool {
-                reserves.as_ref().and_then(|p| trade_price(p, args.amount))
-            } else {
-                reserves.as_ref().and_then(spot_of)
+            let (price, leg) = match &legs {
+                // The record leg's prices: a buy on that leg at the trade's price, anything else
+                // that arrives at that leg's spot; a new record takes the leg it buys on (leg 0
+                // for a transfer).
+                Some(legs) => {
+                    let source_leg = legs.leg_of(&args.source_owner);
+                    let leg = if r.is_set() {
+                        usize::from(r.leg)
+                    } else {
+                        source_leg.unwrap_or(0)
+                    };
+                    // The pools the price needs must be among the extras (the registry lists every
+                    // leg's): the record leg's, and on a buy the leg it buys on. Without the record
+                    // leg's pool an arrival would keep the record's old entry.
+                    let leg_pool = |i: usize| -> Result<Option<PoolReserves>> {
+                        let key = *legs.in_use().get(i).ok_or(LossCoverError::WrongAccount)?;
+                        if key == ctx.accounts.pool.key() {
+                            return Ok(reserves);
+                        }
+                        let info = ctx
+                            .remaining_accounts
+                            .iter()
+                            .find(|a| *a.key == key)
+                            .ok_or(LossCoverError::WrongAccount)?;
+                        Ok(read_pool(info))
+                    };
+                    if let Some(source) = source_leg {
+                        leg_pool(source)?;
+                    }
+                    let leg_reserves = leg_pool(leg)?;
+                    let price = if source_leg == Some(leg) {
+                        leg_reserves
+                            .as_ref()
+                            .and_then(|p| trade_price(p, args.amount))
+                    } else {
+                        leg_reserves.as_ref().and_then(spot_of)
+                    };
+                    // An arrival is priced at its record's leg or refused (every leg's pool exists
+                    // once trading opens): its basis never keeps an old entry for new coins.
+                    require!(
+                        price.is_some() || args.amount == 0,
+                        LossCoverError::WrongAccount
+                    );
+                    (price, leg as u8)
+                }
+                None => {
+                    let price = if args.source_owner == state.pool {
+                        reserves.as_ref().and_then(|p| trade_price(p, args.amount))
+                    } else {
+                        reserves.as_ref().and_then(spot_of)
+                    };
+                    (price, 0)
+                }
             };
-            // No price to read (never, once the pool exists): the basis stays as it was.
-            let price = capped(price.unwrap_or(r.entry), state.reference);
+            // No price to read (a SOL coin's pool not made yet, or nothing moved on a coin quoted in
+            // tokens): the basis stays as it was.
+            let price = price.unwrap_or(r.entry);
+            let new_record = !r.is_set();
             on_receive(&mut r, price, args.amount, clock.unix_timestamp, clock.slot);
+            if new_record {
+                r.leg = leg;
+            }
             answer.destination_hook_data = Some(r.encode());
         }
         Ok(answer)
@@ -480,8 +534,9 @@ pub mod loss_cover_hook {
     }
 
     /// The companion's payout authority alone: records `lamports` of cover paid to `holding` (0: a
-    /// touch) in round `tag`. The holding is of this mint, its owner may hold a record and the
-    /// record exists; the record is written through the token program.
+    /// touch) in round `tag` (on a coin quoted in tokens, raw units of the record leg's token). The
+    /// holding is of this mint, its owner may hold a record and the record exists; the record is
+    /// written through the token program.
     pub fn record_payout(ctx: Context<RecordPayout>, lamports: u64, tag: u32) -> Result<()> {
         let mint_key = ctx.accounts.mint.key();
         let holding = token_client::read_holding(&ctx.accounts.holding)?;
@@ -515,6 +570,196 @@ pub mod loss_cover_hook {
             r.encode(),
         )
     }
+
+    /// This program's upgrade authority alone (read from its ProgramData): sets `holding`'s
+    /// recorded entry to `entry` (lamports per base unit times `PRICE_SCALE`; on a coin quoted in
+    /// tokens raw units of the record leg's token), the repair of a record an earlier rule wrote
+    /// wrong. The balance, the cover paid, the round, the basis time, the leg and the flags stay;
+    /// the slot is stamped. The holding is of this mint, its owner may hold a record, the record
+    /// exists and `entry` is not 0. Written through the token program, signed by this program's
+    /// `["hook-authority"]`, as `record_payout` writes.
+    pub fn set_entry(ctx: Context<SetEntry>, entry: u64) -> Result<()> {
+        require!(
+            upgrade_authority(&ctx.accounts.program_data)? == Some(ctx.accounts.authority.key()),
+            LossCoverError::NotUpgradeAuthority
+        );
+        require!(entry > 0, LossCoverError::ZeroEntry);
+        let holding = token_client::read_holding(&ctx.accounts.holding)?;
+        require_keys_eq!(
+            holding.mint,
+            ctx.accounts.mint.key(),
+            LossCoverError::WrongMint
+        );
+        require!(
+            eligible(&holding.owner, &ctx.accounts.state.excluded()),
+            LossCoverError::NotEligible
+        );
+        let mut r = Record::decode(&holding.hook_data);
+        require!(r.is_set(), LossCoverError::NoRecord);
+        r.entry = entry;
+        r.updated_slot = Clock::get()?.slot;
+        write_own_hook_data(
+            &crate::ID,
+            &ctx.accounts.hook_authority.to_account_info(),
+            &ctx.accounts.mint.to_account_info(),
+            &ctx.accounts.holding.to_account_info(),
+            &ctx.accounts.token_event_authority.to_account_info(),
+            &ctx.accounts.token_program.to_account_info(),
+            r.encode(),
+        )
+    }
+}
+
+/// `prepare` (`legs` false: the launch pool derived from the launchpad's config) and
+/// `prepare_legs` (`legs` true: the legs' pools the remaining accounts, in leg order).
+fn prepare_any<'info>(ctx: Context<'info, Prepare<'info>>, legs: bool) -> Result<()> {
+    let mint = ctx.accounts.mint.key();
+    let (expected, registry_bump) = hook_accounts_address(&crate::ID, &mint);
+    require_keys_eq!(
+        ctx.accounts.registry.key(),
+        expected,
+        LossCoverError::WrongAccount
+    );
+    let pools: Vec<Pubkey> = ctx.remaining_accounts.iter().map(|a| a.key()).collect();
+    if legs {
+        require!(
+            (1..=MAX_LEGS).contains(&pools.len()),
+            LossCoverError::WrongAccount
+        );
+    }
+    let now = Clock::get()?.unix_timestamp;
+    let launch = Pubkey::find_program_address(&[LAUNCH_SEED, mint.as_ref()], &LAUNCH_ID).0;
+    let lp_fee_bps = ctx.accounts.launch_config.lp_fee_bps;
+    let fee_seed = lp_fee_bps.to_le_bytes();
+    let pool = if legs {
+        pools[0]
+    } else {
+        Pubkey::find_program_address(
+            &[
+                POOL_SEED,
+                mint.as_ref(),
+                BRIDGED_SOL_MINT.as_ref(),
+                &fee_seed,
+                LAUNCH_ID.as_ref(),
+            ],
+            &SWAP_ID,
+        )
+        .0
+    };
+    let creator = companion_creator_address(&mint);
+    let payer = ctx.accounts.payer.key();
+    let state_key = ctx.accounts.state.key();
+    let state = &mut ctx.accounts.state;
+    state.version = VERSION;
+    state.bump = ctx.bumps.state;
+    state.mint = mint;
+    state.launch = launch;
+    state.pool = pool;
+    state.creator = creator;
+    state.reference = 0;
+    state.reference_at = 0;
+    state.paid_total = 0;
+    state.records = 0;
+    state.prepared_by = payer;
+    state.prepared_at = now;
+    state.reserved = [0; 64];
+    if legs {
+        state.reserved[0] = pools.len() as u8;
+    }
+    // The callbacks' extras: the state (written every transfer), the launch (read-only), the
+    // pool (read-only: the price), each a PDA of its program with the mint among its seeds. A coin
+    // quoted in tokens: leg 0's pool by its key, the coin's `Legs`, the other legs' pools.
+    let state_entry = ExtraAccount {
+        writable: true,
+        source: AccountSource::Pda {
+            program: crate::ID,
+            seeds: vec![Seed::Literal(STATE_SEED.to_vec()), Seed::Account(1)],
+        },
+    };
+    let launch_entry = ExtraAccount {
+        writable: false,
+        source: AccountSource::Pda {
+            program: LAUNCH_ID,
+            seeds: vec![Seed::Literal(LAUNCH_SEED.to_vec()), Seed::Account(1)],
+        },
+    };
+    let list = if legs {
+        let mut accounts = vec![
+            state_entry,
+            launch_entry,
+            ExtraAccount {
+                writable: false,
+                source: AccountSource::Key(pools[0]),
+            },
+            ExtraAccount {
+                writable: false,
+                source: AccountSource::Pda {
+                    program: LAUNCH_ID,
+                    seeds: vec![Seed::Literal(LEGS_SEED.to_vec()), Seed::Account(1)],
+                },
+            },
+        ];
+        accounts.extend(pools[1..].iter().map(|p| ExtraAccount {
+            writable: false,
+            source: AccountSource::Key(*p),
+        }));
+        HookAccountList::new(accounts)
+    } else {
+        HookAccountList::new(vec![
+            state_entry,
+            launch_entry,
+            ExtraAccount {
+                writable: false,
+                source: AccountSource::Pda {
+                    program: SWAP_ID,
+                    seeds: vec![
+                        Seed::Literal(POOL_SEED.to_vec()),
+                        Seed::Account(1),
+                        Seed::Literal(BRIDGED_SOL_MINT.to_bytes().to_vec()),
+                        Seed::Literal(fee_seed.to_vec()),
+                        Seed::Literal(LAUNCH_ID.to_bytes().to_vec()),
+                    ],
+                },
+            },
+        ])
+    };
+    write_registry(
+        &ctx.accounts.payer.to_account_info(),
+        &ctx.accounts.registry.to_account_info(),
+        &ctx.accounts.system_program.to_account_info(),
+        &crate::ID,
+        &mint,
+        registry_bump,
+        &list,
+    )?;
+    emit_cpi!(Prepared {
+        mint,
+        state: state_key,
+        launch,
+        pool,
+        creator,
+        lp_fee_bps,
+        prepared_by: payer,
+    });
+    Ok(())
+}
+
+/// This program's upgrade authority, read from its ProgramData (`program_data`, address-checked by
+/// the accounts; its owner and header checked here): `None` once the program is immutable.
+fn upgrade_authority(program_data: &AccountInfo) -> Result<Option<Pubkey>> {
+    require_keys_eq!(
+        *program_data.key,
+        PROGRAM_DATA,
+        LossCoverError::NotUpgradeAuthority
+    );
+    require_keys_eq!(
+        *program_data.owner,
+        BPF_LOADER_UPGRADEABLE_ID,
+        LossCoverError::NotUpgradeAuthority
+    );
+    let data = program_data.try_borrow_data()?;
+    let (_, authority) = parse_programdata(&data).ok_or(LossCoverError::NotUpgradeAuthority)?;
+    Ok(authority)
 }
 
 /// The pool's reserves, when the account is the DEX's and reads.
@@ -577,6 +822,12 @@ impl LossCoverState {
     /// The owners that never hold a record, besides the default key and every address off the curve.
     pub fn excluded(&self) -> [Pubkey; 3] {
         [self.launch, self.pool, self.creator]
+    }
+
+    /// A coin quoted in tokens' number of legs (`prepare_legs`, `reserved[0]`, byte 210); 0 on a
+    /// SOL coin.
+    pub fn leg_count(&self) -> u8 {
+        self.reserved[0]
     }
 }
 
@@ -649,6 +900,34 @@ pub struct RecordPayout<'info> {
     pub token_event_authority: UncheckedAccount<'info>,
 }
 
+/// Accounts of `set_entry`.
+#[derive(Accounts)]
+pub struct SetEntry<'info> {
+    /// This program's upgrade authority (as its ProgramData names it).
+    pub authority: Signer<'info>,
+    /// CHECK: this program's ProgramData (address-checked; owner and header read in the handler).
+    #[account(address = PROGRAM_DATA @ LossCoverError::NotUpgradeAuthority)]
+    pub program_data: UncheckedAccount<'info>,
+    /// CHECK: the mint (the token program checks its hook is this program).
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: the holding, read as the token program's (owner and discriminator checked) and of
+    /// `mint`; the token program writes its hook data.
+    #[account(mut)]
+    pub holding: UncheckedAccount<'info>,
+    /// The mint's state: who never holds a record.
+    #[account(seeds = [STATE_SEED, mint.key().as_ref()], bump = state.bump)]
+    pub state: Box<Account<'info, LossCoverState>>,
+    /// CHECK: this program's `["hook-authority"]` (address-checked), which signs `write_hook_data`.
+    #[account(address = HOOK_AUTHORITY @ LossCoverError::WrongAccount)]
+    pub hook_authority: UncheckedAccount<'info>,
+    /// CHECK: the token program (address-checked).
+    #[account(address = bordrless_token::ID @ LossCoverError::WrongAccount)]
+    pub token_program: UncheckedAccount<'info>,
+    /// CHECK: its event authority (address-checked).
+    #[account(address = TOKEN_EVENT_AUTHORITY @ LossCoverError::WrongAccount)]
+    pub token_event_authority: UncheckedAccount<'info>,
+}
+
 /// The hook was prepared for a mint.
 #[event]
 pub struct Prepared {
@@ -680,6 +959,10 @@ pub enum LossCoverError {
     NoRecord,
     #[msg("arithmetic overflow")]
     MathOverflow,
+    #[msg("only this program's upgrade authority, as its ProgramData names it, sets an entry")]
+    NotUpgradeAuthority,
+    #[msg("an entry of 0 is no price")]
+    ZeroEntry,
 }
 
 /// Instruction builders and addresses, as the tests, the SDK and the companion build them.
@@ -734,6 +1017,39 @@ pub mod client {
         ]
     }
 
+    /// The coin's `Legs` (the launch program's `["legs", mint]`).
+    pub fn legs_address(mint: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(&[LEGS_SEED, mint.as_ref()], &LAUNCH_ID).0
+    }
+
+    /// The registry's extras of a coin quoted in tokens prepared with `prepare_legs(pools)`: the
+    /// state, writable; the launch, leg 0's pool, the coin's `Legs` and the other legs' pools,
+    /// read-only.
+    pub fn extras_legs(mint: &Pubkey, pools: &[Pubkey]) -> Vec<AccountMeta> {
+        let mut extras = vec![
+            AccountMeta::new(state_address(mint), false),
+            AccountMeta::new_readonly(launch_address(mint), false),
+            AccountMeta::new_readonly(pools[0], false),
+            AccountMeta::new_readonly(legs_address(mint), false),
+        ];
+        extras.extend(
+            pools[1..]
+                .iter()
+                .map(|p| AccountMeta::new_readonly(*p, false)),
+        );
+        extras
+    }
+
+    /// `prepare_legs` for `mint` (whose keypair signs), `payer` paying: a coin quoted in tokens whose
+    /// legs' pools are `pools`, in leg order.
+    pub fn prepare_legs(payer: Pubkey, mint: Pubkey, pools: &[Pubkey]) -> Instruction {
+        let mut ix = prepare(payer, mint);
+        ix.data = crate::instruction::PrepareLegs {}.data();
+        ix.accounts
+            .extend(pools.iter().map(|p| AccountMeta::new_readonly(*p, false)));
+        ix
+    }
+
     /// `prepare` for `mint` (whose keypair signs), `payer` paying.
     pub fn prepare(payer: Pubkey, mint: Pubkey) -> Instruction {
         Instruction {
@@ -770,6 +1086,26 @@ pub mod client {
             data: crate::instruction::RecordPayout { lamports, tag }.data(),
         }
     }
+
+    /// `set_entry(entry)` for `owner`'s holding of `mint`, signed by `authority` (this program's
+    /// upgrade authority).
+    pub fn set_entry(authority: Pubkey, mint: Pubkey, owner: Pubkey, entry: u64) -> Instruction {
+        Instruction {
+            program_id: crate::ID,
+            accounts: crate::accounts::SetEntry {
+                authority,
+                program_data: PROGRAM_DATA,
+                mint,
+                holding: token_client::holding_address(&mint, &owner),
+                state: state_address(&mint),
+                hook_authority: HOOK_AUTHORITY,
+                token_program: bordrless_token::ID,
+                token_event_authority: TOKEN_EVENT_AUTHORITY,
+            }
+            .to_account_metas(None),
+            data: crate::instruction::SetEntry { entry }.data(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -786,6 +1122,14 @@ mod tests {
         assert_eq!(
             (HOOK_AUTHORITY, HOOK_AUTHORITY_BUMP),
             bordrless_hook::hook_authority(&crate::ID)
+        );
+    }
+
+    #[test]
+    fn this_programs_programdata() {
+        assert_eq!(
+            PROGRAM_DATA,
+            bordrless_hook::authority::programdata_address(&crate::ID)
         );
     }
 
@@ -855,6 +1199,7 @@ mod tests {
             paid_at: -12,
             basis_at: 13,
             round: 14,
+            leg: 5,
         };
         let data = r.encode();
         assert_eq!(Record::decode(&data), r);
@@ -867,7 +1212,8 @@ mod tests {
         assert_eq!(&data[34..42], &(-12i64).to_le_bytes());
         assert_eq!(&data[42..50], &13i64.to_le_bytes());
         assert_eq!(&data[50..54], &14u32.to_le_bytes());
-        assert_eq!(&data[54..], &[0u8; 10][..]);
+        assert_eq!(data[54], 5, "the record's leg (a coin quoted in tokens)");
+        assert_eq!(&data[55..], &[0u8; 9][..]);
         assert_eq!(Record::decode(&[0; 64]), Record::default());
         assert!(!Record::default().is_set());
         assert_eq!(Record::default().encode(), [0; 64]);
@@ -889,6 +1235,7 @@ mod tests {
                 paid_at: 0,
                 basis_at: 50,
                 round: 0,
+                leg: 0,
             }
         );
         // A second buy at 300 of as much again: the average, 200.
@@ -959,7 +1306,8 @@ mod tests {
         assert_eq!(spot_of(&empty), None);
         assert_eq!(trade_price(&empty, 0), None);
         assert_eq!(trade_price(&empty, 1), Some(u64::MAX));
-        // The cap: 20% over the reference, none without one.
+        // The first version's cap (no longer applied to an entry): 20% over the reference, none
+        // without one.
         assert_eq!(capped(1_000, 0), 1_000);
         assert_eq!(capped(1_000, 900), 1_000);
         assert_eq!(capped(1_300, 1_000), 1_200);

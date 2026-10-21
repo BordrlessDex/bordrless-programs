@@ -88,6 +88,7 @@ fn record() -> Record {
         paid_at: 1_800_000_100,
         basis_at: 1_799_999_000,
         round: 6_000_000,
+        leg: 0,
     }
 }
 

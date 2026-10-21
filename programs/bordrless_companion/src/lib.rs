@@ -24,6 +24,17 @@
 //! launch (a game's must be its game's) may also take a custom token hook, which every step that
 //! moves the token carries.
 //!
+//! Coins quoted in tokens (2026-10-21, `docs/token-quotes.md` §7, "builder decides"): a script
+//! companion may launch a coin quoted in 1 to 6 SPL tokens (`launch_token`). Its whole creator fee
+//! is the script's, every leg's in that leg's token, in the creator address's associated token
+//! accounts (the launchpad's `claim_creator_fees_token` pays them, anyone may send it); the script
+//! trades the legs and pays in tokens as it decides, and the companion keeps those accounts the
+//! creator's (`script_step`). A preset companion (a buyback, the launcher's part, a Snowball;
+//! §7.4, the owner: "if the quote token is SPY, it should pay in SPY") launches one too: its parts
+//! are kept per leg in the leg's token (`CompanionLegs`) and spent there by the leg steps
+//! (`claim_fees_leg`, `withdraw_leg`, `buyback_leg`, `snowball_step_leg`); the SOL steps refuse
+//! such a coin.
+//!
 //! Layout: [`state`], [`instructions`] (create and launch, the steps, the game, approvals and
 //! scripts), [`invoke`] (how a step calls another program), [`oracle`], [`events`], [`error`],
 //! [`client`].
@@ -31,7 +42,7 @@
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
-use bordrless_launch::instructions::CreateLaunchArgs;
+use bordrless_launch::instructions::{CreateLaunchArgs, CreateTokenLaunchArgs};
 
 pub mod client;
 pub mod constants;
@@ -344,5 +355,80 @@ pub mod bordrless_companion {
         ctx: Context<'info, CompanionForm<'info>>,
     ) -> Result<()> {
         native::process_revert_companion_to_bridged(ctx)
+    }
+
+    // ---- Coins quoted in tokens (docs/token-quotes.md §7, 2026-10-21) ----
+
+    /// A companion's launch of a coin quoted in tokens: `create_token_launch` through the
+    /// launchpad, the creator address signing as its creator (as `launch` wraps `create_launch`).
+    /// A script's whole creator fee is its pot (`pot_bps` 10,000): each leg's fee, in that leg's
+    /// token, is claimed into the creator address's associated token account of it by the
+    /// launchpad's `claim_creator_fees_token` (anyone), and the script spends it. A preset's
+    /// (a buyback, the launcher's part, a Snowball) pots on the legs are made here
+    /// (`CompanionLegs`, its rent paid by the creator address), each leg's reference its opening
+    /// price. The companion is native from its launch (its SOL, if any reaches it, is its creator
+    /// address's lamports). The remaining accounts are `create_token_launch`'s. Since
+    /// `docs/token-quotes.md` §7.6 a game (its `Game` appended, writable) and a script with a
+    /// launcher's part launch here too, their pots kept per leg (`CompanionLegs`).
+    pub fn launch_token<'info>(
+        ctx: Context<'info, LaunchToken<'info>>,
+        args: CreateTokenLaunchArgs,
+    ) -> Result<()> {
+        instructions::create::process_launch_token(ctx, args)
+    }
+
+    /// Anyone: claims leg `index`'s creator fee into the creator address's token account of the
+    /// leg's token (the launchpad's `claim_creator_fees_token`) and splits what arrived by the
+    /// companion's split into the leg's parts, in that token; the bounty to the sender's token
+    /// account of it, when passed.
+    pub fn claim_fees_leg<'info>(ctx: Context<'info, LegStep<'info>>, index: u8) -> Result<()> {
+        instructions::legs::process_claim_fees_leg(ctx, index)
+    }
+
+    /// Anyone: pays leg `index`'s launcher's part to the launcher's associated token account of the
+    /// leg's token (made when missing, the sender paying).
+    pub fn withdraw_leg<'info>(ctx: Context<'info, LegWithdraw<'info>>, index: u8) -> Result<()> {
+        instructions::legs::process_withdraw_leg(ctx, index)
+    }
+
+    /// Anyone: buys the coin back on leg `index` with that leg's buyback part (capped, spaced, at
+    /// no less than the leg's own curve gives less its fees and the slippage) and burns it.
+    pub fn buyback_leg<'info>(ctx: Context<'info, LegStep<'info>>, index: u8) -> Result<()> {
+        instructions::legs::process_buyback_leg(ctx, index)
+    }
+
+    /// Anyone: a Snowball's trade on leg `index` with that leg's pot, as `snowball_step` trades the
+    /// pool of a SOL coin.
+    pub fn snowball_step_leg<'info>(
+        ctx: Context<'info, LegSnowballStep<'info>>,
+        index: u8,
+    ) -> Result<()> {
+        instructions::legs::process_snowball_step_leg(ctx, index)
+    }
+
+    /// Anyone: shares leg `index`'s holders' part with the coin's holders in the leg's token through
+    /// the kit's `share_token` (`docs/token-quotes.md` §7.5.1), the bounty in that token.
+    pub fn share_leg<'info>(ctx: Context<'info, LegStep<'info>>, index: u8) -> Result<()> {
+        instructions::legs::process_share_leg(ctx, index)
+    }
+
+    /// Anyone: with the coin's SOL switch (`docs/token-quotes.md` §7.5.2), sells leg `index`'s
+    /// launcher's (`part` 0) or holders' (`part` 1) bucket, or a game's pot (`part` 2, §7.6), to
+    /// SOL through the launchpad's `swap_to_sol`, the creator address signing, into the
+    /// companion's SOL part of the same name (paid by `withdraw` and `share`; the game's SOL pot).
+    pub fn swap_bucket_to_sol<'info>(
+        ctx: Context<'info, LegSwapToSol<'info>>,
+        index: u8,
+        part: u8,
+    ) -> Result<()> {
+        instructions::legs::process_swap_bucket_to_sol(ctx, index, part)
+    }
+
+    /// Before the launch, the mint signing (`docs/token-quotes.md` §7.6): a game's least pot on a
+    /// coin quoted in tokens, in basis points of the coin's opening value. `launch_token` requires
+    /// it on such a coin whose SOL switch is off and marks the game's pot kept per leg, in the legs'
+    /// tokens; a SOL coin's `launch` leaves it unread.
+    pub fn set_game_token_terms(ctx: Context<SetGameTokenTerms>, min_pot_bps: u16) -> Result<()> {
+        instructions::token_games::process_set_game_token_terms(ctx, min_pot_bps)
     }
 }

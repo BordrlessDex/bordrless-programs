@@ -115,6 +115,46 @@ pub const LEGS_MAX: usize = 6;
 /// Byte offset of `Legs.reserved[8]`: 1 once the legs together have sold the point a SOL coin
 /// would graduate at, which lifts max wallet.
 pub const LEGS_LIFTED_OFFSET: usize = 918;
+/// Offset of a leg's `quote_mint` within the leg.
+pub const LEGS_LEG_QUOTE_MINT_OFFSET: usize = 0;
+/// Offset of a leg's `quote_program` (0 SPL Token, 1 Token-2022) within the leg.
+pub const LEGS_LEG_QUOTE_PROGRAM_OFFSET: usize = 32;
+/// Offset of a leg's `decimals` within the leg.
+pub const LEGS_LEG_DECIMALS_OFFSET: usize = 33;
+
+// ---- Holder rewards on coins quoted in tokens (`docs/token-quotes.md` §7.5.1): the kind of reward a
+// kit installed by `init_legs` pays, kept in `KitConfig.reserved`, zero on every kit made before. ----
+
+/// `KitConfig.reserved[REWARD_KIND_OFFSET]` (byte 386): the reward kind of a coin quoted in tokens,
+/// 0 for every other kit (and for a token coin without holder rewards).
+pub const REWARD_KIND_OFFSET: usize = 10;
+/// `KitConfig.reserved[11..15]` (bytes 387..391): a rounds kit's round length in seconds (u32).
+pub const ROUND_SECS_OFFSET: usize = 11;
+/// `KitConfig.reserved[15]` (byte 391): a token kit's reward program, 0 SPL Token, 1 Token-2022.
+pub const REWARD_PROGRAM_OFFSET: usize = 15;
+/// `KitConfig.reserved[16]` (byte 392): a token kit's reward mint's decimals.
+pub const REWARD_DECIMALS_OFFSET: usize = 16;
+/// Kind 1: a one-leg coin's rewards in its leg's token, through the kit's own accounting, the vault
+/// being the config's associated token account of that token (continuous, claimable any time).
+pub const REWARD_KIND_TOKEN: u8 = 1;
+/// Kind 2: a coin of two to six legs: every leg's token in rounds (`KitRounds`), each holding paid
+/// its share of each leg's vault on the least it held since the round before began.
+pub const REWARD_KIND_ROUNDS: u8 = 2;
+/// Kind 3: rewards in SOL (the launch's SOL switch): a native kit from birth, fed by
+/// `swap_rewards_to_sol`, which sells the leg vaults' tokens through the launchpad's `swap_to_sol`.
+pub const REWARD_KIND_SOL: u8 = 3;
+/// The shortest round a rounds kit takes (10 minutes).
+pub const MIN_ROUND_SECS: u32 = 600;
+/// The longest round (a day).
+pub const MAX_ROUND_SECS: u32 = 86_400;
+/// The round length when the launch names none (an hour).
+pub const DEFAULT_ROUND_SECS: u32 = 3_600;
+/// `["kit-rounds", mint]`: a rounds kit's [`crate::state::KitRounds`].
+pub const KIT_ROUNDS_SEED: &[u8] = b"kit-rounds";
+/// The launchpad's `swap_to_sol` discriminator (`sha256("global:swap_to_sol")[..8]`), which
+/// `swap_rewards_to_sol` calls by CPI (the kit has no crate dependency on the launchpad; the
+/// launchpad's unit tests check the value against its own).
+pub const SWAP_TO_SOL_DISCRIMINATOR: [u8; 8] = [0x12, 0x3c, 0xff, 0x27, 0x66, 0x80, 0x3e, 0x8c];
 
 /// The token hook flags a kit mint carries for `modules` (§4.2): `BEFORE_TRANSFER`, plus
 /// `BEFORE_BURN | WRITES_HOOK_DATA` when holder rewards or the early-buyer lock is on. Zero (no

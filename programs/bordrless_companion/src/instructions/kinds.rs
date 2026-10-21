@@ -32,6 +32,9 @@ use crate::error::CompanionError;
 use crate::events::*;
 use crate::instructions::game::{apply_status, rolled_over, ClaimPrize, GameStep};
 use crate::instructions::steps::{available, fees_waiting, find, pay_sol, sol_held};
+use crate::instructions::token_games::{
+    fix_prizes, fundable_amounts, LegPayout, TokenPots, PRIZE_SETTLE, PRIZE_SHARE,
+};
 use crate::instructions::CreatorSeeds;
 use crate::state::*;
 
@@ -249,6 +252,75 @@ pub fn process_settle<'info>(ctx: Context<'info, ClaimPrize<'info>>) -> Result<(
     // while it waits. It pays `prize_bps` of the pot when the pot holds its minimum (or the cap
     // when lower, or the floor once dormant), else nothing; and nothing when an empty wallet could
     // not take the prize (below its rent-exempt minimum).
+    if g.in_tokens() {
+        // In the legs' tokens (`docs/token-quotes.md` §7.6): `prize_bps` of each leg's pot, when
+        // the pot holds its minimum in basis points of the opening value. When it falls short and a
+        // `claim_fees_leg` of every leg would fund it (fees in a leg's fee account, or claimed raw
+        // into the companion address's account), they are claimed first (`FeesUnclaimed`).
+        let seeds = CreatorSeeds::of(c);
+        let creator_info = ctx.accounts.creator.to_account_info();
+        let cranker_info = ctx.accounts.cranker.to_account_info();
+        let mut pots = TokenPots::load(&all, &mint)?;
+        let min_pot_bps = g.min_pot_bps_at(now, c.launched_at);
+        let funded = pots.holds(&terms, min_pot_bps);
+        if !funded {
+            require!(
+                !pots.reaches(&fundable_amounts(&all, &pots, c)?, &terms, min_pot_bps),
+                CompanionError::FeesUnclaimed
+            );
+        }
+        let mut paid = [0u64; MAX_COMPANION_LEGS];
+        if funded {
+            let mut amounts = [0u64; MAX_COMPANION_LEGS];
+            for (i, a) in amounts.iter_mut().enumerate().take(pots.count()) {
+                *a = bps_of(pots.legs.legs[i].pending_pot, u64::from(g.prize_bps));
+            }
+            let payout = LegPayout {
+                all: &all,
+                creator: &creator_info,
+                seeds: &seeds,
+                sender: &cranker_info,
+                event_authority: &event_authority,
+                companion: companion_key,
+                bounty_bps: c.bounty_bps,
+            };
+            paid = payout.pay(&mut pots, &round.buyer, &amounts, PRIZE_SETTLE)?;
+            pots.save()?;
+        }
+        let pending_pot = ctx.accounts.companion.pending_pot;
+        let g = &mut ctx.accounts.game;
+        g.paid_buys = round.number;
+        if paid.iter().all(|&p| p == 0) {
+            g.rollovers = g.rollovers.saturating_add(1);
+            emit_cpi!(JackpotUnfunded {
+                game: game_key,
+                mint,
+                round: round.number,
+                winner: round.buyer,
+                amount: round.amount,
+                pending_pot,
+                cranker: ctx.accounts.cranker.key(),
+            });
+            return Ok(());
+        }
+        g.prizes_paid = g.prizes_paid.saturating_add(1);
+        g.last_winner = round.buyer;
+        g.settled_at = now;
+        emit_cpi!(JackpotPaid {
+            game: game_key,
+            mint,
+            round: round.number,
+            holding: holding.key(),
+            winner: round.buyer,
+            amount: round.amount,
+            bought_at: round.at,
+            prize: 0,
+            bounty: 0,
+            pending_pot,
+            cranker: ctx.accounts.cranker.key(),
+        });
+        return Ok(());
+    }
     let threshold = terms.draw_threshold(g.min_pot_at(now, c.launched_at));
     let funded = c.pending_pot >= threshold;
     // Fees the launch holds and nobody has claimed yet could fund the prize: then the round is not
@@ -340,9 +412,19 @@ pub(crate) fn prize_due(
         return Ok(false);
     }
     // What a fee claim would bring counts too: a `retire` never voids a prize a claim would fund.
-    let launch = launch_client::launch_address(&g.mint);
-    if fundable(all, c, &launch)? < terms.draw_threshold(g.min_pot_at(now, c.launched_at)) {
-        return Ok(false);
+    if g.in_tokens() {
+        let pots = TokenPots::load(all, &c.mint)?;
+        let min_pot_bps = g.min_pot_bps_at(now, c.launched_at);
+        if !pots.holds(terms, min_pot_bps)
+            && !pots.reaches(&fundable_amounts(all, &pots, c)?, terms, min_pot_bps)
+        {
+            return Ok(false);
+        }
+    } else {
+        let launch = launch_client::launch_address(&g.mint);
+        if fundable(all, c, &launch)? < terms.draw_threshold(g.min_pot_at(now, c.launched_at)) {
+            return Ok(false);
+        }
     }
     // The state must be passed; one that can't be read (a hook that broke its own state) owes no
     // prize, so it never holds the pot for ever.
@@ -426,10 +508,18 @@ pub fn process_close_epoch<'info>(ctx: Context<'info, GameStep<'info>>, epoch: u
         current > 0 && epoch == current - 1 && epoch >= g.next_round,
         CompanionError::RoundNotOver
     );
-    require!(
-        c.pending_pot >= terms.draw_threshold(g.min_pot_at(now, c.launched_at)),
-        CompanionError::PotTooSmall
-    );
+    if g.in_tokens() {
+        let pots = TokenPots::load(ctx.remaining_accounts, &c.mint)?;
+        require!(
+            pots.holds(&terms, g.min_pot_bps_at(now, c.launched_at)),
+            CompanionError::PotTooSmall
+        );
+    } else {
+        require!(
+            c.pending_pot >= terms.draw_threshold(g.min_pot_at(now, c.launched_at)),
+            CompanionError::PotTooSmall
+        );
+    }
     if released {
         emit_cpi!(EpochEnded {
             game: game_key,
@@ -469,7 +559,24 @@ pub fn process_close_epoch<'info>(ctx: Context<'info, GameStep<'info>>, epoch: u
             return rolled_over(&event_authority, game_key, c, g, reason);
         }
     };
-    let pot = bps_of(c.pending_pot, u64::from(g.prize_bps));
+    // In the legs' tokens: each leg's epoch pot `prize_bps` of its pot, locked on the leg (its
+    // `prize`, until the epoch's claims end).
+    let pot = if g.in_tokens() {
+        let mut pots = TokenPots::load(&all, &c.mint)?;
+        let (prizes, pot_bps) = fix_prizes(&mut pots, g.prize_bps);
+        pots.save()?;
+        emit_cpi!(LegPrizesFixed {
+            game: game_key,
+            mint: g.mint,
+            round: epoch,
+            kind: PRIZE_SHARE,
+            prizes,
+            pot_bps,
+        });
+        0
+    } else {
+        bps_of(c.pending_pot, u64::from(g.prize_bps))
+    };
     g.total = total;
     g.prize = pot;
     g.epoch_paid = 0;
@@ -606,6 +713,55 @@ pub fn process_claim_share<'info>(
         holding.amount,
     );
     require!(weight > 0, CompanionError::NoShare);
+    if g.in_tokens() {
+        // In the legs' tokens: the holding's share of each leg's epoch pot, at most what it still
+        // holds of it, to the owner's account of the leg's token.
+        let all = available(ctx.accounts.to_account_infos(), ctx.remaining_accounts);
+        let seeds = CreatorSeeds::of(c);
+        let creator_info = ctx.accounts.creator.to_account_info();
+        let cranker_info = ctx.accounts.cranker.to_account_info();
+        let mut pots = TokenPots::load(&all, &mint)?;
+        let mut amounts = [0u64; MAX_COMPANION_LEGS];
+        for (i, a) in amounts.iter_mut().enumerate().take(pots.count()) {
+            let p = pots.legs.legs[i];
+            *a = share_of(p.prize, weight, g.total).min(p.prize_left());
+        }
+        let payout = LegPayout {
+            all: &all,
+            creator: &creator_info,
+            seeds: &seeds,
+            sender: &cranker_info,
+            event_authority: &event_authority,
+            companion: companion_key,
+            bounty_bps: c.bounty_bps,
+        };
+        let paid = payout.pay(&mut pots, &owner, &amounts, PRIZE_SHARE)?;
+        require!(paid.iter().any(|&p| p > 0), CompanionError::NothingToDo);
+        for (i, p) in paid.iter().enumerate().take(pots.count()) {
+            pots.legs.legs[i].prize_paid = pots.legs.legs[i].prize_paid.saturating_add(*p);
+        }
+        pots.save()?;
+        let pending_pot = ctx.accounts.companion.pending_pot;
+        let g = &mut ctx.accounts.game;
+        g.prizes_paid = g.prizes_paid.saturating_add(1);
+        g.last_winner = owner;
+        g.settled_at = now;
+        emit_cpi!(ShareClaimed {
+            game: game_key,
+            mint,
+            epoch,
+            holding: holding_key,
+            owner,
+            weight,
+            total: g.total,
+            share: 0,
+            bounty: 0,
+            epoch_paid: g.epoch_paid,
+            pending_pot,
+            cranker: ctx.accounts.cranker.key(),
+        });
+        return Ok(());
+    }
     let share = share_of(g.prize, weight, g.total)
         .min(c.pot_locked)
         .min(c.pending_pot);
