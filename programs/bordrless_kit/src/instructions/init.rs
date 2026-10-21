@@ -1,10 +1,11 @@
 //! `init`: installs the kit on a launch's mint (`docs/hooks-v2.md` §4.10). Called by the launch
-//! program inside `create_launch`, signed by its kit-caller PDA for the mint.
+//! program inside `create_launch`, signed by its kit-caller PDA for the mint. `init_legs` installs
+//! it on a coin quoted in tokens, inside `create_token_launch` (`docs/token-quotes.md` §6.1).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke;
 use bordrless_hook::{
-    write_registry, AccountSource, ExtraAccount, HookAccountList, HOOK_ACCOUNTS_SEED,
+    write_registry, AccountSource, ExtraAccount, HookAccountList, Seed, HOOK_ACCOUNTS_SEED,
 };
 use bordrless_token::client as token_client;
 use bordrless_token::state::{Holding, Mint as TokenMint};
@@ -170,6 +171,123 @@ pub fn process_init(ctx: Context<Init>, args: KitInitArgs) -> Result<()> {
         &registry_list(config_key, vault_key),
     )?;
 
+    emit_cpi!(KitInstalled {
+        mint: mint_key,
+        kit_config: config_key,
+        launch: config.launch,
+        pool: config.pool,
+        creator: config.creator,
+        reward_mint: config.reward_mint,
+        reward_vault: config.reward_vault,
+        modules: config.modules,
+        supply,
+        min_eligible: config.min_eligible,
+        max_wallet_bps: config.max_wallet_bps,
+        max_wallet_amount: config.max_wallet_amount,
+        creator_unlock_at: config.creator_unlock_at,
+        early_window_end: config.early_window_end,
+        early_unlock_at: config.early_unlock_at,
+        ts: now,
+    });
+    ctx.accounts.kit_config.set_inner(config);
+    Ok(())
+}
+
+/// Accounts of `init_legs`: `init`'s without the reward mint, the reward vault and the token
+/// program (a coin quoted in tokens has no holder rewards yet).
+#[event_cpi]
+#[derive(Accounts)]
+pub struct InitLegs<'info> {
+    /// `create_program_address(["kit-caller", mint, [args.kit_caller_bump]], LAUNCH_ID)`, signing
+    /// by CPI from the launch program (checked in the handler).
+    pub kit_caller: Signer<'info>,
+    /// Pays the rent: the creator.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// The launch's new mint: the kit as hook with the flags of the modules, no hook authority,
+    /// no mint authority, the whole supply minted (checked in the handler).
+    pub mint: Account<'info, TokenMint>,
+    /// The launch's holding of the mint, holding the whole supply.
+    pub launch_reserve: Account<'info, Holding>,
+    #[account(init, payer = payer, space = KitConfig::LEN, seeds = [KIT_SEED, mint.key().as_ref()], bump)]
+    pub kit_config: Account<'info, KitConfig>,
+    /// CHECK: the kit's registry for the mint, written here (an address someone already funded is
+    /// accepted).
+    #[account(mut, seeds = [HOOK_ACCOUNTS_SEED, mint.key().as_ref()], bump)]
+    pub registry: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// The kit's registry for a coin quoted in tokens: [`registry_list`]'s two extras (the config,
+/// the kit's id for no reward vault), then the coin's `Legs`, `PDA(["legs", mint], LAUNCH_ID)`
+/// (read-only; the mint is the callback's account 1).
+pub fn legs_registry_list(kit_config: Pubkey) -> HookAccountList {
+    let mut list = registry_list(kit_config, None);
+    list.accounts.push(ExtraAccount {
+        writable: false,
+        source: AccountSource::Pda {
+            program: LAUNCH_ID,
+            seeds: vec![Seed::Literal(LEGS_SEED.to_vec()), Seed::Account(1)],
+        },
+    });
+    list
+}
+
+/// `init_legs`: the kit of a coin quoted in tokens (`docs/token-quotes.md` §6.1), installed by the
+/// launchpad inside `create_token_launch` as `init` installs a SOL coin's: the same checks of the
+/// arguments, the mint, the reserve and the caller, without holder rewards (`RewardsOnTokenQuote`)
+/// or a reward mint (the default key, else `WrongRewardMint`). The config is marked quoted in
+/// tokens, so its callbacks take the coin's `Legs` and treat every leg's pool as the pool; `pool`
+/// is leg 0's.
+pub fn process_init_legs(ctx: Context<InitLegs>, args: KitInitArgs) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let mint_key = ctx.accounts.mint.key();
+    let config_key = ctx.accounts.kit_config.key();
+    let mint = &ctx.accounts.mint;
+    let supply = mint.supply;
+    require!(
+        args.modules & modules::HOLDER_REWARDS == 0,
+        KitError::RewardsOnTokenQuote
+    );
+    require_keys_eq!(
+        args.reward_mint,
+        Pubkey::default(),
+        KitError::WrongRewardMint
+    );
+    let mut config = KitConfig::install(&args, mint_key, supply, ctx.bumps.kit_config, None, now)?;
+    config.set_token_quoted();
+    require!(
+        mint.hook_program == Some(crate::ID)
+            && mint.hook_authority.is_none()
+            && mint.mint_authority.is_none()
+            && mint.max_supply == supply
+            && mint.hook_flags == mint_flags(args.modules),
+        KitError::WrongMintSetup
+    );
+    let reserve = &ctx.accounts.launch_reserve;
+    require!(
+        reserve.mint == mint_key && reserve.owner == args.launch && reserve.amount == supply,
+        KitError::WrongReserve
+    );
+    let expected = Pubkey::create_program_address(
+        &[KIT_CALLER_SEED, mint_key.as_ref(), &[args.kit_caller_bump]],
+        &LAUNCH_ID,
+    )
+    .map_err(|_| KitError::NotKitCaller)?;
+    require_keys_eq!(
+        ctx.accounts.kit_caller.key(),
+        expected,
+        KitError::NotKitCaller
+    );
+    write_registry(
+        &ctx.accounts.payer.to_account_info(),
+        &ctx.accounts.registry.to_account_info(),
+        &ctx.accounts.system_program.to_account_info(),
+        &crate::ID,
+        &mint_key,
+        ctx.bumps.registry,
+        &legs_registry_list(config_key),
+    )?;
     emit_cpi!(KitInstalled {
         mint: mint_key,
         kit_config: config_key,

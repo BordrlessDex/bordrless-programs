@@ -12,11 +12,13 @@ use bordrless_hook::{HookReturn, TokenHookArgs};
 
 use crate::constants::*;
 use crate::error::KitError;
+use crate::legs::LegPools;
 use crate::rules;
 use crate::state::KitConfig;
 
 /// Accounts of `before_transfer` and `before_burn`: the token program's prefix, then the two
-/// extras the kit's registry always lists.
+/// extras the kit's registry always lists. A coin quoted in tokens' registry lists a third, its
+/// `Legs` (the first remaining account, read by [`legs_of`]).
 #[derive(Accounts)]
 pub struct Callback<'info> {
     /// CHECK: the token program's signer for the kit: a signer, compared with the constant.
@@ -82,17 +84,43 @@ fn bind(accounts: &Callback, args: &TokenHookArgs) -> Result<Option<u64>> {
     }
 }
 
+/// The `Legs` of a coin quoted in tokens: the first account after the two extras, required exactly
+/// when the config is such a coin's (`docs/token-quotes.md` §6.1); `None` for every other token,
+/// whose remaining accounts are ignored as before.
+fn legs_of(config: &KitConfig, remaining: &[AccountInfo]) -> Result<Option<LegPools>> {
+    if !config.is_token_quoted() {
+        return Ok(None);
+    }
+    let info = remaining.first().ok_or(KitError::LegsMissing)?;
+    LegPools::read(info, &config.mint).map(Some)
+}
+
 /// `before_transfer`.
 pub fn process_before_transfer(ctx: Context<Callback>, args: TokenHookArgs) -> Result<HookReturn> {
     let vault = bind(ctx.accounts, &args)?;
+    let legs = legs_of(&ctx.accounts.kit_config, ctx.remaining_accounts)?;
     let now = Clock::get()?.unix_timestamp;
     let key = ctx.accounts.kit_config.key();
-    rules::before_transfer(&mut ctx.accounts.kit_config, &key, &args, vault, now)
+    rules::before_transfer_with(
+        &mut ctx.accounts.kit_config,
+        &key,
+        &args,
+        vault,
+        now,
+        legs.as_ref(),
+    )
 }
 
 /// `before_burn`.
 pub fn process_before_burn(ctx: Context<Callback>, args: TokenHookArgs) -> Result<HookReturn> {
     let vault = bind(ctx.accounts, &args)?;
+    let legs = legs_of(&ctx.accounts.kit_config, ctx.remaining_accounts)?;
     let now = Clock::get()?.unix_timestamp;
-    rules::before_burn(&mut ctx.accounts.kit_config, &args, vault, now)
+    rules::before_burn_with(
+        &mut ctx.accounts.kit_config,
+        &args,
+        vault,
+        now,
+        legs.as_ref(),
+    )
 }

@@ -1173,9 +1173,11 @@
       "name": "create_token_launch",
       "docs": [
         "Creates a coin quoted in 1 to 6 SPL Token or Token-2022 mints (`docs/token-quotes.md`",
-        "§2.2): the mint (no token hook), the whole supply to the launch, the `Launch` and its",
-        "`Legs`. The remaining accounts are the quote mints, in leg order. Each leg then opens with",
-        "`open_leg`."
+        "§2.2): the mint, the whole supply to the launch, the `Launch` and its `Legs`. The remaining",
+        "accounts are the quote mints, in leg order. Each leg then opens with `open_leg`. With rules",
+        "(§6.1: the burn, max wallet, the creator wallet lock, the early-buyer lock; no holder fee",
+        "yet) as `create_launch` takes them; when they install the kit, the mint names it as its hook",
+        "and the kit's six accounts follow the quote mints. Data without rules reads as none."
       ],
       "discriminator": [
         93,
@@ -1811,7 +1813,8 @@
       "docs": [
         "Anyone: opens leg `index` of a launch quoted in tokens: its creator-fee account, its pool",
         "on the DEX (this program as the hook, the leg's share deposited) and the pool's registry.",
-        "Trading starts once every leg is open."
+        "Trading starts once every leg is open. With kit rules, the remaining accounts are the kit,",
+        "the token program's signer of its callbacks and the kit config."
       ],
       "discriminator": [
         231,
@@ -2440,6 +2443,19 @@
       ]
     },
     {
+      "name": "LegsMaxWalletLifted",
+      "discriminator": [
+        178,
+        114,
+        234,
+        253,
+        253,
+        149,
+        104,
+        159
+      ]
+    },
+    {
       "name": "NativeLaunchesSet",
       "discriminator": [
         129,
@@ -2515,6 +2531,32 @@
         93,
         98,
         216
+      ]
+    },
+    {
+      "name": "TokenLaunchLocks",
+      "discriminator": [
+        207,
+        196,
+        65,
+        71,
+        28,
+        86,
+        75,
+        97
+      ]
+    },
+    {
+      "name": "TokenLaunchRules",
+      "discriminator": [
+        116,
+        240,
+        117,
+        11,
+        104,
+        67,
+        215,
+        117
       ]
     }
   ],
@@ -2928,6 +2970,11 @@
       "code": 6081,
       "name": "LegsAccountInvalid",
       "msg": "a leg pool's callbacks take the launch's Legs (writable) where a launch pool takes its holder vault"
+    },
+    {
+      "code": 6082,
+      "name": "HolderFeeOnTokenLaunch",
+      "msg": "holder rewards are not available on a coin quoted in tokens yet: no holder fee"
     }
   ],
   "types": [
@@ -3509,6 +3556,21 @@
             ],
             "type": {
               "vec": "u64"
+            }
+          },
+          {
+            "name": "rules",
+            "docs": [
+              "The token rules, as `create_launch` takes them and within the same bounds",
+              "(`docs/token-quotes.md` §6.1): the burn on buys and sells (every leg's pool hook), max",
+              "wallet, the creator wallet lock and the early-buyer lock (the kit). No holder fee yet",
+              "(`HolderFeeOnTokenLaunch`). Last in the data and optional there: data that ends after",
+              "`virtual_quotes`, as every call made before rules, reads as no rules."
+            ],
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
             }
           }
         ]
@@ -4879,7 +4941,12 @@
           {
             "name": "reserved",
             "docs": [
-              "Reserved."
+              "Reserved. With max wallet (`docs/token-quotes.md` §6.1): `reserved[0..8]` the coins the legs",
+              "together must have sold for max wallet to lift ([`Legs::lift_at`], the supply's `curve_bps`,",
+              "where a SOL coin graduates; 0 without max wallet), `reserved[8]` 1 once it has lifted",
+              "([`Legs::lifted`], which the kit reads), `reserved[16..64]` each leg's coins sold so far",
+              "([`Legs::sold`], `i64`: its share less its pool's base reserve, negative while the leg holds",
+              "coins bought on another). Zeros for every `Legs` made before, and with no max wallet."
             ],
             "type": {
               "array": [
@@ -4887,6 +4954,49 @@
                 64
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LegsMaxWalletLifted",
+      "docs": [
+        "Max wallet lifted on a launch quoted in tokens (`docs/token-quotes.md` §6.1): its legs together",
+        "had sold `lift_at` coins before this trade. Logged by the pool hook (`after_swap` of the trade",
+        "on `pool`), not by self-CPI: the DEX calls the hook without this program's event authority."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "The leg pool whose trade lifted it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "sold",
+            "docs": [
+              "The coins the legs together had sold."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lift_at",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
           }
         ]
       }
@@ -5500,6 +5610,132 @@
           },
           {
             "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenLaunchLocks",
+      "docs": [
+        "The locks of a launch quoted in tokens start (`docs/token-quotes.md` §6.1): its last leg opened",
+        "(`open_leg`, right after its `LegOpened`), so trading opened, and its creator wallet lock and",
+        "early-buyer lock run from now: the times `TokenLaunchRules` and the `Launch` hold (counted from",
+        "`create_token_launch`) moved by `delay`, as the kit applies them. Only when the launch has",
+        "either lock."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "trading_opened_at",
+            "docs": [
+              "When trading opened: the last leg's `opened_at`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "delay",
+            "docs": [
+              "`trading_opened_at - created_at`: what every lock's time moves by."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The times in force (0 when that lock is off)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "type": "i64"
+          },
+          {
+            "name": "ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenLaunchRules",
+      "docs": [
+        "The rules of a launch quoted in tokens (`create_token_launch`, `docs/token-quotes.md` §6.1),",
+        "right after its `TokenLaunchCreated`, only when it has any: the burn (every leg's pool hook) and",
+        "the kit's modules (max wallet, the creator wallet lock, the early-buyer lock). No holder fee yet."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "rules",
+            "type": {
+              "defined": {
+                "name": "LaunchRules"
+              }
+            }
+          },
+          {
+            "name": "modules",
+            "type": "u8"
+          },
+          {
+            "name": "kit_config",
+            "docs": [
+              "`PDA([\"kit\", mint], KIT_ID)` when `modules` is above 0."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "creator_unlock_at",
+            "docs": [
+              "The locks' times counted from the launch; they run from when trading opens (the last",
+              "`open_leg`, `TokenLaunchLocks`), moved by how long after the launch that is."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "early_window_end",
+            "type": "i64"
+          },
+          {
+            "name": "early_unlock_at",
+            "type": "i64"
+          },
+          {
+            "name": "lift_at",
+            "docs": [
+              "With max wallet, the coins the legs together must sell for it to lift (the supply's",
+              "`curve_bps`, where a SOL coin graduates); 0 without."
+            ],
             "type": "u64"
           },
           {

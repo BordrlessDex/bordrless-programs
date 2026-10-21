@@ -180,6 +180,8 @@ pub enum LaunchError {
     WrongLegAccount,
     #[msg("a leg pool's callbacks take the launch's Legs (writable) where a launch pool takes its holder vault")]
     LegsAccountInvalid,
+    #[msg("holder rewards are not available on a coin quoted in tokens yet: no holder fee")]
+    HolderFeeOnTokenLaunch,
 }
 
 impl From<bordrless_swap::spl::MintRefusal> for LaunchError {

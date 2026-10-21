@@ -303,3 +303,60 @@ pub struct LegCreatorFeesClaimed {
     pub slot: u64,
     pub ts: i64,
 }
+
+/// The rules of a launch quoted in tokens (`create_token_launch`, `docs/token-quotes.md` §6.1),
+/// right after its `TokenLaunchCreated`, only when it has any: the burn (every leg's pool hook) and
+/// the kit's modules (max wallet, the creator wallet lock, the early-buyer lock). No holder fee yet.
+#[event]
+pub struct TokenLaunchRules {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub rules: LaunchRules,
+    pub modules: u8,
+    /// `PDA(["kit", mint], KIT_ID)` when `modules` is above 0.
+    pub kit_config: Option<Pubkey>,
+    /// The locks' times counted from the launch; they run from when trading opens (the last
+    /// `open_leg`, `TokenLaunchLocks`), moved by how long after the launch that is.
+    pub creator_unlock_at: i64,
+    pub early_window_end: i64,
+    pub early_unlock_at: i64,
+    /// With max wallet, the coins the legs together must sell for it to lift (the supply's
+    /// `curve_bps`, where a SOL coin graduates); 0 without.
+    pub lift_at: u64,
+    pub ts: i64,
+}
+
+/// The locks of a launch quoted in tokens start (`docs/token-quotes.md` §6.1): its last leg opened
+/// (`open_leg`, right after its `LegOpened`), so trading opened, and its creator wallet lock and
+/// early-buyer lock run from now: the times `TokenLaunchRules` and the `Launch` hold (counted from
+/// `create_token_launch`) moved by `delay`, as the kit applies them. Only when the launch has
+/// either lock.
+#[event]
+pub struct TokenLaunchLocks {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    /// When trading opened: the last leg's `opened_at`.
+    pub trading_opened_at: i64,
+    /// `trading_opened_at - created_at`: what every lock's time moves by.
+    pub delay: i64,
+    /// The times in force (0 when that lock is off).
+    pub creator_unlock_at: i64,
+    pub early_window_end: i64,
+    pub early_unlock_at: i64,
+    pub ts: i64,
+}
+
+/// Max wallet lifted on a launch quoted in tokens (`docs/token-quotes.md` §6.1): its legs together
+/// had sold `lift_at` coins before this trade. Logged by the pool hook (`after_swap` of the trade
+/// on `pool`), not by self-CPI: the DEX calls the hook without this program's event authority.
+#[event]
+pub struct LegsMaxWalletLifted {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    /// The leg pool whose trade lifted it.
+    pub pool: Pubkey,
+    /// The coins the legs together had sold.
+    pub sold: u64,
+    pub lift_at: u64,
+    pub ts: i64,
+}

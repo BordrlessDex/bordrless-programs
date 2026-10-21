@@ -11,7 +11,7 @@ use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::solana_program::instruction::Instruction;
 use bordrless_launch::client as launch;
 use bordrless_launch::instructions::CreateTokenLaunchArgs;
-use bordrless_launch::state::{Launch, Legs};
+use bordrless_launch::state::{Launch, LaunchRules, Legs};
 use bordrless_swap::spl;
 use bordrless_swap::state::Pool;
 use bordrless_token::client as token;
@@ -314,11 +314,21 @@ impl Env {
 pub type Quote = (Pubkey, u64);
 
 impl World {
-    /// The arguments of a launch quoted in `quotes`.
+    /// The arguments of a launch quoted in `quotes`, without rules.
     pub fn token_launch_args(
         symbol: &str,
         creator_fee_bps: u16,
         quotes: &[Quote],
+    ) -> CreateTokenLaunchArgs {
+        Self::token_launch_args_with(symbol, creator_fee_bps, quotes, LaunchRules::NONE)
+    }
+
+    /// The arguments of a launch quoted in `quotes` with `rules` (`docs/token-quotes.md` §6.1).
+    pub fn token_launch_args_with(
+        symbol: &str,
+        creator_fee_bps: u16,
+        quotes: &[Quote],
+        rules: LaunchRules,
     ) -> CreateTokenLaunchArgs {
         CreateTokenLaunchArgs {
             name: format!("Token {symbol}"),
@@ -326,10 +336,11 @@ impl World {
             uri: "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi".to_string(),
             creator_fee_bps,
             virtual_quotes: quotes.iter().map(|q| q.1).collect(),
+            rules,
         }
     }
 
-    /// The `create_token_launch` of `creator` for `mint`.
+    /// The `create_token_launch` of `creator` for `mint`, without rules.
     pub fn token_launch_ix(
         &self,
         creator: &Pubkey,
@@ -337,25 +348,55 @@ impl World {
         creator_fee_bps: u16,
         quotes: &[Quote],
     ) -> Instruction {
+        self.token_launch_ix_with(creator, mint, creator_fee_bps, quotes, LaunchRules::NONE)
+    }
+
+    /// The `create_token_launch` of `creator` for `mint` with `rules` (the kit's accounts after the
+    /// quote mints when they install it).
+    pub fn token_launch_ix_with(
+        &self,
+        creator: &Pubkey,
+        mint: &Pubkey,
+        creator_fee_bps: u16,
+        quotes: &[Quote],
+        rules: LaunchRules,
+    ) -> Instruction {
         let mints: Vec<Pubkey> = quotes.iter().map(|q| q.0).collect();
         launch::create_token_launch(
             *creator,
             *mint,
             self.env.treasury.pubkey(),
-            Self::token_launch_args("TQ", creator_fee_bps, quotes),
+            Self::token_launch_args_with("TQ", creator_fee_bps, quotes, rules),
             &mints,
         )
     }
 
-    /// A launch quoted in `quotes` by `creator`.
+    /// A launch quoted in `quotes` by `creator`, without rules.
     pub fn create_token_launch(
         &mut self,
         creator: &Keypair,
         creator_fee_bps: u16,
         quotes: &[Quote],
     ) -> (Pubkey, Tx) {
+        self.create_token_launch_with(creator, creator_fee_bps, quotes, LaunchRules::NONE)
+    }
+
+    /// A launch quoted in `quotes` by `creator` with `rules`.
+    pub fn create_token_launch_with(
+        &mut self,
+        creator: &Keypair,
+        creator_fee_bps: u16,
+        quotes: &[Quote],
+        rules: LaunchRules,
+    ) -> (Pubkey, Tx) {
         let mint = Keypair::new();
-        let ix = self.token_launch_ix(&creator.pubkey(), &mint.pubkey(), creator_fee_bps, quotes);
+        let ix = self.token_launch_ix_with(
+            &creator.pubkey(),
+            &mint.pubkey(),
+            creator_fee_bps,
+            quotes,
+            rules,
+        );
         let tx = self.env.send_paid_by(&[ix], creator, &[&mint]);
         (mint.pubkey(), tx)
     }
@@ -378,13 +419,40 @@ impl World {
         }
     }
 
-    /// `open_leg(index)` of the launch of `mint`, `payer` paying.
+    /// `open_leg(index)` of the launch of `mint`, `payer` paying (with the kit's accounts when the
+    /// launch's rules installed it).
     pub fn open_leg_ix(&self, payer: &Pubkey, mint: &Pubkey, index: usize) -> Instruction {
-        launch::open_leg(
+        let l: Launch = self.env.read(&launch::launch_address(mint));
+        launch::open_leg_with(
             *payer,
             self.env.treasury.pubkey(),
             &self.leg_keys(mint, index),
             index as u8,
+            l.modules,
+        )
+    }
+
+    /// A swap on leg `index` of the launch of `mint` by `trader`, delivered to `recipient`, as a
+    /// client builds it from the launch's rules (the kit's slice with the `Legs`, the coin's mint
+    /// writable when it burns).
+    pub fn leg_swap_ix(
+        &self,
+        trader: &Pubkey,
+        recipient: &Pubkey,
+        mint: &Pubkey,
+        index: usize,
+        direction: u8,
+        amount_in: u64,
+    ) -> Instruction {
+        let l: Launch = self.env.read(&launch::launch_address(mint));
+        launch::leg_swap_with_rules(
+            &self.leg_keys(mint, index),
+            &l.rules,
+            *trader,
+            *recipient,
+            direction,
+            amount_in,
+            0,
         )
     }
 
@@ -412,10 +480,10 @@ impl World {
     /// A buy of `amount` of leg `index`'s quote, delivered to the trader (its holding of the coin
     /// created first).
     pub fn leg_buy(&mut self, trader: &Keypair, mint: &Pubkey, index: usize, amount: u64) -> Tx {
-        let keys = self.leg_keys(mint, index);
+        let who = trader.pubkey();
         let ixs = [
-            token::create_holding(trader.pubkey(), *mint, trader.pubkey()),
-            launch::leg_swap(&keys, trader.pubkey(), trader.pubkey(), 1, amount, 0),
+            token::create_holding(who, *mint, who),
+            self.leg_swap_ix(&who, &who, mint, index, 1, amount),
         ];
         self.env.send_paid_by(&ixs, trader, &[])
     }
@@ -423,8 +491,8 @@ impl World {
     /// A sell of `amount` of the coin on leg `index`, delivered to the trader's associated token
     /// account of the quote.
     pub fn leg_sell(&mut self, trader: &Keypair, mint: &Pubkey, index: usize, amount: u64) -> Tx {
-        let keys = self.leg_keys(mint, index);
-        let ix = launch::leg_swap(&keys, trader.pubkey(), trader.pubkey(), 0, amount, 0);
+        let who = trader.pubkey();
+        let ix = self.leg_swap_ix(&who, &who, mint, index, 0, amount);
         self.env.send_paid_by(&[ix], trader, &[])
     }
 }

@@ -80,6 +80,42 @@ pub const MAX_CREATOR_LOCK_SECS: i64 = 365 * 86_400;
 /// The latest early-buyer unlock, counted from `init`.
 pub const MAX_EARLY_LOCK_SECS: i64 = 30 * 86_400;
 
+// ---- Coins quoted in tokens (`docs/token-quotes.md` §6.1): the launchpad's `Legs` at
+// `["legs", mint]`, read in place. A constant layout: the kit has no crate dependency on the
+// launch, whose unit tests check every number below against its own `Legs`. ----
+
+/// `KitConfig.reserved[QUOTE_KIND_OFFSET]`: [`QUOTE_KIND_TOKENS`] for the kit of a coin quoted in
+/// tokens (`init_legs`), whose callbacks take the coin's `Legs` after the two extras; 0 for every
+/// other kit.
+pub const QUOTE_KIND_OFFSET: usize = 9;
+/// See [`QUOTE_KIND_OFFSET`] (the launchpad's `Launch.reserved[18]` takes the same value).
+pub const QUOTE_KIND_TOKENS: u8 = 2;
+/// `["legs", mint]` under [`LAUNCH_ID`].
+pub const LEGS_SEED: &[u8] = b"legs";
+/// Anchor's discriminator of the launchpad's `Legs`: `sha256("account:Legs")[..8]`.
+pub const LEGS_DISCRIMINATOR: [u8; 8] = [0x16, 0xbe, 0x5c, 0xdd, 0xc3, 0x3b, 0xab, 0xbd];
+/// Size of a `Legs` account.
+pub const LEGS_LEN: usize = 974;
+/// Byte offset of `Legs.mint`.
+pub const LEGS_MINT_OFFSET: usize = 10;
+/// Byte offset of `Legs.count`.
+pub const LEGS_COUNT_OFFSET: usize = 74;
+/// Byte offset of `Legs.opened` (trading opens when it reaches `count`).
+pub const LEGS_OPENED_OFFSET: usize = 75;
+/// Byte offset of `Legs.legs[0]`.
+pub const LEGS_FIRST_LEG_OFFSET: usize = 76;
+/// Bytes of one leg.
+pub const LEGS_LEG_LEN: usize = 139;
+/// Offset of a leg's `pool` within the leg.
+pub const LEGS_LEG_POOL_OFFSET: usize = 51;
+/// Offset of a leg's `opened_at` (i64, 0 until `open_leg`) within the leg.
+pub const LEGS_LEG_OPENED_AT_OFFSET: usize = 131;
+/// The most legs a coin has.
+pub const LEGS_MAX: usize = 6;
+/// Byte offset of `Legs.reserved[8]`: 1 once the legs together have sold the point a SOL coin
+/// would graduate at, which lifts max wallet.
+pub const LEGS_LIFTED_OFFSET: usize = 918;
+
 /// The token hook flags a kit mint carries for `modules` (§4.2): `BEFORE_TRANSFER`, plus
 /// `BEFORE_BURN | WRITES_HOOK_DATA` when holder rewards or the early-buyer lock is on. Zero (no
 /// hook at all) without any module.

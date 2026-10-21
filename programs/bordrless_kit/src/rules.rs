@@ -8,6 +8,7 @@ use bordrless_hook::{HookReturn, Phase, TokenHookArgs, TokenOp};
 
 use crate::constants::modules;
 use crate::error::KitError;
+use crate::legs::LegPools;
 use crate::math::settle;
 use crate::state::{HolderData, KitConfig};
 
@@ -38,6 +39,31 @@ fn vault_of(config: &KitConfig, vault_amount: Option<u64>) -> Result<Option<u64>
     }
 }
 
+/// The times the locks run by: the config's for every token but a coin quoted in tokens, whose
+/// locks run from when trading opened (its last leg's opening, [`LegPools::delay`]) rather than
+/// from its launch, so withholding a leg never spends a lock before anyone can trade. 0 stays 0
+/// (the lock is off).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LockTimes {
+    /// The creator wallet unlocks at this time.
+    pub creator_unlock_at: i64,
+    /// Buys from a pool before this time are locked.
+    pub early_window_end: i64,
+    /// ... until this time.
+    pub early_unlock_at: i64,
+}
+
+/// The [`LockTimes`] of `config` at `now`, with the coin's `Legs` when it is quoted in tokens.
+pub fn lock_times(config: &KitConfig, legs: Option<&LegPools>, now: i64) -> LockTimes {
+    let delay = legs.map_or(0, |l| l.delay(config.created_at, now));
+    let at = |t: i64| if t == 0 { 0 } else { t.saturating_add(delay) };
+    LockTimes {
+        creator_unlock_at: at(config.creator_unlock_at),
+        early_window_end: at(config.early_window_end),
+        early_unlock_at: at(config.early_unlock_at),
+    }
+}
+
 /// `before_transfer` of a token whose config is `config` (at address `config_key`), at `now`:
 ///
 /// 1. a refused destination, or with holder rewards a destination owner that is neither
@@ -57,13 +83,34 @@ pub fn before_transfer(
     vault_amount: Option<u64>,
     now: i64,
 ) -> Result<HookReturn> {
+    before_transfer_with(config, config_key, args, vault_amount, now, None)
+}
+
+/// [`before_transfer`] of a coin quoted in tokens (`legs`, its `Legs` as read; `None` for every
+/// other token, which then runs exactly as [`before_transfer`]): every leg's pool is the launch's
+/// pool (excluded, never capped, a transfer out of it a buy for the early-buyer lock), the locks
+/// run from when trading opened ([`lock_times`]), and once the launchpad has lifted max wallet on
+/// the `Legs` the config is marked graduated, as `graduate` marks a SOL coin's.
+pub fn before_transfer_with(
+    config: &mut KitConfig,
+    config_key: &Pubkey,
+    args: &TokenHookArgs,
+    vault_amount: Option<u64>,
+    now: i64,
+    legs: Option<&LegPools>,
+) -> Result<HookReturn> {
     require!(
         args.op == TokenOp::Transfer && args.phase == Phase::Before,
         KitError::UnsupportedOperation
     );
+    let times = lock_times(config, legs, now);
     let vault = vault_of(config, vault_amount)?;
-    let source_excluded = config.is_excluded(&args.source_owner);
-    let destination_excluded = config.is_excluded(&args.destination_owner);
+    let source_excluded = config.is_excluded_with(&args.source_owner, legs);
+    let destination_excluded = config.is_excluded_with(&args.destination_owner, legs);
+    // The legs of a coin quoted in tokens sold what would have graduated it: max wallet lifts.
+    if legs.is_some_and(|l| l.lifted) && !config.graduated {
+        config.graduated = true;
+    }
 
     // 1. Where the token may go.
     require!(
@@ -85,7 +132,7 @@ pub fn before_transfer(
 
     // 3. The creator's wallet sends nothing until it unlocks, whoever signs.
     if config.has(modules::CREATOR_WALLET_LOCK)
-        && now < config.creator_unlock_at
+        && now < times.creator_unlock_at
         && args.source_owner == config.creator
     {
         return err!(KitError::CreatorLocked);
@@ -106,7 +153,7 @@ pub fn before_transfer(
     let early = config.has(modules::EARLY_BUYER_LOCK);
 
     // 4. Tokens bought in the early window stay until the unlock.
-    if early && !source_excluded && now < config.early_unlock_at {
+    if early && !source_excluded && now < times.early_unlock_at {
         require!(source_after >= source.early_locked, KitError::EarlyLocked);
     }
 
@@ -142,8 +189,8 @@ pub fn before_transfer(
     // 8. What a holder buys from the pool in the early window is locked; after the unlock the
     //    lock is cleared on each side the transfer touches.
     if early {
-        if args.source_owner == config.pool
-            && now < config.early_window_end
+        if config.is_pool(&args.source_owner, legs)
+            && now < times.early_window_end
             && !destination_excluded
         {
             destination.early_locked = destination
@@ -151,7 +198,7 @@ pub fn before_transfer(
                 .checked_add(args.amount)
                 .ok_or(KitError::MathOverflow)?;
         }
-        if now >= config.early_unlock_at {
+        if now >= times.early_unlock_at {
             if !source_excluded {
                 source.early_locked = 0;
             }
@@ -194,6 +241,19 @@ pub fn before_burn(
     vault_amount: Option<u64>,
     now: i64,
 ) -> Result<HookReturn> {
+    before_burn_with(config, args, vault_amount, now, None)
+}
+
+/// [`before_burn`] of a coin quoted in tokens (`legs`; `None` for every other token, which then
+/// runs exactly as [`before_burn`]): a burn from any leg's pool (a buy's burn) is the pool's, and
+/// the early-buyer unlock runs from when trading opened ([`lock_times`]).
+pub fn before_burn_with(
+    config: &mut KitConfig,
+    args: &TokenHookArgs,
+    vault_amount: Option<u64>,
+    now: i64,
+    legs: Option<&LegPools>,
+) -> Result<HookReturn> {
     require!(
         args.op == TokenOp::Burn && args.phase == Phase::Before,
         KitError::UnsupportedOperation
@@ -202,7 +262,7 @@ pub fn before_burn(
     if let Some(vault) = vault {
         config.sync(vault, now)?;
     }
-    if config.is_excluded(&args.source_owner) {
+    if config.is_excluded_with(&args.source_owner, legs) {
         // The pool's and the launch's burns change nothing the kit keeps.
         return Ok(HookReturn::default());
     }
@@ -213,7 +273,8 @@ pub fn before_burn(
         .checked_sub(args.amount)
         .ok_or(KitError::MathOverflow)?;
     let early = config.has(modules::EARLY_BUYER_LOCK);
-    if early && now < config.early_unlock_at {
+    let early_unlock_at = lock_times(config, legs, now).early_unlock_at;
+    if early && now < early_unlock_at {
         require!(after >= source.early_locked, KitError::EarlyLocked);
     }
     if config.rewards_on() {
@@ -224,7 +285,7 @@ pub fn before_burn(
             config.acc_per_share,
         )?;
     }
-    if early && now >= config.early_unlock_at {
+    if early && now >= early_unlock_at {
         source.early_locked = 0;
     }
     config.eligible = config

@@ -73,6 +73,9 @@ pub fn process_claim(ctx: Context<Claim>) -> Result<()> {
     let read = ctx.accounts.holding.hook_data;
 
     let config = &mut ctx.accounts.kit_config;
+    // TODO(phase 2, holder rewards on coins quoted in tokens, docs/token-quotes.md §6.2): exclude
+    // every leg's pool here too (`is_excluded_with` and the coin's `Legs`); today such a coin's kit
+    // has no holder rewards, so it never reaches this (`RewardsOff`).
     require!(!config.is_excluded(&owner), KitError::NotAHolder);
     config.sync(vault_amount, now)?;
     let mut data = HolderData::read(&read);

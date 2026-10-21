@@ -539,6 +539,138 @@
       ]
     },
     {
+      "name": "init_legs",
+      "docs": [
+        "Installs the kit on a coin quoted in tokens (`docs/token-quotes.md` §6.1): as `init`,",
+        "without holder rewards or a reward vault, its callbacks taking the coin's `Legs` and every",
+        "leg's pool as the pool. Signed by the launch program's kit-caller PDA for the mint."
+      ],
+      "discriminator": [
+        120,
+        104,
+        94,
+        28,
+        227,
+        72,
+        186,
+        211
+      ],
+      "accounts": [
+        {
+          "name": "kit_caller",
+          "docs": [
+            "`create_program_address([\"kit-caller\", mint, [args.kit_caller_bump]], LAUNCH_ID)`, signing",
+            "by CPI from the launch program (checked in the handler)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "payer",
+          "docs": [
+            "Pays the rent: the creator."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The launch's new mint: the kit as hook with the flags of the modules, no hook authority,",
+            "no mint authority, the whole supply minted (checked in the handler)."
+          ]
+        },
+        {
+          "name": "launch_reserve",
+          "docs": [
+            "The launch's holding of the mint, holding the whole supply."
+          ]
+        },
+        {
+          "name": "kit_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  107,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry",
+          "docs": [
+            "accepted)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  114,
+                  100,
+                  114,
+                  108,
+                  101,
+                  115,
+                  115,
+                  45,
+                  104,
+                  111,
+                  111,
+                  107,
+                  45,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "KitInitArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "set_native",
       "docs": [
         "Moves the reward vault between bridged SOL (its holding) and lamports on the config",
@@ -1000,6 +1132,21 @@
       "code": 6032,
       "name": "BridgeAccountsMissing",
       "msg": "the bridge accounts are missing or wrong"
+    },
+    {
+      "code": 6033,
+      "name": "LegsMissing",
+      "msg": "a coin quoted in tokens passes its Legs after the kit's two extras"
+    },
+    {
+      "code": 6034,
+      "name": "WrongLegs",
+      "msg": "the Legs passed is not this coin's"
+    },
+    {
+      "code": 6035,
+      "name": "RewardsOnTokenQuote",
+      "msg": "holder rewards are not available on a coin quoted in tokens yet"
     }
   ],
   "types": [
@@ -1440,7 +1587,10 @@
           {
             "name": "reserved",
             "docs": [
-              "Reserved."
+              "Reserved. `reserved[0]` is the native flag and `reserved[1..9]` the native kit's lamport",
+              "base ([`KitConfig::is_native`]); `reserved[9]` is [`QUOTE_KIND_TOKENS`] for the kit of a coin",
+              "quoted in tokens ([`KitConfig::is_token_quoted`], `init_legs`, `docs/token-quotes.md`",
+              "§6.1). Zeros for every config made before."
             ],
             "type": {
               "array": [

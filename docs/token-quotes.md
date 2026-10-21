@@ -10,6 +10,12 @@ sha256 `567318c21044d62bb6eaade4993755b0d79f51b68a2457b075b2adea18a77104`) and `
 slot 459123096 (941,472 bytes, sha256 `5c5fd98ce1ca296c683f5b1e660df5720b4b1705e8ed478eb9c9a4dd025acc79`),
 each extended first (+93,280 and +149,376 bytes).
 
+Rules on token-quoted coins, phase 1 (§2.5), are built on top of those programs and the deployed
+kit (slot 457493758; its first 345,320 bytes of program data, sha256
+`001f5c58ad2e019ec7764eee75c986403c1fa558fa3bc0e307453fab220547d9`, are the build of the tree they
+start from, the rest zero), change the launchpad and the kit (the DEX does not), and are not deployed
+yet.
+
 ## 1. What a token-quoted coin is
 
 - The whole supply is split evenly into `n` legs (1 ≤ n ≤ 6, `legShares`; the last leg takes the
@@ -25,9 +31,14 @@ each extended first (+93,280 and +149,376 bytes).
 - The **creator fee** (the launch's one fee rule here) is paid on the quote side of every trade, in
   the leg's token, into a fee account the launch owns per leg; the creator claims it per leg (or
   anyone pushes it to the creator's token account).
-- **Not available on a token-quoted coin (v1):** kit rules (holder rewards, burn, max wallet, the
-  early-buyer and creator locks), companions of every kind (their pots are SOL), custom hooks and
-  launch configs (Workshop or not), partner shares, the first-buy vest. The coin's mint has no hook: it moves freely.
+- **Rules (phase 1, §2.5; built, not deployed yet):** the burn on buys and sells, max wallet, the
+  creator wallet lock and the early-buyer lock, with `create_launch`'s `LaunchRules` and bounds. The
+  burn is every leg's pool hook's; the other three are the kit's, which treats every leg's pool as the
+  launch's pool, and max wallet lifts once the legs together have sold what would have graduated a
+  SOL coin.
+- **Not available on a token-quoted coin yet:** holder rewards (phase 2), companions of every kind
+  (their pots are SOL), custom hooks and launch configs (Workshop or not), partner shares, the
+  first-buy vest. Without kit rules the coin's mint has no hook: it moves freely.
 - Trading opens when **every** leg is open (the hook refuses swaps until then), so no leg trades
   before the others exist.
 - Arbitrage keeps the legs' prices in line.
@@ -66,7 +77,8 @@ each extended first (+93,280 and +149,376 bytes).
 - A new account **`Legs`** at `["legs", mint]`: count, opened, and per leg its quote mint, program,
   decimals, virtual quote, share, pool, fee account, creator fees accrued and claimed, opened.
 - **`create_token_launch`**: makes the mint and the launch as `create_launch` does for a launch with
-  no kit, no custom hook and no companion (the creator a wallet: a companion creator is refused),
+  no custom hook and no companion (the creator a wallet: a companion creator is refused), with the
+  kit only when its rules install it (phase 1, §2.5),
   the whole supply into the launch's holding, the `Legs` account from the quote mints (remaining
   accounts, 1 to 6, each SPL Token or Token-2022, none wrapped SOL, bridged SOL, a Bordrless mint or
   repeated) and their virtual quotes (each at least `MIN_LEG_VIRTUAL_QUOTE`), the creator fee within
@@ -80,7 +92,8 @@ each extended first (+93,280 and +149,376 bytes).
   `Legs`. No holder fee, no sniper window, no creator first-buy rule.
 - **`claim_creator_fees_token(index)`**: anyone; the leg's fee account to the creator's associated
   token account of that quote (created idempotently by the caller).
-- **Refused on kind 2**: `graduate`, the bridged and SOL creator claims, every kit and companion path.
+- **Refused on kind 2**: `graduate`, the bridged and SOL creator claims, every companion path, the
+  kit's holder-reward paths (no holder rewards yet; the kit's other rules are phase 1, §2.5).
 - Events: `TokenLaunchCreated`, `LegOpened`, `LegCreatorFeesClaimed` (the DEX's `PoolCreated` and
   `Swapped` describe the pools and trades as for any pool).
 
@@ -410,18 +423,197 @@ from the same tree, `hook_vault.so` (+3,352 B: the launchpad's new error strings
 `bordrless_router.so` and `loss_cover_script.so` (same size, shifted panic locations) differ
 from their deployed bytes too; their behaviour does not change and they need no upgrade.
 
+### 2.5 Rules (phase 1)
+
+The burn on buys and sells, max wallet, the creator wallet lock and the early-buyer lock, on a
+token-quoted coin as on a SOL coin, with the same `LaunchRules` and bounds. No holder fee yet
+(holder rewards are phase 2). Changes the launchpad and the kit; the DEX is unchanged.
+
+- **The burn** is every leg's pool hook's, on the coin's side of each trade: a sell's input in
+  `before_swap`, a buy's output in `after_swap`, `⌊amount × burn_bps / 10,000⌋` (dropped when not
+  below the amount), counted in `Launch.burned_on_trades`. The coin's mint must be passed writable
+  to a burning leg's swaps (the DEX's `MintNotWritable` otherwise).
+- **The kit** (max wallet, the creator wallet lock, the early-buyer lock) is installed by
+  `create_token_launch` through the kit's new `init_legs`, as `create_launch` installs it through
+  `init`: the mint names the kit as its hook from its first instruction, with the flags of its
+  modules; no reward mint, no reward vault. Its config is marked quoted in tokens
+  (`KitConfig.reserved[9] = 2`), and its callbacks take the coin's `Legs` after their two extras:
+  every leg's pool is the launch's pool (excluded from holders and from `eligible`, never capped,
+  a transfer out of any of them a buy for the early-buyer lock).
+- **Max wallet lifts** where a SOL coin's does, at the point that would have graduated it: once the
+  legs together have sold `curve_bps` of the supply. Each leg's `after_swap` records its coins sold
+  (its share less its pool's base reserve) on the `Legs`; the first trade, on any leg, after the
+  legs together had sold `lift_at` sets `Legs.reserved[8]` and logs `LegsMaxWalletLifted`; the kit
+  reads that byte and lifts the cap (and sets `KitConfig.graduated`, as `graduate` does for a SOL
+  coin) before that trade's output reaches the trader. The trade that crosses is still capped, like
+  the buy that sells a SOL coin's curve out (its graduation follows it).
+- **The locks run from when trading opens**, the last `open_leg`, as a SOL coin's run from its
+  launch, which is when it opens: the creator wallet lock, the early-buyer window and its unlock. The
+  launch stores them counted from `create_token_launch`; the kit moves each by `max(0, T −
+  created_at)`, `T` the latest `opened_at` of the legs once every leg is open (read from the same
+  `Legs`), so withholding the last leg never spends a lock before anyone can trade. The last
+  `open_leg` says the times in force (`TokenLaunchLocks`).
+- **Holder fees are refused** (`HolderFeeOnTokenLaunch`); every other bound is `create_launch`'s
+  (`HolderFeeTooHigh`, `BurnTooHigh`, `RulesFeeTooHigh`, `MaxWalletOutOfBounds`, `CreatorLockTooLong`,
+  `InvalidEarlyLock`).
+- **Compatibility**: data that ends after `virtual_quotes` (every call made before rules) reads as
+  no rules, with the accounts as before; a launch without rules creates, opens, trades and claims
+  exactly as before; every `Launch`, `KitConfig` and `Legs` made before reads the new fields as zero
+  (no rules, a SOL coin's kit, nothing counted, not lifted). SOL launches are unchanged byte for byte.
+
+#### Interface (phase 1)
+
+Rust builders: `bordrless_launch::client::{create_token_launch, token_launch_kit_accounts,
+open_leg_with, leg_base_slice, leg_swap_with_rules, leg_swap_with_slice}` (`leg_swap` and `open_leg`
+build a launch without rules, as before); `bordrless_kit::client::{init_legs, legs_hook_extras,
+legs_hook_slice, legs_address}`; the times in force: `Legs::{trading_opened_at, lock_delay}` and
+`bordrless_kit::rules::lock_times`. IDLs: `idl/bordrless_launch.json`, `idl/bordrless_kit.json`.
+
+**`create_token_launch(args: CreateTokenLaunchArgs)`** — discriminator unchanged
+(`5d 57 3a 7e 58 4b ac e9`). `CreateTokenLaunchArgs` gains a last field, `rules: LaunchRules`
+(Borsh, 22 bytes: `holder_fee_buy_bps, holder_fee_sell_bps, burn_buy_bps, burn_sell_bps,
+max_wallet_bps: u16, creator_lock_secs, early_window_secs, early_lock_secs: u32`). Data that ends
+before it reads as `LaunchRules::NONE`; a part of it is `InstructionDidNotDeserialize`. Accounts
+0–11 and the quote mints unchanged; when the rules install the kit (`max_wallet_bps`,
+`creator_lock_secs` or `early_window_secs` above 0), six accounts follow the quote mints:
+
+| # | account | | |
+| --- | --- | --- | --- |
+| 12+n | kit program | r | `14RJQXPdJfkehit6ezktjd3xujamf8nVSKw2shKamaEH` |
+| 13+n | token hook signer | r | `["hook-authority", KIT]` under the token program, `C2Y3B3hZTesJQqLYrZ7qoaZUoRmwYWh5Qh3MuFxruouE` |
+| 14+n | kit config | w | `["kit", mint]` under the kit (created) |
+| 15+n | kit registry | w | `["bordrless-hook-accounts", mint]` under the kit (written) |
+| 16+n | kit caller | r | `["kit-caller", mint]` under the launchpad (signs `init_legs`) |
+| 17+n | kit event authority | r | |
+
+(`n` quote mints.) `KitAccountsMissing` when they are missing, `WrongKitAccount` when one is not at its
+address (the kit checks the registry's seeds). A burn alone needs no kit and takes none. The mint:
+hook the kit, flags `0x01` (before transfer), `0x91` with the early-buyer lock (before transfer,
+before burn, writes hook data). The `Launch`: `rules`, `modules`, `kit_caller_bump`,
+`creator_unlock_at`, `early_window_end`, `early_unlock_at` (the launch time plus each duration, 0 when
+off; they run from when trading opens, moved as the kit callbacks say); `holder_vault` the default
+key. The `Legs`: `reserved[0..8]` = `lift_at` with max wallet.
+Emits `TokenLaunchCreated` (unchanged), then, with any rule, `TokenLaunchRules`; the kit emits
+`KitInstalled`.
+
+**`open_leg(index)`** — with kit rules, three remaining accounts: the kit, the token hook signer, the
+kit config (w) (`KitAccountsMissing`, `WrongKitAccount`). The deposit runs the kit: the DEX's
+`create_spl_pool` gets `base_hook_accounts = 5`, the coin's slice `[kit, token hook signer, kit config
+(w), kit id, Legs]`. The leg that opens last (trading opens), on a launch with the creator wallet lock
+or the early-buyer lock, also emits `TokenLaunchLocks` with the times in force; no other launch does.
+
+**Leg swaps** (`swap_spl`) with kit rules: the coin's slice on its side (`out_hook_accounts = 5` on a
+buy, `in_hook_accounts = 5` on a sell): the kit, the token hook signer, the kit config (w), the kit's
+id, the `Legs` (r), as the kit's registry for the mint resolves them; then the leg's four extras as
+before. With a burn, the coin's mint writable. 25 account entries (22 keys).
+
+**Kit `init_legs(args: KitInitArgs)`** — `78 68 5e 1c e3 48 ba d3`. Signed by the launchpad's
+kit-caller PDA, inside `create_token_launch`.
+
+| # | account | | |
+| --- | --- | --- | --- |
+| 0 | kit_caller | s | `["kit-caller", mint]` under the launchpad, at `args.kit_caller_bump` (`NotKitCaller`) |
+| 1 | payer | s w | the creator |
+| 2 | mint | r | hook the kit, no hook or mint authority, the whole supply minted (`WrongMintSetup`) |
+| 3 | launch_reserve | r | the launch's holding of the whole supply (`WrongReserve`) |
+| 4 | kit_config | w | `["kit", mint]` (created) |
+| 5 | registry | w | `["bordrless-hook-accounts", mint]` (written) |
+| 6 | system_program | r | |
+| 7, 8 | event_authority, program | r | |
+
+`KitInitArgs` unchanged; `pool` leg 0's; `reward_mint` the default key (`WrongRewardMint`); no holder
+rewards (`RewardsOnTokenQuote`); every other bound as `init`'s. Emits `KitInstalled` (reward mint and
+vault the default key). The registry for the mint lists three extras: the kit config (w,
+`Key`), the kit's id (r, `Key`: no reward vault), the `Legs` (r, `PDA(launchpad, ["legs",
+Account(1)])`, the mint being the callback's account 1).
+
+**Kit callbacks** (`before_transfer`, `before_burn`) of a config quoted in tokens: the `Legs` is the
+first account after the two extras (`LegsMissing` without it; `WrongLegs` unless it is owned by the
+launchpad, has `Legs`' discriminator and size and names this mint). The lock times in force are the
+config's moved by `max(0, T − created_at)`: `T` the latest `opened_at` of the legs once `opened ==
+count`, the clock before that (nothing trades yet); a time of 0 stays 0; nothing is written back.
+Every other kit reads its accounts exactly as before.
+
+**Layouts** (all in reserved bytes; sizes unchanged):
+
+| account | bytes | field |
+| --- | --- | --- |
+| `KitConfig` (431 B) | 385 (`reserved[9]`) | 2 for a coin quoted in tokens, else 0 |
+| `Legs` (974 B) | 910..918 (`reserved[0..8]`) | `lift_at` u64: `⌊supply × curve_bps / 10,000⌋` with max wallet, else 0 |
+| `Legs` | 918 (`reserved[8]`) | `lifted` u8, 1 once lifted (the kit reads it) |
+| `Legs` | 926 + 8·i (`reserved[16 + 8i]`), i < 6 | leg `i`'s coins sold, i64 (share less the pool's base reserve after its last trade; counted only while max wallet waits) |
+| `Legs` | 75; 76 + 139·i + 131 | `opened` and each leg's `opened_at` (existing fields, now read by the kit for the locks' delay) |
+| `Launch` | unchanged | `rules`, `modules`, the lock times (counted from the launch) and `kit_caller_bump` now set on a token-quoted coin |
+
+**Events**:
+
+- `TokenLaunchRules` — `74 f0 75 0b 68 43 d7 75` (self-CPI, after `TokenLaunchCreated`, only with a
+  rule): `launch, mint: Pubkey, rules: LaunchRules, modules: u8, kit_config: Option<Pubkey>,
+  creator_unlock_at, early_window_end, early_unlock_at: i64, lift_at: u64, ts: i64` (the lock times
+  counted from the launch).
+- `TokenLaunchLocks` — `cf c4 41 47 1c 56 4b 61` (self-CPI, after the last leg's `LegOpened`, only
+  with a lock): `launch, mint: Pubkey, trading_opened_at, delay, creator_unlock_at, early_window_end,
+  early_unlock_at, ts: i64`: the times in force (`delay = trading_opened_at − created_at` added to
+  each, 0 staying 0). These are the times to show.
+- `LegsMaxWalletLifted` — `b2 72 ea fd fd 95 68 9f`, logged by the pool hook (`Program data:`; the
+  DEX calls the hook without the launchpad's event authority): `launch, mint, pool: Pubkey, sold,
+  lift_at: u64, ts: i64`.
+
+**Error codes** (appended): launchpad 6082 `HolderFeeOnTokenLaunch`; kit 6033 `LegsMissing`, 6034
+`WrongLegs`, 6035 `RewardsOnTokenQuote`.
+
+**Measured** (LiteSVM, every rule but holder fees; compute units as consumed by the transaction,
+with a compute limit and a price; sizes with the protocol lookup table / without):
+
+| instruction | compute units | accounts | transaction |
+| --- | --- | --- | --- |
+| `create_token_launch`, 1 leg | 131.5k–157.0k | 19 | 800 / 983 B |
+| `create_token_launch`, 3 legs | 156.1k–169.6k | 21 | 882 / 1,065 B |
+| `create_token_launch`, 6 legs | 180.4k–208.9k | 24 | 1,005 / 1,188 B |
+| the same, 32 B name, 10 B symbol, 200 B URI | 178.8k–187.8k | 24 | 1,171 / 1,354 B |
+| `open_leg` with the kit, SPL Token | 134.9k–143.9k | 26 | 781 / 1,026 B |
+| `open_leg` with the kit, Token-2022 (xStocks-like) | 151.1k–155.6k | 26 | 781 / 1,026 B |
+| the last `open_leg` (trading opens, `TokenLaunchLocks`), Token-2022 | 145.8k–150.3k | 26 | 781 / 1,026 B |
+| `swap_spl` buy with the kit, SPL Token / Token-2022 | 107.3k / 114.3k | 25 | 767 / 919 B |
+| `swap_spl` sell with the kit, SPL Token / Token-2022 | 107.6k / 114.6k | 25 | 767 / 919 B |
+| a buy with the buyer's `create_holding` in front | 120.3k–124.8k / 127.4k–128.9k | | 786 / 969 B |
+
+Ranges are three runs: the creates and `open_leg` vary with the bump searches of fresh addresses (the
+legs' pools and fee accounts, the kit caller, the ATA program's); the swaps are exact. A leg trade
+with the kit costs about 41.7k compute units more than without it (65.5k under SPL Token, §2.4).
+
+**Sizes**: `bordrless_launch.so` 941,472 → 969,584 B (+28,112; sha256
+`8fe9c810f4911d3ba179fa3976da0559a46ff92aa959ef1dbb930e8c3f797cf7`) and `bordrless_kit.so` 345,320 →
+373,888 B (+28,568; sha256 `7302050b4989070a395bab787cbdedf77c414d0d996a0cb353b39a7cf0a66277`). The
+launchpad's program data is 941,472 B and the kit's 352,888 B, so the launchpad needs `solana program
+extend` by 28,112 B (about 0.196 SOL) and the kit by 21,000 B (about 0.146 SOL). The DEX is unchanged
+(it rebuilds to its deployed bytes). Upgrade the kit first: the new launchpad's `create_token_launch`
+calls `init_legs`, and the new kit runs every existing coin as before (a new launchpad on the old kit
+would refuse only launches with kit rules).
+
 ## 3. Tests
 
 `programs/tests/tests/token_quotes_dex.rs` (a kind-2 pool's life, the mint policy, quote-side cuts,
 the protocol fee sweep, the launchpad-pool rule, a sell refused into the pool's own token accounts),
 `token_quotes_launch.rs` (1-leg and 6-leg launches with SPL Token and Token-2022 quotes, trading
-refused until every leg is open, the creator fee per leg and its claim, every refusal) and
+refused until every leg is open, the creator fee per leg and its claim, every refusal),
+`token_quotes_rules.rs` (phase 1: each rule alone and all of them, over one leg and three, in SPL
+Token and Token-2022 quotes; the burn on every leg, max wallet across legs and its lift at the
+threshold, the creator lock, the early-buyer lock on buys from different legs, leg pools never capped
+or counted, holder fees refused, the kit's accounts checked, today's data without rules, and the
+locks running from when trading opens: a last leg opened 61 s and 5,000 s after the launch still locks
+the first buys for an hour from the opening and the creator for the whole lock, with
+`TokenLaunchLocks` on the last `open_leg`) and
 `token_quotes_sol_differential.rs` (35 SOL-path transactions run on this tree and on a 7fde540 build,
-compared account by account; `#[ignore]`d unless `QUOTES_BASELINE_SBF_DIR` names that build):
+compared account by account, `QUOTES_BASELINE_SBF_DIR`; and, with `RULES_BASELINE_SBF_DIR` naming the
+deployed DEX, launchpad and kit, SOL kit launches with every rule, bridged and native, and a
+token-quoted coin without rules, the same byte for byte, and accounts made by the deployed programs
+reading and trading after the upgrade; `#[ignore]`d without them):
 
 ```
 scripts/solana/programs.sh build
 scripts/solana/programs.sh test -p bordrless-program-tests --test token_quotes_dex
 scripts/solana/programs.sh test -p bordrless-program-tests --test token_quotes_launch
-QUOTES_BASELINE_SBF_DIR=<7fde540 build>/target/deploy scripts/solana/programs.sh test -p bordrless-program-tests --test token_quotes_sol_differential -- --ignored
+scripts/solana/programs.sh test -p bordrless-program-tests --test token_quotes_rules
+QUOTES_BASELINE_SBF_DIR=<7fde540 build>/target/deploy RULES_BASELINE_SBF_DIR=<deployed build>/target/deploy scripts/solana/programs.sh test -p bordrless-program-tests --test token_quotes_sol_differential -- --ignored
 ```

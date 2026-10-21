@@ -1141,9 +1141,36 @@ pub fn leg_hook_extras(mint: &Pubkey, quote_mint: &Pubkey) -> Vec<AccountMeta> {
     ]
 }
 
+/// The kit's six accounts `create_token_launch` takes after the quote mints when its rules install
+/// the kit (`docs/token-quotes.md` §6.1): the kit, the token program's signer of its callbacks, the
+/// kit config (w), the kit's registry for the mint (w), the mint's kit-caller PDA, the kit's event
+/// authority.
+pub fn token_launch_kit_accounts(mint: &Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new_readonly(KIT_ID, false),
+        AccountMeta::new_readonly(TOKEN_HOOK_AUTHORITY, false),
+        AccountMeta::new(kit_config_address(mint), false),
+        AccountMeta::new(kit_client::registry_address(mint), false),
+        AccountMeta::new_readonly(kit_caller_address(mint).0, false),
+        AccountMeta::new_readonly(kit_client::event_authority(), false),
+    ]
+}
+
+/// The coin's token-hook slice on a leg's swaps when its rules install the kit (`modules` above
+/// 0): the kit, the token program's signer of its callbacks, the kit config (w), the kit's id (no
+/// reward vault) and the coin's `Legs` (r), as the kit's registry for the mint resolves them; empty
+/// without kit modules.
+pub fn leg_base_slice(mint: &Pubkey, modules: u8) -> Vec<AccountMeta> {
+    if modules == 0 {
+        return vec![];
+    }
+    kit_client::legs_hook_slice(mint)
+}
+
 /// `create_token_launch`: `mint` a fresh keypair that signs, `treasury` the config's treasury,
 /// `quote_mints` the legs' quote mints in order (the remaining accounts; `args.virtual_quotes` in
-/// the same order).
+/// the same order), then the kit's accounts when `args.rules` install the kit
+/// ([`token_launch_kit_accounts`]).
 pub fn create_token_launch(
     creator: Pubkey,
     mint: Pubkey,
@@ -1152,6 +1179,11 @@ pub fn create_token_launch(
     quote_mints: &[Pubkey],
 ) -> Instruction {
     let launch = launch_address(&mint);
+    let kit = if args.rules.modules() != 0 {
+        token_launch_kit_accounts(&mint)
+    } else {
+        vec![]
+    };
     let mut accounts = with_events(vec![
         AccountMeta::new(creator, true),
         AccountMeta::new(config_address(), false),
@@ -1169,6 +1201,7 @@ pub fn create_token_launch(
             .iter()
             .map(|q| AccountMeta::new_readonly(*q, false)),
     );
+    accounts.extend(kit);
     Instruction {
         program_id: crate::ID,
         accounts,
@@ -1176,7 +1209,28 @@ pub fn create_token_launch(
     }
 }
 
-/// `open_leg(index)`, `payer` paying the rent; `dex_treasury` the DEX config's treasury.
+/// [`open_leg`] of a launch whose rules installed `modules` (`Launch.modules`): with a kit, its
+/// three accounts follow (the kit, the token program's signer of its callbacks, the kit config).
+pub fn open_leg_with(
+    payer: Pubkey,
+    dex_treasury: Pubkey,
+    keys: &LegKeys,
+    index: u8,
+    modules: u8,
+) -> Instruction {
+    let mut ix = open_leg(payer, dex_treasury, keys, index);
+    if modules != 0 {
+        ix.accounts.extend([
+            AccountMeta::new_readonly(KIT_ID, false),
+            AccountMeta::new_readonly(TOKEN_HOOK_AUTHORITY, false),
+            AccountMeta::new(kit_config_address(&keys.mint), false),
+        ]);
+    }
+    ix
+}
+
+/// `open_leg(index)`, `payer` paying the rent; `dex_treasury` the DEX config's treasury. For a
+/// launch without kit rules ([`open_leg_with`] otherwise).
 pub fn open_leg(payer: Pubkey, dex_treasury: Pubkey, keys: &LegKeys, index: u8) -> Instruction {
     let launch = launch_address(&keys.mint);
     let pool = keys.pool();
@@ -1274,9 +1328,76 @@ pub fn leg_swap_with(
 
 /// A `swap_spl` on a leg pool by `trader`, delivered to `recipient`: a buy pays from `trader`'s
 /// associated token account of the quote into `recipient`'s holding of the coin; a sell delivers
-/// to `recipient`'s associated token account of the quote.
+/// to `recipient`'s associated token account of the quote. For a launch without rules
+/// ([`leg_swap_with_rules`] otherwise).
 pub fn leg_swap(
     keys: &LegKeys,
+    trader: Pubkey,
+    recipient: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+) -> Instruction {
+    leg_swap_with_rules(
+        keys,
+        &LaunchRules::NONE,
+        trader,
+        recipient,
+        direction,
+        amount_in,
+        min_amount_out,
+    )
+}
+
+/// [`leg_swap_with`] with the coin's token-hook slice (`base_slice`: [`leg_base_slice`], on the
+/// coin's side) and its mint passed writable when the launch burns (`base_mint_writable`).
+#[allow(clippy::too_many_arguments)]
+pub fn leg_swap_with_slice(
+    keys: &LegKeys,
+    trader: Pubkey,
+    trader_base: Pubkey,
+    trader_quote: Pubkey,
+    direction: u8,
+    amount_in: u64,
+    min_amount_out: u64,
+    base_slice: Vec<AccountMeta>,
+    base_mint_writable: bool,
+) -> Instruction {
+    let n = base_slice.len() as u8;
+    let (in_hook_accounts, out_hook_accounts) = if direction == 1 { (0, n) } else { (n, 0) };
+    let mut extras = base_slice;
+    extras.extend(leg_hook_extras(&keys.mint, &keys.quote_mint));
+    swap_client::swap_spl(
+        &swap_client::SwapSplKeys {
+            trader,
+            pool: keys.pool(),
+            base_mint: keys.mint,
+            quote_mint: keys.quote_mint,
+            quote_program: keys.quote_program,
+            trader_base,
+            trader_quote,
+            hook_program: Some(crate::ID),
+            base_mint_writable,
+        },
+        SwapArgs {
+            direction,
+            amount_in,
+            min_amount_out,
+            in_hook_accounts,
+            out_hook_accounts,
+            hook_data: vec![],
+        },
+        extras,
+    )
+}
+
+/// [`leg_swap`] on a launch with `rules` (`Launch.rules`, `docs/token-quotes.md` §6.1): the kit's
+/// slice with the coin's `Legs` on the coin's side when they install the kit, the coin's mint
+/// writable when they burn.
+#[allow(clippy::too_many_arguments)]
+pub fn leg_swap_with_rules(
+    keys: &LegKeys,
+    rules: &LaunchRules,
     trader: Pubkey,
     recipient: Pubkey,
     direction: u8,
@@ -1294,7 +1415,7 @@ pub fn leg_swap(
             keys.quote_account(&recipient),
         )
     };
-    leg_swap_with(
+    leg_swap_with_slice(
         keys,
         trader,
         trader_base,
@@ -1302,6 +1423,8 @@ pub fn leg_swap(
         direction,
         amount_in,
         min_amount_out,
+        leg_base_slice(&keys.mint, rules.modules()),
+        rules.burns(),
     )
 }
 
@@ -1593,6 +1716,165 @@ mod tests {
         assert_eq!(u64_at(at + Legs::LEG_ACCRUED + 8), 10);
         assert_eq!(u64_at(at + Legs::LEG_ACCRUED + 16), 11);
         assert_eq!(Legs::LEGS_OFFSET + MAX_LEGS * Legs::LEG_LEN + 64, Legs::LEN);
+        assert_eq!(at + Legs::LEG_SHARE, at + 43);
+        assert_eq!(Legs::LEG_OPENED_AT, Legs::LEG_ACCRUED + 16);
+        // Trading opens with the last leg: 2 of 3 open, no opening yet (the locks wait: `now`).
+        assert_eq!(legs.trading_opened_at(), None);
+        assert_eq!(legs.lock_delay(1_000, 1_500), 500);
+        legs.opened = 3;
+        legs.legs[0].opened_at = 1_010;
+        legs.legs[2].opened_at = 1_090;
+        assert_eq!(legs.trading_opened_at(), Some(1_090));
+        assert_eq!(legs.lock_delay(1_000, 5_000), 90);
+        assert_eq!(legs.lock_delay(2_000, 5_000), 0, "never below 0");
+        legs.opened = 2;
+        // A `Legs` made before rules (reserved all zero): no max wallet, nothing sold, not lifted.
+        assert_eq!(
+            (legs.lift_at(), legs.lifted(), legs.total_sold()),
+            (0, false, 0)
+        );
+        // The reserved fields (§6.1) at their offsets: lift_at, lifted, each leg's coins sold.
+        legs.set_lift_at(750);
+        legs.reserved[8] = 1;
+        for (i, sold) in [500i64, -20, 300].iter().enumerate() {
+            legs.reserved[16 + 8 * i..24 + 8 * i].copy_from_slice(&sold.to_le_bytes());
+        }
+        legs.reserved[16 + 8 * 3..24 + 8 * 3].copy_from_slice(&99i64.to_le_bytes());
+        assert_eq!((legs.lift_at(), legs.lifted()), (750, true));
+        assert_eq!(
+            (legs.sold(0), legs.sold(1), legs.total_sold()),
+            (500, -20, 780),
+            "the legs in use only"
+        );
+        let mut data = Vec::new();
+        legs.try_serialize(&mut data).unwrap();
+        assert_eq!(
+            (
+                Legs::RESERVED_OFFSET,
+                Legs::LIFTED_OFFSET,
+                Legs::SOLD_OFFSET
+            ),
+            (910, 918, 926)
+        );
+        assert_eq!(u64::from_le_bytes(data[910..918].try_into().unwrap()), 750);
+        assert_eq!(data[Legs::LIFTED_OFFSET], 1);
+        assert_eq!(
+            i64::from_le_bytes(data[926 + 8..926 + 16].try_into().unwrap()),
+            -20
+        );
+    }
+
+    /// The kit reads the launchpad's `Legs` in place by constants of its own (it has no crate
+    /// dependency on the launch): every one of them is the launchpad's.
+    #[test]
+    fn the_kit_reads_the_legs_at_the_launchpads_offsets() {
+        use anchor_lang::Discriminator;
+        use bordrless_kit::constants as k;
+        assert_eq!(k::LEGS_DISCRIMINATOR, Legs::DISCRIMINATOR);
+        assert_eq!(k::LEGS_LEN, Legs::LEN);
+        assert_eq!(k::LEGS_MINT_OFFSET, Legs::MINT_OFFSET);
+        assert_eq!(k::LEGS_COUNT_OFFSET, Legs::COUNT_OFFSET);
+        assert_eq!(k::LEGS_OPENED_OFFSET, Legs::OPENED_OFFSET);
+        assert_eq!(k::LEGS_LEG_OPENED_AT_OFFSET, Legs::LEG_OPENED_AT);
+        assert_eq!(k::LEGS_FIRST_LEG_OFFSET, Legs::LEGS_OFFSET);
+        assert_eq!(k::LEGS_LEG_LEN, Legs::LEG_LEN);
+        assert_eq!(k::LEGS_LEG_POOL_OFFSET, Legs::LEG_POOL);
+        assert_eq!(k::LEGS_MAX, MAX_LEGS);
+        assert_eq!(k::LEGS_LIFTED_OFFSET, Legs::LIFTED_OFFSET);
+        assert_eq!(k::LEGS_SEED, LEGS_SEED);
+        assert_eq!(k::QUOTE_KIND_TOKENS, QUOTE_KIND_TOKENS);
+        let mint = Pubkey::new_unique();
+        assert_eq!(kit_client::legs_address(&mint), legs_address(&mint));
+        // A leg swap's slice with kit rules: the kit's, with the coin's `Legs`.
+        assert_eq!(leg_base_slice(&mint, 0), vec![]);
+        let slice = leg_base_slice(&mint, bordrless_kit::modules::MAX_WALLET);
+        assert_eq!(slice.len(), 5);
+        assert_eq!(
+            slice[4],
+            AccountMeta::new_readonly(legs_address(&mint), false)
+        );
+        assert_eq!(
+            slice,
+            crate::cpi::kit_legs_slice(kit_config_address(&mint), legs_address(&mint))
+        );
+    }
+
+    /// `create_token_launch`'s data without rules (every call made before them) reads as no rules;
+    /// with them, as given; a part of them fails.
+    #[test]
+    fn token_launch_rules_are_optional_at_the_end_of_the_data() {
+        use crate::instructions::CreateTokenLaunchArgs;
+        use anchor_lang::Discriminator;
+        let rules = LaunchRules {
+            holder_fee_buy_bps: 0,
+            holder_fee_sell_bps: 0,
+            burn_buy_bps: 50,
+            burn_sell_bps: 25,
+            max_wallet_bps: 200,
+            creator_lock_secs: 86_400,
+            early_window_secs: 60,
+            early_lock_secs: 3_600,
+        };
+        let args = CreateTokenLaunchArgs {
+            name: "Token".into(),
+            symbol: "TQ".into(),
+            uri: "ipfs://x".into(),
+            creator_fee_bps: 100,
+            virtual_quotes: vec![5_000_000_000, 7],
+            rules,
+        };
+        let full = crate::instruction::CreateTokenLaunch { args: args.clone() }.data();
+        assert_eq!(
+            &full[..8],
+            crate::instruction::CreateTokenLaunch::DISCRIMINATOR
+        );
+        let read = |bytes: &[u8]| CreateTokenLaunchArgs::deserialize(&mut &bytes[8..]);
+        let back = read(&full).unwrap();
+        assert_eq!(
+            (back.rules, back.virtual_quotes),
+            (rules, args.virtual_quotes.clone())
+        );
+        // Before rules: the same bytes without the last 22.
+        let old = &full[..full.len() - LaunchRules::INIT_SPACE];
+        let back = read(old).unwrap();
+        assert_eq!(
+            (back.rules, back.name),
+            (LaunchRules::NONE, args.name.clone())
+        );
+        assert_eq!(back.creator_fee_bps, 100);
+        for cut in 1..LaunchRules::INIT_SPACE {
+            assert!(
+                read(&full[..full.len() - cut]).is_err(),
+                "{cut} bytes short"
+            );
+        }
+        // The builder passes the kit's accounts exactly when the rules install it.
+        let mint = Pubkey::new_unique();
+        let quotes = [Pubkey::new_unique(), Pubkey::new_unique()];
+        let ix = create_token_launch(
+            Pubkey::new_unique(),
+            mint,
+            Pubkey::new_unique(),
+            args.clone(),
+            &quotes,
+        );
+        assert_eq!(ix.accounts.len(), 12 + 2 + TOKEN_LAUNCH_KIT_ACCOUNTS);
+        assert_eq!(ix.accounts[14..], token_launch_kit_accounts(&mint)[..]);
+        let burn_only = CreateTokenLaunchArgs {
+            rules: LaunchRules {
+                burn_buy_bps: 50,
+                ..LaunchRules::NONE
+            },
+            ..args
+        };
+        let ix = create_token_launch(
+            Pubkey::new_unique(),
+            mint,
+            Pubkey::new_unique(),
+            burn_only,
+            &quotes,
+        );
+        assert_eq!(ix.accounts.len(), 12 + 2, "a burn alone needs no kit");
     }
 
     #[test]

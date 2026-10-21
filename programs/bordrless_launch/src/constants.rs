@@ -206,6 +206,15 @@ pub const LEG_FEES_INDEX: u8 = 6;
 /// Index, in a leg pool's callback account list, of the launch's `Legs` (where a launch pool has
 /// the holder vault), writable: the creator fee is counted there.
 pub const LEGS_INDEX: u8 = 7;
+/// The kit's accounts a launch quoted in tokens with kit rules passes `create_token_launch` after
+/// its quote mints (`docs/token-quotes.md` §6.1): the kit, the token program's signer of its
+/// callbacks, the kit config, the kit's registry for the mint, the mint's kit-caller PDA and the
+/// kit's event authority.
+pub const TOKEN_LAUNCH_KIT_ACCOUNTS: usize = 6;
+/// The kit's accounts `open_leg` takes, as its remaining accounts, for a launch with kit rules:
+/// the kit, the token program's signer of its callbacks and the kit config (writable); with the
+/// kit's id again and the `Legs` they make the coin's slice for the leg's deposit.
+pub const OPEN_LEG_KIT_ACCOUNTS: usize = 3;
 
 /// Whether `creator` is the companion creator address of `mint` (`PDA(["creator", mint],
 /// COMPANION_ID)`): a companion coin. `revert_launch_to_bridged` uses it to know a launch has a

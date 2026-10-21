@@ -1286,3 +1286,6 @@ fn seeded_walk_keeps_the_vault_solvent() {
         );
     }
 }
+
+/// Coins quoted in tokens (`docs/token-quotes.md` §6.1): every leg's pool is the pool.
+mod legs;

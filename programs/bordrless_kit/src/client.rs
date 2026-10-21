@@ -68,6 +68,54 @@ fn with_events(mut accounts: Vec<AccountMeta>) -> Vec<AccountMeta> {
     accounts
 }
 
+/// The launchpad's `Legs` of a coin quoted in tokens: `PDA(["legs", mint], LAUNCH_ID)`.
+pub fn legs_address(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[LEGS_SEED, mint.as_ref()], &LAUNCH_ID).0
+}
+
+/// The three extra accounts every callback of a coin quoted in tokens takes, as its registry lists
+/// them (`docs/token-quotes.md` §6.1): the config (writable), the kit's id (no reward vault), the
+/// coin's `Legs` (read-only).
+pub fn legs_hook_extras(mint: &Pubkey) -> Vec<AccountMeta> {
+    let mut extras = hook_extras(mint, None);
+    extras.push(AccountMeta::new_readonly(legs_address(mint), false));
+    extras
+}
+
+/// A coin quoted in tokens' token-hook slice for a DEX instruction: the kit's id, the token
+/// program's signer of its callbacks, then [`legs_hook_extras`].
+pub fn legs_hook_slice(mint: &Pubkey) -> Vec<AccountMeta> {
+    let mut slice = vec![
+        AccountMeta::new_readonly(crate::ID, false),
+        AccountMeta::new_readonly(TOKEN_HOOK_AUTHORITY, false),
+    ];
+    slice.extend(legs_hook_extras(mint));
+    slice
+}
+
+/// `init_legs`, signed by `kit_caller` (the launch's kit-caller PDA for `mint`) and paid by
+/// `payer` (`args.reward_mint` the default key, no holder rewards).
+pub fn init_legs(
+    kit_caller: Pubkey,
+    payer: Pubkey,
+    mint: Pubkey,
+    args: KitInitArgs,
+) -> Instruction {
+    Instruction {
+        program_id: crate::ID,
+        accounts: with_events(vec![
+            AccountMeta::new_readonly(kit_caller, true),
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new_readonly(token_client::holding_address(&mint, &args.launch), false),
+            AccountMeta::new(kit_config_address(&mint), false),
+            AccountMeta::new(registry_address(&mint), false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ]),
+        data: crate::instruction::InitLegs { args }.data(),
+    }
+}
+
 /// `init`, signed by `kit_caller` (the launch's kit-caller PDA for `mint`) and paid by `payer`.
 /// The reward vault is passed (and created) when `args.modules` has holder rewards.
 pub fn init(kit_caller: Pubkey, payer: Pubkey, mint: Pubkey, args: KitInitArgs) -> Instruction {
@@ -343,6 +391,60 @@ mod tests {
             (crate::ID, TOKEN_HOOK_AUTHORITY)
         );
         assert_eq!(slice[2..], hook_extras(&mint, None)[..]);
+    }
+
+    #[test]
+    fn a_legs_registry_resolves_to_the_three_extras() {
+        let mint = Pubkey::new_unique();
+        let prefix = [
+            TOKEN_HOOK_AUTHORITY,
+            mint,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
+        let resolved = crate::instructions::legs_registry_list(kit_config_address(&mint))
+            .resolve(&prefix, &Pubkey::default(), &Pubkey::default())
+            .unwrap();
+        assert_eq!(resolved, legs_hook_extras(&mint));
+        assert_eq!(resolved[..2], hook_extras(&mint, None)[..]);
+        assert_eq!(
+            resolved[2],
+            AccountMeta::new_readonly(
+                Pubkey::find_program_address(&[b"legs", mint.as_ref()], &LAUNCH_ID).0,
+                false
+            )
+        );
+        let slice = legs_hook_slice(&mint);
+        assert_eq!(
+            (slice[0].pubkey, slice[1].pubkey),
+            (crate::ID, TOKEN_HOOK_AUTHORITY)
+        );
+        assert_eq!(slice[2..], legs_hook_extras(&mint)[..]);
+        // `init_legs` takes `init`'s accounts without the reward mint, its vault and the token
+        // program's two.
+        let args = KitInitArgs {
+            launch: Pubkey::new_unique(),
+            pool: Pubkey::new_unique(),
+            creator: Pubkey::new_unique(),
+            reward_mint: Pubkey::default(),
+            modules: modules::MAX_WALLET,
+            max_wallet_bps: 100,
+            creator_unlock_at: 0,
+            early_window_end: 0,
+            early_unlock_at: 0,
+            kit_caller_bump: 255,
+        };
+        let caller = kit_caller_address(&mint).0;
+        let full = init(caller, Pubkey::new_unique(), mint, args.clone());
+        let legs = init_legs(caller, full.accounts[1].pubkey, mint, args);
+        let keep = [0usize, 1, 2, 3, 4, 5, 10, 11, 12];
+        assert_eq!(
+            legs.accounts,
+            keep.iter()
+                .map(|i| full.accounts[*i].clone())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

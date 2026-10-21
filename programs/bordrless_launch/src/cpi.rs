@@ -276,33 +276,69 @@ pub struct CreateSplPoolKeys {
     pub quote_program: Pubkey,
 }
 
-/// DEX `create_spl_pool` with this program as the pool's hook and its hook authority signing. The
-/// coin has no token hook: no remaining accounts.
-pub fn dex_create_spl_pool(keys: &CreateSplPoolKeys, args: CreatePoolArgs) -> Instruction {
+/// DEX `create_spl_pool` with this program as the pool's hook and its hook authority signing.
+/// `extras` are the coin's token-hook slice for the deposit (`args.base_hook_accounts` of them): the
+/// kit's with the coin's `Legs` when its rules installed the kit, none without a hook.
+pub fn dex_create_spl_pool(
+    keys: &CreateSplPoolKeys,
+    args: CreatePoolArgs,
+    extras: Vec<AccountMeta>,
+) -> Instruction {
+    let mut accounts = vec![
+        AccountMeta::new(keys.payer, true),
+        AccountMeta::new_readonly(keys.authority, true),
+        rw(DEX_CONFIG),
+        rw(keys.treasury),
+        ro(keys.base_mint),
+        ro(keys.quote_mint),
+        rw(keys.pool),
+        rw(keys.base_vault),
+        rw(keys.quote_vault),
+        rw(keys.authority_base),
+        AccountMeta::new_readonly(LAUNCH_HOOK_AUTHORITY, true),
+        ro(bordrless_token::ID),
+        ro(TOKEN_EVENT_AUTHORITY),
+        ro(keys.quote_program),
+        ro(bordrless_swap::spl::ATA_PROGRAM_ID),
+        ro(system_program::ID),
+        ro(DEX_EVENT_AUTHORITY),
+        ro(bordrless_swap::ID),
+    ];
+    accounts.extend(extras);
     Instruction {
         program_id: bordrless_swap::ID,
-        accounts: vec![
-            AccountMeta::new(keys.payer, true),
-            AccountMeta::new_readonly(keys.authority, true),
-            rw(DEX_CONFIG),
-            rw(keys.treasury),
-            ro(keys.base_mint),
-            ro(keys.quote_mint),
-            rw(keys.pool),
-            rw(keys.base_vault),
-            rw(keys.quote_vault),
-            rw(keys.authority_base),
-            AccountMeta::new_readonly(LAUNCH_HOOK_AUTHORITY, true),
-            ro(bordrless_token::ID),
-            ro(TOKEN_EVENT_AUTHORITY),
-            ro(keys.quote_program),
-            ro(bordrless_swap::spl::ATA_PROGRAM_ID),
-            ro(system_program::ID),
-            ro(DEX_EVENT_AUTHORITY),
-            ro(bordrless_swap::ID),
-        ],
+        accounts,
         data: bordrless_swap::instruction::CreateSplPool { args }.data(),
     }
+}
+
+/// The kit's `init_legs` (`docs/token-quotes.md` §6.1): `init`'s keys without the reward mint and
+/// vault (none on a coin quoted in tokens yet).
+pub fn kit_init_legs(keys: &KitInitKeys, args: KitInitArgs) -> Instruction {
+    Instruction {
+        program_id: KIT_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(keys.kit_caller, true),
+            AccountMeta::new(keys.payer, true),
+            ro(keys.mint),
+            ro(keys.launch_reserve),
+            rw(keys.kit_config),
+            rw(keys.registry),
+            ro(system_program::ID),
+            ro(KIT_EVENT_AUTHORITY),
+            ro(KIT_ID),
+        ],
+        data: bordrless_kit::instruction::InitLegs { args }.data(),
+    }
+}
+
+/// A coin quoted in tokens' token-hook slice for a DEX instruction (the deposit of `open_leg`):
+/// the kit, the token program's signer of its callbacks, the config (writable), the kit's id (no
+/// reward vault) and the coin's `Legs`.
+pub fn kit_legs_slice(kit_config: Pubkey, legs: Pubkey) -> Vec<AccountMeta> {
+    let mut slice = kit_slice(kit_config, None);
+    slice.push(ro(legs));
+    slice
 }
 
 /// DEX `finalize_curve`, signed by this program's hook authority.

@@ -71,4 +71,10 @@ pub enum KitError {
     RecipientBelowRent,
     #[msg("the bridge accounts are missing or wrong")]
     BridgeAccountsMissing,
+    #[msg("a coin quoted in tokens passes its Legs after the kit's two extras")]
+    LegsMissing,
+    #[msg("the Legs passed is not this coin's")]
+    WrongLegs,
+    #[msg("holder rewards are not available on a coin quoted in tokens yet")]
+    RewardsOnTokenQuote,
 }

@@ -606,7 +606,12 @@ pub struct Legs {
     pub opened: u8,
     /// The legs, in the order the creator gave the quote mints.
     pub legs: [Leg; MAX_LEGS],
-    /// Reserved.
+    /// Reserved. With max wallet (`docs/token-quotes.md` §6.1): `reserved[0..8]` the coins the legs
+    /// together must have sold for max wallet to lift ([`Legs::lift_at`], the supply's `curve_bps`,
+    /// where a SOL coin graduates; 0 without max wallet), `reserved[8]` 1 once it has lifted
+    /// ([`Legs::lifted`], which the kit reads), `reserved[16..64]` each leg's coins sold so far
+    /// ([`Legs::sold`], `i64`: its share less its pool's base reserve, negative while the leg holds
+    /// coins bought on another). Zeros for every `Legs` made before, and with no max wallet.
     pub reserved: [u8; 64],
 }
 
@@ -629,6 +634,18 @@ impl Legs {
     pub const LEG_FEE_ACCOUNT: usize = 83;
     /// Offset of `creator_fees_accrued` within a [`Leg`].
     pub const LEG_ACCRUED: usize = 115;
+    /// Offset of `share` within a [`Leg`].
+    pub const LEG_SHARE: usize = 43;
+    /// Offset of `opened_at` within a [`Leg`] (the kit reads it at this offset).
+    pub const LEG_OPENED_AT: usize = 131;
+    /// Byte offset of `reserved`.
+    pub const RESERVED_OFFSET: usize = Self::LEGS_OFFSET + MAX_LEGS * Self::LEG_LEN;
+    /// Byte offset of [`Legs::lift_at`] (`reserved[0..8]`).
+    pub const LIFT_AT_OFFSET: usize = Self::RESERVED_OFFSET;
+    /// Byte offset of [`Legs::lifted`] (`reserved[8]`; the kit reads it at this offset).
+    pub const LIFTED_OFFSET: usize = Self::RESERVED_OFFSET + 8;
+    /// Byte offset of [`Legs::sold`] of leg 0 (`reserved[16..24]`; leg `i` at `+ 8 * i`).
+    pub const SOLD_OFFSET: usize = Self::RESERVED_OFFSET + 16;
 
     /// The `Legs` address of `mint`.
     pub fn address(mint: &Pubkey) -> (Pubkey, u8) {
@@ -638,5 +655,54 @@ impl Legs {
     /// The legs in use.
     pub fn in_use(&self) -> &[Leg] {
         &self.legs[..usize::from(self.count).min(MAX_LEGS)]
+    }
+
+    /// The coins the legs together must have sold for max wallet to lift: the supply's `curve_bps`
+    /// at launch, where a SOL coin's curve sells out and graduates; 0 without max wallet (nothing
+    /// is counted then). `reserved[0..8]`.
+    pub fn lift_at(&self) -> u64 {
+        u64::from_le_bytes(self.reserved[0..8].try_into().expect("8 bytes"))
+    }
+
+    /// Sets [`Self::lift_at`].
+    pub fn set_lift_at(&mut self, coins: u64) {
+        self.reserved[0..8].copy_from_slice(&coins.to_le_bytes());
+    }
+
+    /// Whether max wallet has lifted (`reserved[8]`): set by the pool hook at the first trade after
+    /// the legs together sold [`Self::lift_at`]; the kit lifts the cap when it reads it.
+    pub fn lifted(&self) -> bool {
+        self.reserved[8] == 1
+    }
+
+    /// Leg `i`'s coins sold so far (`reserved[16 + 8i..]`): its share less its pool's base reserve
+    /// after its last trade, counted while max wallet waits to lift.
+    pub fn sold(&self, i: usize) -> i64 {
+        let at = 16 + 8 * i;
+        i64::from_le_bytes(self.reserved[at..at + 8].try_into().expect("8 bytes"))
+    }
+
+    /// The coins the legs together have sold (see [`Self::sold`]).
+    pub fn total_sold(&self) -> i128 {
+        (0..usize::from(self.count).min(MAX_LEGS))
+            .map(|i| i128::from(self.sold(i)))
+            .sum()
+    }
+
+    /// When trading opened: the last leg's `opened_at`, once every leg is open.
+    pub fn trading_opened_at(&self) -> Option<i64> {
+        (self.count > 0 && self.opened >= self.count)
+            .then(|| self.in_use().iter().map(|l| l.opened_at).max().unwrap_or(0))
+    }
+
+    /// What the kit moves every lock's time by (`docs/token-quotes.md` §6.1): how long after the
+    /// launch (`created_at`, the `Launch`'s) trading opened, at `now` (`now` itself before every leg
+    /// is open). The times in force are the `Launch`'s (`creator_unlock_at`, `early_window_end`,
+    /// `early_unlock_at`) plus this, each when above 0.
+    pub fn lock_delay(&self, created_at: i64, now: i64) -> i64 {
+        self.trading_opened_at()
+            .unwrap_or(now)
+            .saturating_sub(created_at)
+            .max(0)
     }
 }

@@ -5,6 +5,9 @@
 //! the launch pool, taken by the launch's pool hook, paid to holders in SOL through an exact
 //! reward accounting kept in 64 bytes of each holding, claimable any time, plus shares streamed
 //! over an hour), max wallet until graduation, the creator wallet lock and the early-buyer lock.
+//! A coin quoted in tokens (`docs/token-quotes.md` §6.1) gets the last three through `init_legs`:
+//! its callbacks take its `Legs` ([`legs`]), every leg's pool is its pool, and max wallet lifts when
+//! the launchpad marks the legs' sales on the `Legs`.
 //!
 //! Only the launchpad installs it: [`KitConfig`] is created only by `init`, which the launch
 //! program's `["kit-caller", mint]` PDA must sign ([`constants::LAUNCH_ID`] is a constant here;
@@ -30,6 +33,7 @@ pub mod constants;
 pub mod error;
 pub mod events;
 pub mod instructions;
+pub mod legs;
 pub mod math;
 pub mod mirror;
 pub mod rules;
@@ -112,5 +116,12 @@ pub mod bordrless_kit {
     /// Token hook: every burn of a kit mint with holder rewards or the early-buyer lock.
     pub fn before_burn(ctx: Context<Callback>, args: TokenHookArgs) -> Result<HookReturn> {
         callbacks::process_before_burn(ctx, args)
+    }
+
+    /// Installs the kit on a coin quoted in tokens (`docs/token-quotes.md` §6.1): as `init`,
+    /// without holder rewards or a reward vault, its callbacks taking the coin's `Legs` and every
+    /// leg's pool as the pool. Signed by the launch program's kit-caller PDA for the mint.
+    pub fn init_legs(ctx: Context<InitLegs>, args: KitInitArgs) -> Result<()> {
+        init::process_init_legs(ctx, args)
     }
 }

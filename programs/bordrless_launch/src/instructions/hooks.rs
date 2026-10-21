@@ -23,8 +23,9 @@
 //! and leaves the rest of the input with the trader, and `graduate` can follow in the same
 //! transaction. A buy short of the end is unchanged.
 //!
-//! A launch quoted in tokens (`docs/token-quotes.md` §2.2) answers on each of its leg pools with
-//! its creator fee alone, on the quote side, into the leg's fee account ([`leg_answer`]), and
+//! A launch quoted in tokens (`docs/token-quotes.md` §2.2, §6.1) answers on each of its leg pools
+//! with its creator fee, on the quote side, into the leg's fee account, and its rules' burn on the
+//! coin's side ([`leg_answer`]); it counts the legs' sales for max wallet ([`count_leg_sales`]) and
 //! refuses every trade until all its legs are open.
 
 use anchor_lang::prelude::*;
@@ -40,7 +41,7 @@ use bordrless_token::client as token_client;
 
 use crate::constants::*;
 use crate::error::LaunchError;
-use crate::events::QuoteCutTaken;
+use crate::events::{LegsMaxWalletLifted, QuoteCutTaken};
 use crate::state::*;
 
 /// Accounts of `before_initialize`: the prefix only. There is never a launch to find, so the
@@ -317,12 +318,14 @@ fn share_bps_of(pool: &AccountInfo) -> Result<u16> {
     })
 }
 
-/// The answer on a leg pool of a launch quoted in tokens (`docs/token-quotes.md` §2.2), in
+/// The answer on a leg pool of a launch quoted in tokens (`docs/token-quotes.md` §2.2, §6.1), in
 /// `before_swap` (`before`) or `after_swap`: the pool is one of the launch's legs (its `Legs`, at
 /// index 7, names it with this quote mint and its fee account at index 6); every leg must be open;
-/// the creator fee alone is taken, from the quote side (a buy's input before, a sell's output
-/// after) into the leg's fee account, and counted on the leg. No LP fee override (the leg's pool
-/// keeps its own), no holder fee, no burn, no sniper window, no creator first-buy rule.
+/// the creator fee is taken from the quote side (a buy's input before, a sell's output after) into
+/// the leg's fee account, and counted on the leg; the rules' burn from the coin's side (a sell's
+/// input before, a buy's output after), as on a SOL coin's pool. No LP fee override (the leg's pool
+/// keeps its own), no holder fee, no sniper window, no creator first-buy rule. `after_swap` also
+/// counts the leg's sales while max wallet waits to lift ([`count_leg_sales`]).
 fn leg_answer(
     ctx: &Context<HookCallback>,
     args: &PoolHookArgs,
@@ -336,7 +339,7 @@ fn leg_answer(
         LaunchError::LegsAccountInvalid
     );
     // The leg's offset in the `Legs` account, read in place (no full decode on every trade).
-    let at = {
+    let (at, count) = {
         use anchor_lang::Discriminator;
         let data = legs_info.try_borrow_data()?;
         require!(
@@ -363,16 +366,24 @@ fn leg_answer(
             a.launch_quote.key(),
             LaunchError::WrongLegAccount
         );
-        at
+        (at, count)
     };
     let buy = args.direction == 1;
-    let rates = LaunchRules::NONE.fee_rates(a.launch.creator_fee_bps);
+    // The launch's rules: its creator fee and burn (a launch quoted in tokens has no holder fee).
+    let rates = bordrless_core::LaunchFeeRates {
+        holder_fee_buy_bps: 0,
+        holder_fee_sell_bps: 0,
+        ..a.launch.rules.fee_rates(a.launch.creator_fee_bps)
+    };
     let cut = if before {
         launch_before_swap(buy, args.amount_in, &rates, 0, 0)
     } else {
         launch_after_swap(buy, args.amount_out, &rates, 0, 0)
     };
-    let mut ret = HookReturn::default();
+    let mut ret = HookReturn {
+        burn: cut.burn,
+        ..HookReturn::default()
+    };
     if cut.creator_fee > 0 {
         ret.deltas.push(Delta {
             amount: cut.creator_fee,
@@ -385,7 +396,56 @@ fn leg_answer(
         data[field..field + 8]
             .copy_from_slice(&accrued.saturating_add(cut.creator_fee).to_le_bytes());
     }
+    if !before && a.launch.modules & bordrless_kit::modules::MAX_WALLET != 0 {
+        count_leg_sales(&legs_info, a.launch.key(), a.launch.mint, args, at, count)?;
+    }
     Ok(ret)
+}
+
+/// Max wallet on a launch quoted in tokens (`docs/token-quotes.md` §6.1), in `after_swap` (the pool
+/// as the trade left it): while it waits to lift (`Legs::lift_at` above 0, not yet lifted), the leg
+/// records its coins sold (its share less its pool's base reserve), and when the legs together had
+/// sold `lift_at` before this trade, it lifts: `Legs::lifted`, which the kit reads before this
+/// trade's output reaches the trader, and `LegsMaxWalletLifted`. The trade that crosses is capped
+/// like the buy that sells a SOL coin's curve out (graduation, which lifts it there, follows it);
+/// the first trade after it, on any leg, lifts. Nothing is read or written for a launch without
+/// max wallet.
+fn count_leg_sales(
+    legs_info: &AccountInfo,
+    launch: Pubkey,
+    mint: Pubkey,
+    args: &PoolHookArgs,
+    at: usize,
+    count: usize,
+) -> Result<()> {
+    let mut data = legs_info.try_borrow_mut_data()?;
+    let u64_at =
+        |data: &[u8], at: usize| u64::from_le_bytes(data[at..at + 8].try_into().expect("8"));
+    let lift_at = u64_at(&data[..], Legs::LIFT_AT_OFFSET);
+    if lift_at == 0 || data[Legs::LIFTED_OFFSET] == 1 {
+        return Ok(());
+    }
+    let sold_at = |i: usize| Legs::SOLD_OFFSET + 8 * i;
+    let before: i128 = (0..count)
+        .map(|i| i128::from(u64_at(&data[..], sold_at(i)) as i64))
+        .sum();
+    let i = (at - Legs::LEGS_OFFSET) / Legs::LEG_LEN;
+    let share = u64_at(&data[..], at + Legs::LEG_SHARE);
+    let sold = i128::from(share) - i128::from(args.base_reserve);
+    let sold = i64::try_from(sold).unwrap_or(if sold < 0 { i64::MIN } else { i64::MAX });
+    data[sold_at(i)..sold_at(i) + 8].copy_from_slice(&sold.to_le_bytes());
+    if before >= i128::from(lift_at) {
+        data[Legs::LIFTED_OFFSET] = 1;
+        emit!(LegsMaxWalletLifted {
+            launch,
+            mint,
+            pool: args.pool,
+            sold: u64::try_from(before).unwrap_or(u64::MAX),
+            lift_at,
+            ts: Clock::get()?.unix_timestamp,
+        });
+    }
+    Ok(())
 }
 
 /// `before_swap`: the LP fee (the sniper schedule; the creator's own first buy into its own
@@ -398,6 +458,8 @@ pub fn process_before_swap<'info>(
 ) -> Result<()> {
     if ctx.accounts.launch.is_token_quoted() {
         let ret = leg_answer(&ctx, &args, true)?;
+        let launch = &mut ctx.accounts.launch;
+        launch.burned_on_trades = launch.burned_on_trades.saturating_add(ret.burn);
         set_answer(&ret, None);
         return Ok(());
     }
@@ -502,7 +564,10 @@ pub fn process_after_swap<'info>(
     args: PoolHookArgs,
 ) -> Result<HookReturn> {
     if ctx.accounts.launch.is_token_quoted() {
-        return leg_answer(&ctx, &args, false);
+        let ret = leg_answer(&ctx, &args, false)?;
+        let launch = &mut ctx.accounts.launch;
+        launch.burned_on_trades = launch.burned_on_trades.saturating_add(ret.burn);
+        return Ok(ret);
     }
     require_keys_eq!(args.pool, ctx.accounts.launch.pool, LaunchError::WrongPool);
     let buy = args.direction == 1;

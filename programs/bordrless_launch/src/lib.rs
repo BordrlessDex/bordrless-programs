@@ -219,9 +219,11 @@ pub mod bordrless_launch {
     }
 
     /// Creates a coin quoted in 1 to 6 SPL Token or Token-2022 mints (`docs/token-quotes.md`
-    /// §2.2): the mint (no token hook), the whole supply to the launch, the `Launch` and its
-    /// `Legs`. The remaining accounts are the quote mints, in leg order. Each leg then opens with
-    /// `open_leg`.
+    /// §2.2): the mint, the whole supply to the launch, the `Launch` and its `Legs`. The remaining
+    /// accounts are the quote mints, in leg order. Each leg then opens with `open_leg`. With rules
+    /// (§6.1: the burn, max wallet, the creator wallet lock, the early-buyer lock; no holder fee
+    /// yet) as `create_launch` takes them; when they install the kit, the mint names it as its hook
+    /// and the kit's six accounts follow the quote mints. Data without rules reads as none.
     pub fn create_token_launch<'info>(
         ctx: Context<'info, CreateTokenLaunch<'info>>,
         args: CreateTokenLaunchArgs,
@@ -231,7 +233,8 @@ pub mod bordrless_launch {
 
     /// Anyone: opens leg `index` of a launch quoted in tokens: its creator-fee account, its pool
     /// on the DEX (this program as the hook, the leg's share deposited) and the pool's registry.
-    /// Trading starts once every leg is open.
+    /// Trading starts once every leg is open. With kit rules, the remaining accounts are the kit,
+    /// the token program's signer of its callbacks and the kit config.
     pub fn open_leg<'info>(ctx: Context<'info, OpenLeg<'info>>, index: u8) -> Result<()> {
         token_launch::process_open_leg(ctx, index)
     }

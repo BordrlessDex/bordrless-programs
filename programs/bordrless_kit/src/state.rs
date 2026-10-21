@@ -7,6 +7,7 @@ use bordrless_hook::HOOK_DATA_LEN;
 
 use crate::constants::*;
 use crate::error::KitError;
+use crate::legs::LegPools;
 
 /// The kit's settings and reward accounting for one token, at `["kit", mint]` (`docs/hooks-v2.md`
 /// §4.3). Created only by `init`, which the launch's kit-caller PDA for the mint must sign.
@@ -84,7 +85,10 @@ pub struct KitConfig {
     /// docs/companions.md), decided once at `init`: the companion holds the creator's dev bag and what
     /// it buys back to burn, so it is excluded like the pool and the launch. Taken from `reserved`.
     pub creator_is_companion: bool,
-    /// Reserved.
+    /// Reserved. `reserved[0]` is the native flag and `reserved[1..9]` the native kit's lamport
+    /// base ([`KitConfig::is_native`]); `reserved[9]` is [`QUOTE_KIND_TOKENS`] for the kit of a coin
+    /// quoted in tokens ([`KitConfig::is_token_quoted`], `init_legs`, `docs/token-quotes.md`
+    /// §6.1). Zeros for every config made before.
     pub reserved: [u8; 55],
 }
 
@@ -278,6 +282,18 @@ impl KitConfig {
         lamports.saturating_sub(self.lamports_base())
     }
 
+    /// Whether this is the kit of a coin quoted in tokens (`reserved[9]`, set by `init_legs`): its
+    /// callbacks take the coin's `Legs` after their two extras, and every leg's pool is its pool
+    /// ([`crate::legs::LegPools`]). 0 for every config made before.
+    pub fn is_token_quoted(&self) -> bool {
+        self.reserved[QUOTE_KIND_OFFSET] == QUOTE_KIND_TOKENS
+    }
+
+    /// Marks the kit as a coin quoted in tokens'.
+    pub fn set_token_quoted(&mut self) {
+        self.reserved[QUOTE_KIND_OFFSET] = QUOTE_KIND_TOKENS;
+    }
+
     /// Whether `owner` is excluded (the pool, the launch, or a companion that is the launch's
     /// creator, holding a vesting dev bag or what it buys back to burn): never settled, capped,
     /// counted in `eligible`, and never able to claim. Any other creator is a holder like anyone.
@@ -285,6 +301,18 @@ impl KitConfig {
         *owner == self.pool
             || *owner == self.launch
             || (self.creator_is_companion && *owner == self.creator)
+    }
+
+    /// [`Self::is_excluded`], every leg's pool of a coin quoted in tokens (`legs`) counting as the
+    /// pool.
+    pub fn is_excluded_with(&self, owner: &Pubkey, legs: Option<&LegPools>) -> bool {
+        self.is_excluded(owner) || legs.is_some_and(|l| l.has(owner))
+    }
+
+    /// Whether `owner` is the launch's pool, or with `legs` any leg's pool: a transfer out of it is
+    /// a buy.
+    pub fn is_pool(&self, owner: &Pubkey, legs: Option<&LegPools>) -> bool {
+        *owner == self.pool || legs.is_some_and(|l| l.has(owner))
     }
 
     /// Whether the token may never be sent to `owner` (§4.5): the launch, this config (at
